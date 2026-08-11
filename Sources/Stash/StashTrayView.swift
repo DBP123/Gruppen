@@ -8,9 +8,6 @@ struct StashTrayView: View {
     @EnvironmentObject private var settings: AppSettings
 
     var onMinimize: () -> Void
-    /// Nil only if a shelf is somehow opened before the store exists; the
-    /// routing chips are simply absent in that case.
-    var store: GroupStore?
 
     @State private var exportNote: String?
     @State private var hovering = false
@@ -22,9 +19,6 @@ struct StashTrayView: View {
         VStack(alignment: .leading, spacing: 8) {
             header
             content
-            if let store, !state.isEmpty {
-                TargetRoutingRow(store: store).environmentObject(state)
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -198,9 +192,14 @@ private struct ConvertBar: View {
                     try FileConverter.convert(urls, to: target)
                 }.value
                 await MainActor.run {
-                    // The results join the shelf, so they can be dragged
-                    // straight out without going looking for them.
-                    state.add(results.map { .file($0) })
+                    // The shelf ends up holding the *result*, not both, and the
+                    // result lives in the stash's temporary directory rather
+                    // than beside the original. The original is untouched, right
+                    // where it was, and nothing new appears in its folder.
+                    let converted = subjects
+                    state.add(results.map { StashItem.virtual(file: $0, kind: .file,
+                                                              title: $0.lastPathComponent) })
+                    converted.forEach { state.remove($0) }
                     note = "\(results.count) → \(target.label)"
                     working = false
                 }
@@ -299,80 +298,6 @@ private struct StashRow: View {
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             copied = false
-        }
-    }
-}
-
-/// Gruppe chips along the bottom of the tray. Drop a file on one and it opens in
-/// that workspace's apps.
-///
-/// Same contract as the Stash page: a Gruppe that is not running is not started
-/// by dropping on it — the chip's lamp just goes red and clears itself.
-private struct TargetRoutingRow: View {
-    @ObservedObject var store: GroupStore
-    @EnvironmentObject private var state: ShelfState
-    @Environment(\.dropZones) private var registry
-
-    @State private var failures: [UUID: WorkspaceRouter.Outcome] = [:]
-
-    var body: some View {
-        if store.groups.isEmpty {
-            EmptyView()
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("DROP ON A GRUPPE")
-                    .font(Theme.mono(8, .semibold))
-                    .tracking(1)
-                    .foregroundStyle(Theme.textMuted)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 4) {
-                        ForEach(store.groups) { group in
-                            chip(for: group)
-                        }
-                    }
-                }
-            }
-            // Drops routed to a chip come back here rather than being handled by
-            // the window controller, so a refusal lights the chip that refused.
-            .onAppear {
-                registry?.onZoneItems = { groupID, items in
-                    guard let group = store.groups.first(where: { $0.id == groupID }) else { return }
-                    send(items, to: group)
-                }
-            }
-        }
-    }
-
-    private func chip(for group: AppGroup) -> some View {
-        HStack(spacing: 5) {
-            LED(color: failures[group.id] == nil ? group.color : Theme.red,
-                lit: failures[group.id] != nil || group.isActive,
-                size: 5)
-            Text(group.name)
-                .font(Theme.sans(10, .medium))
-                .foregroundStyle(Theme.textPrimary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .recessed(cornerRadius: 4, fill: Theme.surface)
-        // Claims this rectangle for itself: a drop released here routes to this
-        // Gruppe instead of landing on the shelf.
-        .dropZone(group.id)
-        .onTapGesture { send(state.items, to: group) }
-        .help("Open on \(group.name)")
-    }
-
-    private func send(_ items: [StashItem], to group: AppGroup) {
-        let urls = items.compactMap(\.fileURL)
-        failures[group.id] = nil
-        Task { @MainActor in
-            let outcome: WorkspaceRouter.Outcome =
-                urls.isEmpty ? .refused : await WorkspaceRouter.send(urls, to: group)
-            guard outcome != .sent else { return }
-            failures[group.id] = outcome
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if failures[group.id] == outcome { failures[group.id] = nil }
         }
     }
 }

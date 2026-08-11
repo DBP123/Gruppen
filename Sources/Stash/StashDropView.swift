@@ -2,75 +2,16 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Where a drop landed, and who wants it.
+/// The callbacks a stash surface wants when a drag arrives.
 ///
-/// SwiftUI reports the chips' frames into this as they lay out; the hosting view
-/// reads it when a drag is released. It is a plain class on purpose — writing a
-/// frame into it must not invalidate a view, or laying out the chips would
-/// re-trigger the layout that reported them.
+/// A plain class on purpose: the hosting view reads it when a drag is released,
+/// and nothing here should be able to invalidate a view.
 @MainActor
 final class DropZoneRegistry {
-    /// Sub-regions that want the drop for themselves, in the root view's
-    /// coordinate space. Small and ordered, so a linear scan is the right
-    /// lookup.
-    private(set) var zones: [(id: UUID, rect: CGRect)] = []
-
     var onTargetChanged: ((Bool) -> Void)?
     /// Fired synchronously on drop, before any bytes are read.
     var onDropAccepted: (() -> Void)?
     var onItems: (([StashItem]) -> Void)?
-    var onZoneItems: ((UUID, [StashItem]) -> Void)?
-
-    func setZone(_ id: UUID, rect: CGRect) {
-        if let index = zones.firstIndex(where: { $0.id == id }) {
-            guard zones[index].rect != rect else { return }
-            zones[index].rect = rect
-        } else {
-            zones.append((id, rect))
-        }
-    }
-
-    func zone(at point: CGPoint) -> UUID? {
-        zones.first { $0.rect.contains(point) }?.id
-    }
-}
-
-private struct DropZoneRegistryKey: EnvironmentKey {
-    static let defaultValue: DropZoneRegistry? = nil
-}
-
-extension EnvironmentValues {
-    var dropZones: DropZoneRegistry? {
-        get { self[DropZoneRegistryKey.self] }
-        set { self[DropZoneRegistryKey.self] = newValue }
-    }
-}
-
-/// The name of the coordinate space every reported zone is measured in.
-let stashRootSpace = "stashRoot"
-
-extension View {
-    /// Marks a view as its own drop target within a stash surface.
-    func dropZone(_ id: UUID) -> some View {
-        modifier(DropZoneReporter(id: id))
-    }
-}
-
-private struct DropZoneReporter: ViewModifier {
-    let id: UUID
-    @Environment(\.dropZones) private var registry
-
-    func body(content: Content) -> some View {
-        content.background(
-            GeometryReader { geometry in
-                Color.clear
-                    .onAppear { registry?.setZone(id, rect: geometry.frame(in: .named(stashRootSpace))) }
-                    .onChange(of: geometry.frame(in: .named(stashRootSpace))) { frame in
-                        registry?.setZone(id, rect: frame)
-                    }
-            }
-        )
-    }
 }
 
 /// A hosting view that is itself the dragging destination.
@@ -87,8 +28,7 @@ private struct DropZoneReporter: ViewModifier {
 ///    the notch panel returned the background drop view over empty space but the
 ///    hosting view over the close button, the header, and every item chip — so a
 ///    drop onto a file already on the shelf would have been refused. The hosting
-///    view is the root of the content, so registering it catches everything, and
-///    per-chip routing is resolved by geometry instead.
+///    view is the root of the content, so registering it catches everything.
 final class StashHostingView<Content: View>: NSHostingView<Content> {
     let registry: DropZoneRegistry
     /// Called when the pointer leaves the panel entirely. Event-driven via
@@ -163,25 +103,10 @@ final class StashHostingView<Content: View>: NSHostingView<Content> {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         registry.onDropAccepted?()
-        let zone = registry.zone(at: dropPoint(for: sender))
         IngestionManager.ingest(sender) { [weak self] items in
-            guard let self else { return }
-            if let zone {
-                self.registry.onZoneItems?(zone, items)
-            } else {
-                self.registry.onItems?(items)
-            }
+            self?.registry.onItems?(items)
         }
         return true
     }
 
-    /// The drop location in the same space SwiftUI reported its zones in.
-    ///
-    /// `NSHostingView` is flipped, so a converted window point already shares
-    /// SwiftUI's top-left origin; the flip is handled anyway rather than assumed,
-    /// because getting it wrong routes files to the wrong Gruppe.
-    func dropPoint(for sender: NSDraggingInfo) -> CGPoint {
-        let local = convert(sender.draggingLocation, from: nil)
-        return isFlipped ? local : CGPoint(x: local.x, y: bounds.height - local.y)
-    }
 }

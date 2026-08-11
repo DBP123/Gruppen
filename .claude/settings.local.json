@@ -31,7 +31,10 @@
       "Bash(ps -Ao pid,%cpu,etime,comm)",
       "Bash(./build.sh --dmg --install)",
       "Bash(python3 - *)",
-      "Bash(./build.sh --install --dmg)"
+      "Bash(./build.sh --install --dmg)",
+      "Bash(rm -f /private/tmp/claude-501/probe-scripts.json)",
+      "Bash(OUT=/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/builder3.png /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/scriptprobe)",
+      "Bash(awk '{print $5}')"
     ]
   }
 }

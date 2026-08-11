@@ -54,6 +54,9 @@ final class HotkeyCenter {
 
     private var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
+    /// Which subsystem claimed each binding. Gruppen and scripts both hold
+    /// hotkeys, and re-syncing one must not silently drop the other's.
+    private var owners: [UInt32: String] = [:]
     private var nextID: UInt32 = 1
     private var installed = false
 
@@ -61,17 +64,19 @@ final class HotkeyCenter {
 
     /// Drops every binding. Call before re-registering the current set, and
     /// while recording so an existing hotkey cannot fire mid-capture.
-    func unregisterAll() {
-        for ref in refs.values { UnregisterEventHotKey(ref) }
-        refs.removeAll()
-        handlers.removeAll()
-        nextID = 1
+    func unregisterAll(owner: String) {
+        for (id, ref) in refs where owners[id] == owner {
+            UnregisterEventHotKey(ref)
+            refs.removeValue(forKey: id)
+            handlers.removeValue(forKey: id)
+            owners.removeValue(forKey: id)
+        }
     }
 
     /// Claims a combination. Returns false when it is already spoken for by
     /// macOS or another app, so the UI can show it as unavailable.
     @discardableResult
-    func register(_ shortcut: Shortcut, handler: @escaping () -> Void) -> Bool {
+    func register(_ shortcut: Shortcut, owner: String, handler: @escaping () -> Void) -> Bool {
         guard shortcut.isValid else { return false }
         installHandlerIfNeeded()
 
@@ -90,6 +95,7 @@ final class HotkeyCenter {
 
         refs[id] = ref
         handlers[id] = handler
+        owners[id] = owner
         return true
     }
 

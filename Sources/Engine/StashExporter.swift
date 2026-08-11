@@ -33,7 +33,7 @@ enum StashExporter {
         defer { try? FileManager.default.removeItem(at: staging) }
 
         var used: Set<String> = []
-        for item in items {
+        for item in items { autoreleasepool {
             let name = uniqueName(for: item.name, in: &used)
             let target = staging.appendingPathComponent(name)
             if let source = item.url, FileManager.default.fileExists(atPath: source.path) {
@@ -51,7 +51,7 @@ enum StashExporter {
             } else if let text = item.text {
                 try? text.data(using: .utf8)?.write(to: target.appendingPathExtension("txt"))
             }
-        }
+        } }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"

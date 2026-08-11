@@ -17,13 +17,14 @@ final class IconCache {
     /// every representation up to 512×512 — roughly a megabyte each — so
     /// caching 200 of them costs ~200 MB, not the ~40 MB a count limit
     /// suggests. One 64pt bitmap per icon is all the UI ever draws.
-    private static let side: CGFloat = 64
+    private static let side: CGFloat = 40
 
     private let cache: NSCache<NSURL, NSImage> = {
         let cache = NSCache<NSURL, NSImage>()
-        cache.countLimit = 200
-        // 64×64 @2x RGBA ≈ 64 KB; 200 of those is a ~13 MB ceiling.
-        cache.totalCostLimit = 16 * 1024 * 1024
+        cache.countLimit = 64
+        // 40×40 @2x RGBA ≈ 25 KB; 64 of those is a ~1.6 MB ceiling. The old
+        // 64pt/200-entry limits allowed 13 MB for icons the UI draws at 18–34pt.
+        cache.totalCostLimit = 2 * 1024 * 1024
         return cache
     }()
 

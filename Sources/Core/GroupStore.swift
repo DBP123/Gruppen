@@ -276,12 +276,6 @@ final class GroupStore: ObservableObject {
         groups[index].sequenceDelay = clamped
     }
 
-    /// Attaches or replaces a Gruppe's drop script.
-    func setScript(_ script: ScriptConfig, for group: AppGroup) {
-        guard let index = index(of: group) else { return }
-        guard groups[index].script != script else { return }
-        groups[index].script = script
-    }
 
     /// Reorders the execution sequence.
     func moveApps(in group: AppGroup, from source: IndexSet, to destination: Int) {
@@ -305,7 +299,7 @@ final class GroupStore: ObservableObject {
     /// combination that is already bound records it instead of firing it.
     func suspendHotkeys() {
         hotkeysSuspended = true
-        HotkeyCenter.shared.unregisterAll()
+        HotkeyCenter.shared.unregisterAll(owner: "gruppen")
         hotkeySignature = [:]
     }
 
@@ -324,12 +318,12 @@ final class GroupStore: ObservableObject {
         guard signature != hotkeySignature else { return }
         hotkeySignature = signature
 
-        HotkeyCenter.shared.unregisterAll()
+        HotkeyCenter.shared.unregisterAll(owner: "gruppen")
         var unavailable: Set<UUID> = []
         for group in groups {
             guard let shortcut = group.shortcut else { continue }
             let groupID = group.id
-            let claimed = HotkeyCenter.shared.register(shortcut) { [weak self] in
+            let claimed = HotkeyCenter.shared.register(shortcut, owner: "gruppen") { [weak self] in
                 Task { @MainActor in
                     guard let self, let live = self.groups.first(where: { $0.id == groupID }) else { return }
                     Self.log("HOTKEY \(shortcut.display) -> \"\(live.name)\"")

@@ -8,6 +8,8 @@ struct GruppenApp: App {
         @StateObject private var settings = AppSettings.shared
     @StateObject private var navigation = NavigationModel()
     @StateObject private var monitor = PerformanceMonitor()
+    @StateObject private var scripts: ScriptLibrary
+    @StateObject private var triggers: ScriptTriggerCoordinator
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
@@ -20,7 +22,14 @@ struct GruppenApp: App {
         // handed to a coordinator that owns their lifetime.
         let store = GroupStore()
         _store = StateObject(wrappedValue: store)
-        _stash = StateObject(wrappedValue: StashCoordinator(store: store))
+        let stash = StashCoordinator(store: store)
+        _stash = StateObject(wrappedValue: stash)
+
+        // The script library is global: it belongs to the app, not to a Gruppe.
+        let scripts = ScriptLibrary()
+        let triggers = ScriptTriggerCoordinator(library: scripts)
+        _scripts = StateObject(wrappedValue: scripts)
+        _triggers = StateObject(wrappedValue: triggers)
     }
 
     private func applyStashSetting() {
@@ -35,11 +44,20 @@ struct GruppenApp: App {
                 .environmentObject(navigation)
                 .environmentObject(stash)
                 .environmentObject(monitor)
+                .environmentObject(scripts)
+                .environmentObject(triggers)
                 .frame(minWidth: 860, minHeight: 560)
                 .onAppear {
                     settings.applyActivationPolicy()
                     applyStashSetting()
-                    AppDelegate.willTerminate = { stash.disable() }
+                    MemoryRelief.install()
+                    // Arms whatever the library already had active. Nothing runs
+                    // until one of those events actually fires.
+                    triggers.rearm()
+                    AppDelegate.willTerminate = {
+                        stash.disable()
+                        triggers.disarm()
+                    }
                 }
                 .onChange(of: settings.stashEnabled) { _ in applyStashSetting() }
         }
