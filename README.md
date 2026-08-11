@@ -1,7 +1,5 @@
-<<<<<<< HEAD
 # Gruppen
-=======
-# Gruppen
+
 
 Version 2.0 — workspace manager plus a stash/clipboard engine with notch and
 shelf overlays.
