@@ -85,6 +85,48 @@ private struct NotchShelfSummary: View {
     }
 }
 
+/// Records the global shortcut that summons a shelf.
+private struct SummonShortcutRow: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var stash: StashCoordinator
+    @StateObject private var recorder = KeyRecorder()
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Summon a shelf")
+                    .font(Theme.sans(13))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(recorder.isRecording ? "Press keys to set shortcut" : "Requires ⌘, ⌥ or ⌃")
+                    .font(Theme.mono(10))
+                    .foregroundStyle(recorder.isRecording ? Theme.ambient : Theme.textMuted)
+            }
+            Spacer()
+            if let shortcut = settings.stashShortcut, !recorder.isRecording {
+                KeyBadge(text: shortcut.display)
+                Button("Clear") {
+                    settings.stashShortcut = nil
+                    stash.applySummonShortcut()
+                }
+                .industrialButton(.ghost)
+            }
+            Button(recorder.isRecording ? "Cancel" : "Record Shortcut") {
+                if recorder.isRecording {
+                    recorder.stop()
+                } else {
+                    recorder.start { recorded in
+                        settings.stashShortcut = recorded
+                        stash.applySummonShortcut()
+                    }
+                }
+            }
+            .industrialButton(recorder.isRecording ? .danger : .secondary)
+        }
+        .panelRow()
+        .onDisappear { recorder.stop() }
+    }
+}
+
 private struct TriggerRow: View {
     let systemImage: String
     let title: String
@@ -145,6 +187,7 @@ private struct ExportPathRow: View {
 /// Isolated settings for the Stash tool.
 struct StashSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var stash: StashCoordinator
 
     var body: some View {
         SettingsScroll {
@@ -152,6 +195,11 @@ struct StashSettingsPane: View {
                 SettingToggle(title: "Enable the stash shelf",
                               detail: "Notch, screen-edge and shake triggers",
                               isOn: $settings.stashEnabled)
+            }
+
+            LabeledSection(label: "SUMMON SHORTCUT") {
+                SummonShortcutRow()
+                FootNote("Opens a shelf under the pointer, on top of whatever is on screen — no drag required. Press it again to bring the shelf back to where the pointer is.")
             }
             LabeledSection(label: "EXPORT") {
                 ExportPathRow()

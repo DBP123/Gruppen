@@ -11,7 +11,8 @@ import IOKit.ps
 /// | --- | --- |
 /// | File drop | `FSEventStream` — the kernel reports the change |
 /// | Global hotkey | Carbon `RegisterEventHotKey` |
-/// | App lifecycle | `NSWorkspace` launch/terminate notifications |
+/// | App lifecycle (bundled apps) | `NSWorkspace` launch/terminate notifications |
+/// | App lifecycle (raw processes) | kqueue for exit; `ProcessMonitor` for launch |
 /// | System state | `NSWorkspace` sleep/wake, `IOPSNotification` for power |
 ///
 /// There is no timer and no scan. When nothing is armed this object holds no
@@ -39,6 +40,10 @@ final class ScriptTriggerCoordinator: ObservableObject {
     private struct ProcessKey: Hashable { let pid: pid_t; let scriptID: UUID }
     private var exitSources: [ProcessKey: DispatchSourceProcess] = [:]
     private var distributedObservers: [NSObjectProtocol] = []
+    /// Only exists while a script watches for a raw process *launch*.
+    private lazy var processMonitor = ProcessMonitor { [weak self] name, pid in
+        Task { @MainActor in self?.handleProcessLaunch(name: name, pid: pid) }
+    }
     private var darwinNames: [String] = []
     /// Darwin callbacks are C function pointers with no usable context object,
     /// so the live coordinator is reachable through this.
@@ -66,8 +71,9 @@ final class ScriptTriggerCoordinator: ObservableObject {
             case .customNotification:
                 armCustomNotification(script)
             case .appLifecycle:
-                // Bundle matches ride the shared workspace observers; a process
-                // name needs its own exit watcher for anything already running.
+                // Bundle matches ride the shared workspace observers. A process
+                // name needs more: an exit watcher per running match, and — for
+                // launches — the process monitor, since no notification exists.
                 if script.trigger.appMatch == .processName, script.trigger.appEvent == .quit {
                     armProcessExit(script)
                 }
@@ -78,6 +84,15 @@ final class ScriptTriggerCoordinator: ObservableObject {
 
         if armable.contains(where: { $0.trigger.kind == .appLifecycle }) { armAppLifecycle() }
         if armable.contains(where: { $0.trigger.kind == .systemState }) { armSystemState() }
+
+        // The monitor is armed with exactly the names that need it, and with
+        // nothing at all when none do — which is when it costs nothing.
+        processMonitor.watch(Set(armable.compactMap { script -> String? in
+            guard script.trigger.kind == .appLifecycle,
+                  script.trigger.appMatch == .processName,
+                  script.trigger.appEvent == .launched else { return nil }
+            return script.trigger.processName
+        }))
     }
 
     func disarm() {
@@ -85,6 +100,7 @@ final class ScriptTriggerCoordinator: ObservableObject {
         watchers.removeAll()
         exitSources.values.forEach { $0.cancel() }
         exitSources.removeAll()
+        processMonitor.stop()
         for observer in distributedObservers {
             DistributedNotificationCenter.default().removeObserver(observer)
         }
@@ -161,6 +177,26 @@ final class ScriptTriggerCoordinator: ObservableObject {
         if event == .launched { rearmProcessExitWatchers() }
     }
 
+    /// A raw process appeared. Applications arrive through `NSWorkspace`
+    /// instead, so this is only reached for unbundled binaries.
+    private func handleProcessLaunch(name: String, pid: pid_t) {
+        for script in library.scripts where script.isArmable
+            && script.trigger.kind == .appLifecycle
+            && script.trigger.appMatch == .processName
+            && script.trigger.appEvent == .launched
+            && script.trigger.processName.caseInsensitiveCompare(name) == .orderedSame {
+            fire(script.id, paths: [])
+        }
+        // Anything watching this name for its *exit* now has a pid to watch.
+        for script in library.scripts where script.isArmable
+            && script.trigger.kind == .appLifecycle
+            && script.trigger.appMatch == .processName
+            && script.trigger.appEvent == .quit
+            && script.trigger.processName.caseInsensitiveCompare(name) == .orderedSame {
+            watchExit(pid: pid, scriptID: script.id)
+        }
+    }
+
     /// Watches processes that are *already running* and match by name, using a
     /// kqueue exit source per pid.
     ///
@@ -174,39 +210,11 @@ final class ScriptTriggerCoordinator: ObservableObject {
     private func armProcessExit(_ script: Script) {
         let name = script.trigger.processName
         guard !name.isEmpty else { return }
-        for pid in Self.pids(named: name) {
+        for pid in ProcessMonitor.pids(named: name) {
             watchExit(pid: pid, scriptID: script.id)
         }
     }
 
-    /// Every process currently running under this executable name.
-    ///
-    /// `NSWorkspace.runningApplications` only knows about *applications*, so it
-    /// cannot see a `java` or `node` started from a terminal — which is exactly
-    /// the case this trigger exists for. `proc_listallpids` can. This is a
-    /// single pass, performed once when the trigger is armed, and never again:
-    /// the watching itself is done by kqueue exit sources, which cost nothing
-    /// until the process dies.
-    private nonisolated static func pids(named name: String) -> [pid_t] {
-        let count = proc_listallpids(nil, 0)
-        guard count > 0 else { return [] }
-        var buffer = [pid_t](repeating: 0, count: Int(count) + 32)
-        let filled = proc_listallpids(&buffer, Int32(buffer.count * MemoryLayout<pid_t>.size))
-        guard filled > 0 else { return [] }
-
-        var matches: [pid_t] = []
-        var path = [CChar](repeating: 0, count: 4096)  // PROC_PIDPATHINFO_MAXSIZE
-        for pid in buffer.prefix(Int(filled)) where pid > 0 {
-            path.withUnsafeMutableBufferPointer { pointer in
-                _ = proc_pidpath(pid, pointer.baseAddress, UInt32(pointer.count))
-            }
-            let executable = String(cString: path)
-            guard !executable.isEmpty else { continue }
-            let last = (executable as NSString).lastPathComponent
-            if last.caseInsensitiveCompare(name) == .orderedSame { matches.append(pid) }
-        }
-        return matches
-    }
 
     private func rearmProcessExitWatchers() {
         let wanted = library.scripts.filter {
