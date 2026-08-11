@@ -79,6 +79,18 @@ final class AppSettings: ObservableObject {
         didSet { persist(showPerformanceMonitor, oldValue, Keys.performanceMonitor) }
     }
 
+    /// Summons a shelf in front of everything, from anywhere. Nil for none.
+    @Published var stashShortcut: Shortcut? {
+        didSet {
+            guard stashShortcut != oldValue else { return }
+            if let stashShortcut, let data = try? JSONEncoder().encode(stashShortcut) {
+                defaults.set(data, forKey: Keys.stashShortcut)
+            } else {
+                defaults.removeObject(forKey: Keys.stashShortcut)
+            }
+        }
+    }
+
     @Published private(set) var loginItemError: String?
 
     /// Posted after any surface-related preference changes, so the overlay
@@ -99,6 +111,7 @@ final class AppSettings: ObservableObject {
         static let stashEnabled = "stashEnabled"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
+        static let stashShortcut = "stashSummonShortcut"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -121,6 +134,8 @@ final class AppSettings: ObservableObject {
         stashEnabled = defaults.bool(forKey: Keys.stashEnabled)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
+        stashShortcut = defaults.data(forKey: Keys.stashShortcut)
+            .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

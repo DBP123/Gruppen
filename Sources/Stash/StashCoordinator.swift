@@ -77,6 +77,30 @@ final class StashCoordinator: ObservableObject {
         )
         monitor.start()
         dragMonitor = monitor
+
+        applySummonShortcut()
+    }
+
+    /// Binds — or rebinds — the global shortcut that summons a shelf.
+    ///
+    /// Owned separately from the Gruppe hotkeys so re-syncing those cannot drop
+    /// this one, and re-applied whenever the setting changes.
+    func applySummonShortcut() {
+        HotkeyCenter.shared.unregisterAll(owner: "stash")
+        guard isEnabled, let shortcut = AppSettings.shared.stashShortcut else { return }
+        HotkeyCenter.shared.register(shortcut, owner: "stash") { [weak self] in
+            self?.summonShelf()
+        }
+    }
+
+    /// Puts a shelf under the pointer, in front of everything.
+    ///
+    /// Floating shelves sit at `.floating` level, so this comes up over full
+    /// screen apps and anything else on the desktop. An empty shelf that is
+    /// already open moves to the pointer rather than a second one appearing.
+    func summonShelf() {
+        guard isEnabled else { return }
+        manager.spawnShelf(at: NSEvent.mouseLocation)
     }
 
     func disable() {
@@ -86,6 +110,7 @@ final class StashCoordinator: ObservableObject {
         sentinels = nil
         dragMonitor?.stop()
         dragMonitor = nil
+        HotkeyCenter.shared.unregisterAll(owner: "stash")
         closeNotch()
         manager.destroyAll()
     }
