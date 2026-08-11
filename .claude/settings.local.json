@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcode-select -p)",
+      "Bash(swift --version)",
+      "Read(//Library/Developer/CommandLineTools/SDKs/**)",
+      "Read(//Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk/System/Library/Frameworks/**)",
+      "Bash(chmod +x build.sh)",
+      "Bash(./build.sh)",
+      "Bash(mkdir -p build)",
+      "Bash(swift Tools/makeicon.swift)",
+      "Bash(open \"build/Auto Launch.app\")",
+      "Bash(screencapture -x -o shot.png)",
+      "Bash(pkill -x AutoLaunch)",
+      "Bash(open \"/Users/dhilanpatel/Auto Launch/build/Auto Launch.app\")",
+      "Bash(python3 -)",
+      "Bash(rm -rf \"build/Auto Launch.app\")",
+      "Bash(open \"build/Gruppen.app\")",
+      "Read(//Users/dhilanpatel/Library/Logs/**)",
+      "Read(//Users/dhilanpatel/Library/Logs/DiagnosticReports/**)",
+      "Bash(ls -la /Users/dhilanpatel/Gruppen/ 2>&1 | head -20; echo \"--- Sources:\"; ls -la /Users/dhilanpatel/Gruppen/Sources/ 2>&1 | head -20; echo \"--- old dir still there?\"; ls -d \"/Users/dhilanpatel/Auto Launch\" 2>&1)",
+      "Bash(git mv *)",
+      "Bash(ps -Ao pid,%cpu,%mem,etime,comm)",
+      "Bash(sample Gruppen 5 -file /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/a5f4f2bb-b600-4701-b66f-431812039b0a/scratchpad/sample.txt)",
+      "Bash(ps -Ao pid,%cpu,comm)",
+      "Bash(pkill -x Gruppen)",
+      "Bash(./build.sh --install)",
+      "Bash(open /Applications/Gruppen.app)",
+      "Bash(md5 Resources/AppIcon.icns /Applications/Gruppen.app/Contents/Resources/AppIcon.icns)",
+      "Bash(/usr/libexec/PlistBuddy -c \"Print :CFBundleIconFile\" /Applications/Gruppen.app/Contents/Info.plist)",
+      "Bash(ps -Ao pid,%cpu,etime,comm)",
+      "Bash(./build.sh --dmg --install)",
+      "Bash(python3 - *)",
+      "Bash(./build.sh --install --dmg)"
+    ]
+  }
+}
