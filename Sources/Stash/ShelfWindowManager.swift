@@ -158,8 +158,6 @@ final class FloatingShelfController {
         let registry = DropZoneRegistry()
         registry.onTargetChanged = { [weak state] targeted in state?.isTargeted = targeted }
         registry.onItems = { [weak state] items in state?.add(items) }
-        // `onZoneItems` is installed by the routing row itself, so a Gruppe that
-        // refuses a file lights its own lamp.
         self.registry = registry
 
         let host = StashHostingView(
@@ -168,13 +166,10 @@ final class FloatingShelfController {
                     onMinimize: { [weak self] in
                         guard let self else { return }
                         self.onDestroy(self.state.id)
-                    },
-                    store: store
+                    }
                 )
                 .environmentObject(state)
                 .environmentObject(AppSettings.shared)
-                .environment(\.dropZones, registry)
-                .coordinateSpace(name: stashRootSpace)
             ),
             registry: registry
         )

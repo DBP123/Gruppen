@@ -59,10 +59,6 @@ private struct NotchShelfSummary: View {
             }
             .panelRow()
 
-            if !shelf.isEmpty, !store.groups.isEmpty {
-                SendToRow().environmentObject(shelf)
-            }
-
             ForEach(shelf.items) { item in
                 HStack(spacing: 10) {
                     Image(nsImage: item.icon)
@@ -85,76 +81,6 @@ private struct NotchShelfSummary: View {
                     return provider
                 }
             }
-        }
-    }
-}
-
-/// Opens everything on the shelf with a Gruppe's apps. This is the in-app home
-/// for routing; the notch stays a plain drop target.
-///
-/// Sending never launches a Gruppe. If the Gruppe is up, the files go to its
-/// apps; if it is not, or if nothing would take them, the Gruppe's own lamp goes
-/// red for a few seconds. That is the whole error report — no banner, no alert.
-private struct SendToRow: View {
-    @EnvironmentObject private var store: GroupStore
-    @EnvironmentObject private var shelf: ShelfState
-
-    /// Gruppen whose last send failed, and why, keyed by group.
-    @State private var failures: [UUID: WorkspaceRouter.Outcome] = [:]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("SEND TO A GRUPPE")
-                .font(Theme.mono(9, .semibold))
-                .tracking(1.1)
-                .foregroundStyle(Theme.textMuted)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(store.groups) { group in
-                        Button { send(to: group) } label: {
-                            HStack(spacing: 6) {
-                                LED(color: lampColor(for: group),
-                                    lit: failures[group.id] != nil || group.isActive,
-                                    size: 6)
-                                Text(group.name).font(Theme.sans(11, .medium))
-                            }
-                        }
-                        .industrialButton(.secondary)
-                        .help(hint(for: group))
-                    }
-                }
-            }
-        }
-        .panelRow()
-        .animation(.easeOut(duration: 0.15), value: failures.count)
-    }
-
-    private func lampColor(for group: AppGroup) -> Color {
-        failures[group.id] == nil ? group.color : Theme.red
-    }
-
-    private func hint(for group: AppGroup) -> String {
-        switch failures[group.id] {
-        case .notRunning: return "\(group.name) is not running — activate it first"
-        case .refused: return "\(group.name) would not open these"
-        case .sent, nil:
-            return group.isActive
-                ? "Open the shelf in \(group.name)"
-                : "\(group.name) is not running"
-        }
-    }
-
-    private func send(to group: AppGroup) {
-        let urls = shelf.items.compactMap(\.url)
-        failures[group.id] = nil
-        Task { @MainActor in
-            let outcome: WorkspaceRouter.Outcome =
-                urls.isEmpty ? .refused : await WorkspaceRouter.send(urls, to: group)
-            guard outcome != .sent else { return }
-            failures[group.id] = outcome
-            // Quiet: the lamp clears itself rather than needing to be dismissed.
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if failures[group.id] == outcome { failures[group.id] = nil }
         }
     }
 }

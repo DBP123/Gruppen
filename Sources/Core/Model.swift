@@ -95,197 +95,6 @@ struct AppEntry: Identifiable, Codable, Hashable {
     var isRunning: Bool { !runningInstances.isEmpty }
 }
 
-/// A script attached to a Gruppe, run when files are dropped on it.
-///
-/// The parameters and the source are kept separately on purpose: editing a
-/// preset's fields regenerates the source, right up until the source is edited
-/// by hand, at which point `isCustomised` latches and the generated version
-/// never overwrites the user's work.
-struct ScriptConfig: Codable, Hashable {
-    enum Interpreter: String, Codable, CaseIterable, Identifiable {
-        case bash, zsh, python3, jxa
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .bash: return "Bash"
-            case .zsh: return "Zsh"
-            case .python3: return "Python 3"
-            case .jxa: return "JavaScript (JXA)"
-            }
-        }
-
-        /// Candidates in preference order. The first one that exists and is
-        /// executable wins, so a Homebrew python3 is found without hard-coding
-        /// anyone's machine.
-        var candidatePaths: [String] {
-            switch self {
-            case .bash: return ["/bin/bash"]
-            case .zsh: return ["/bin/zsh"]
-            case .python3: return ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
-            case .jxa: return ["/usr/bin/osascript"]
-            }
-        }
-
-        /// JXA needs to be told it is not AppleScript.
-        var leadingArguments: [String] {
-            self == .jxa ? ["-l", "JavaScript"] : []
-        }
-
-        var fileExtension: String {
-            switch self {
-            case .bash, .zsh: return "sh"
-            case .python3: return "py"
-            case .jxa: return "js"
-            }
-        }
-    }
-
-    enum Preset: String, Codable, CaseIterable, Identifiable {
-        case move, transform, runCommand, copyPath, custom
-        var id: String { rawValue }
-
-        var label: String {
-            switch self {
-            case .move: return "Move files"
-            case .transform: return "Transform each file"
-            case .runCommand: return "Run a command"
-            case .copyPath: return "Copy paths"
-            case .custom: return "Custom"
-            }
-        }
-
-        var detail: String {
-            switch self {
-            case .move: return "Move everything dropped into a folder"
-            case .transform: return "Run a command once per file"
-            case .runCommand: return "Run a command once, with every path as an argument"
-            case .copyPath: return "Put the dropped paths on the clipboard"
-            case .custom: return "Write it yourself"
-            }
-        }
-
-        var usesDirectory: Bool { self == .move }
-        var usesFilter: Bool { self == .move || self == .transform }
-        var usesCommand: Bool { self == .transform || self == .runCommand }
-    }
-
-    var isEnabled: Bool = false
-    var preset: Preset = .move
-    var interpreter: Interpreter = .bash
-
-    /// Preset parameters. These are handed to the script as environment
-    /// variables rather than pasted into it, so a folder name with a quote in it
-    /// cannot change what the script does.
-    var directory: String = ""
-    var fileExtension: String = ""
-    var command: String = ""
-
-    /// The script itself.
-    var source: String = ""
-    /// Latches the first time the source is edited by hand.
-    var isCustomised: Bool = false
-
-    /// The environment a run should carry.
-    var environment: [String: String] {
-        ["GRUPPEN_DEST": directory,
-         "GRUPPEN_EXT": fileExtension.replacingOccurrences(of: ".", with: "")]
-    }
-
-    /// The source a preset produces, given the current parameters.
-    ///
-    /// Paths arrive as arguments — `"$@"` in shell, `sys.argv[1:]` in Python —
-    /// and are never interpolated into the text, which is what keeps a file
-    /// named `; rm -rf ~` a file name rather than a command.
-    var generatedSource: String {
-        switch interpreter {
-        case .bash, .zsh:
-            switch preset {
-            case .move:
-                return """
-                #!/bin/bash
-                set -euo pipefail
-                # Every dropped path arrives as an argument.
-                dest="${GRUPPEN_DEST:-$HOME/Desktop}"
-                only="${GRUPPEN_EXT:-}"
-                mkdir -p "$dest"
-                for f in "$@"; do
-                  if [ -z "$only" ] || [ "${f##*.}" = "$only" ]; then
-                    mv -n -- "$f" "$dest/"
-                    echo "moved $(basename "$f")"
-                  fi
-                done
-                """
-            case .transform:
-                return """
-                #!/bin/bash
-                set -euo pipefail
-                only="${GRUPPEN_EXT:-}"
-                for f in "$@"; do
-                  if [ -z "$only" ] || [ "${f##*.}" = "$only" ]; then
-                    \(command.isEmpty ? "echo \"$f\"" : command) "$f"
-                  fi
-                done
-                """
-            case .runCommand:
-                return """
-                #!/bin/bash
-                set -euo pipefail
-                \(command.isEmpty ? "echo" : command) "$@"
-                """
-            case .copyPath:
-                return """
-                #!/bin/bash
-                set -euo pipefail
-                printf '%s\\n' "$@" | pbcopy
-                echo "copied $# path(s)"
-                """
-            case .custom:
-                return """
-                #!/bin/bash
-                set -euo pipefail
-                # "$@" is every dropped path, in the order they were dropped.
-                for f in "$@"; do
-                  echo "$f"
-                done
-                """
-            }
-        case .python3:
-            return """
-            #!/usr/bin/env python3
-            import os, sys
-
-            paths = sys.argv[1:]
-            dest = os.environ.get("GRUPPEN_DEST", "")
-            only = os.environ.get("GRUPPEN_EXT", "")
-
-            for path in paths:
-                if only and not path.lower().endswith("." + only.lower()):
-                    continue
-                print(path)
-            """
-        case .jxa:
-            return """
-            // Every dropped path arrives as an argument.
-            function run(paths) {
-              paths.forEach(function (p) { console.log(p) })
-              return paths.length + " path(s)"
-            }
-            """
-        }
-    }
-
-    /// What should actually be executed.
-    var effectiveSource: String {
-        isCustomised && !source.isEmpty ? source : generatedSource
-    }
-
-    var summary: String {
-        guard isEnabled else { return "No script" }
-        return "\(preset.label) · \(interpreter.label)"
-    }
-}
-
 /// A named set of apps that can be turned on and off together.
 struct AppGroup: Identifiable, Codable, Hashable {
     var id = UUID()
@@ -304,8 +113,6 @@ struct AppGroup: Identifiable, Codable, Hashable {
     var isSequenced: Bool = false
     /// Seconds between steps of a sequenced launch or termination.
     var sequenceDelay: TimeInterval = 0.5
-    /// Runs when files are dropped on this Gruppe. Nil until one is built.
-    var script: ScriptConfig?
 
     var color: Color { Color(hex: colorHex) }
 
@@ -337,7 +144,6 @@ struct AppGroup: Identifiable, Codable, Hashable {
         fillsWhenPartial = try container.decodeIfPresent(Bool.self, forKey: .fillsWhenPartial) ?? true
         isSequenced = try container.decodeIfPresent(Bool.self, forKey: .isSequenced) ?? false
         sequenceDelay = try container.decodeIfPresent(TimeInterval.self, forKey: .sequenceDelay) ?? 0.5
-        script = try container.decodeIfPresent(ScriptConfig.self, forKey: .script)
 
         if let recorded = try container.decodeIfPresent(Shortcut.self, forKey: .shortcut) {
             shortcut = recorded
@@ -351,7 +157,7 @@ struct AppGroup: Identifiable, Codable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, apps, isActive, colorHex, shortcut, fillsWhenPartial
-        case isSequenced, sequenceDelay, script
+        case isSequenced, sequenceDelay
         /// Read-only: written by builds before the shortcut recorder.
         case shortcutKey
     }
@@ -367,6 +173,5 @@ struct AppGroup: Identifiable, Codable, Hashable {
         try container.encode(fillsWhenPartial, forKey: .fillsWhenPartial)
         try container.encode(isSequenced, forKey: .isSequenced)
         try container.encode(sequenceDelay, forKey: .sequenceDelay)
-        try container.encodeIfPresent(script, forKey: .script)
     }
 }

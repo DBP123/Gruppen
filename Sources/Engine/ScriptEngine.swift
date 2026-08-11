@@ -9,83 +9,84 @@ struct ScriptRun: Equatable {
 
     var succeeded: Bool { exitCode == 0 }
 
-    /// Everything worth showing in the console, in the order it happened as
-    /// closely as two separate pipes allow.
     var transcript: String {
         [output, errorOutput]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
     }
+
 }
 
 enum ScriptError: LocalizedError, Equatable {
     case noSource
-    case interpreterMissing(String, [String])
+    case interpreterMissing(String, String)
     case launchFailed(String)
     case timedOut(TimeInterval)
     case exited(Int32, String)
+    case badWebhookURL(String)
 
     var errorDescription: String? {
         switch self {
         case .noSource:
             return "This script is empty."
-        case .interpreterMissing(let name, let paths):
-            return "\(name) was not found. Looked in \(paths.joined(separator: ", "))."
+        case .interpreterMissing(let name, let path):
+            return "\(name) was not found at \(path)."
         case .launchFailed(let message):
             return "The script could not be started — \(message)"
         case .timedOut(let seconds):
-            return "The script was still running after \(Int(seconds))s and was stopped."
+            return "Still running after \(Int(seconds))s. Stopped."
         case .exited(let code, let message):
-            return message.isEmpty ? "The script exited with code \(code)." : message
+            return message.isEmpty ? "Exited with code \(code)." : message
+        case .badWebhookURL(let raw):
+            return raw.isEmpty ? "No webhook URL set." : "\(raw) is not a valid http(s) URL."
         }
     }
 }
 
-/// Runs a `ScriptConfig` against a set of files.
+/// Spawns scripts. Nothing else.
 ///
 /// **Dormant by construction.** There is no timer, no queue drain and no
-/// watcher: `run` is called from a drop and does nothing before or after. The
-/// only clock involved is the watchdog that stops a runaway script, and it
-/// exists only for the duration of a run.
+/// watcher here: `run` is called from an event and does nothing before or after.
+/// The only clock involved is the watchdog that stops a runaway script, and it
+/// exists for the duration of that run alone.
 ///
-/// **Never on the main thread.** Everything below is `nonisolated`; the process
-/// is spawned and its pipes are drained on background queues, and only the
+/// **Never on the main thread.** Everything is `nonisolated`; the process is
+/// spawned and both pipes are drained on background queues, and only the
 /// finished `ScriptRun` crosses back.
 enum ScriptExecutionEngine {
-    /// A script gets this long before it is killed. Long enough for real work,
-    /// short enough that a stuck process cannot sit there forever.
+    /// How long a script gets before it is killed.
     static let timeout: TimeInterval = 60
 
-    /// Where the interpreter actually is, or nil if it is not installed.
-    nonisolated static func resolveInterpreter(_ interpreter: ScriptConfig.Interpreter) -> String? {
-        interpreter.candidatePaths.first { FileManager.default.isExecutableFile(atPath: $0) }
+    /// Whether the interpreter this action needs is actually installed.
+    nonisolated static func interpreterExists(_ interpreter: ScriptAction.Interpreter) -> Bool {
+        FileManager.default.isExecutableFile(atPath: interpreter.path)
     }
 
-    /// Runs the script with `paths` as its arguments.
+    /// Runs `action` with `paths` as its arguments.
     ///
     /// Paths are passed as **argv**, never spliced into the source: the shell
-    /// sees `"$1"`, `"$2"`, `"$@"`, and a file called `; rm -rf ~` is a file
-    /// called `; rm -rf ~`. The preset's own parameters travel as environment
-    /// variables for the same reason.
-    nonisolated static func run(_ config: ScriptConfig,
-                                paths: [URL],
+    /// sees `"$1"`, `"$2"`, `"$@"`, so a file named `; echo hi` is a file name
+    /// and not a command. Preset parameters travel as environment variables for
+    /// the same reason.
+    nonisolated static func run(_ action: ScriptAction,
+                                paths: [URL] = [],
                                 timeout: TimeInterval = timeout) async throws -> ScriptRun {
-        let source = config.effectiveSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        if action.kind == .webhook { return try await callWebhook(action, paths: paths, timeout: timeout) }
+        let source = action.effectiveSource
         guard !source.isEmpty else { throw ScriptError.noSource }
-
-        guard let interpreterPath = resolveInterpreter(config.interpreter) else {
-            throw ScriptError.interpreterMissing(config.interpreter.label,
-                                                 config.interpreter.candidatePaths)
+        let interpreter = action.effectiveInterpreter
+        guard interpreterExists(interpreter) else {
+            throw ScriptError.interpreterMissing(interpreter.label, interpreter.path)
         }
 
-        let scriptURL = try write(source, extension: config.interpreter.fileExtension)
+        let scriptURL = try write(source, extension: interpreter.fileExtension)
         defer { try? FileManager.default.removeItem(at: scriptURL) }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: interpreterPath)
-        process.arguments = config.interpreter.leadingArguments + [scriptURL.path] + paths.map(\.path)
-        process.environment = environment(for: config)
+        process.executableURL = URL(fileURLWithPath: interpreter.path)
+        process.arguments = interpreter.leadingArguments + [scriptURL.path] + paths.map(\.path)
+        process.environment = environment(for: action)
 
         let out = Pipe()
         let err = Pipe()
@@ -94,14 +95,11 @@ enum ScriptExecutionEngine {
         process.standardInput = FileHandle.nullDevice
 
         // Drained as it arrives. Waiting first and reading after deadlocks the
-        // moment a script writes more than a pipe buffer holds.
+        // moment a script writes more than one pipe buffer holds — measured at
+        // roughly 64KB, and a chatty script passes that in a heartbeat.
         let collector = OutputCollector()
-        out.fileHandleForReading.readabilityHandler = { handle in
-            collector.appendOutput(handle.availableData)
-        }
-        err.fileHandleForReading.readabilityHandler = { handle in
-            collector.appendError(handle.availableData)
-        }
+        out.fileHandleForReading.readabilityHandler = { collector.appendOutput($0.availableData) }
+        err.fileHandleForReading.readabilityHandler = { collector.appendError($0.availableData) }
 
         let started = Date()
         let watchdog = DispatchWorkItem { [weak process] in
@@ -111,7 +109,7 @@ enum ScriptExecutionEngine {
         }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
 
-        let finished: Int32 = try await withCheckedThrowingContinuation { continuation in
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
             let resumed = Resumed()
             process.terminationHandler = { process in
                 guard resumed.claim() else { return }
@@ -129,20 +127,20 @@ enum ScriptExecutionEngine {
         watchdog.cancel()
         out.fileHandleForReading.readabilityHandler = nil
         err.fileHandleForReading.readabilityHandler = nil
-        // Whatever landed between the last readability callback and exit.
+        // Whatever landed between the last callback and exit.
         collector.appendOutput(out.fileHandleForReading.availableData)
         collector.appendError(err.fileHandleForReading.availableData)
 
         if collector.didTimeOut { throw ScriptError.timedOut(timeout) }
 
-        let result = ScriptRun(output: collector.output,
-                               errorOutput: collector.errorOutput,
-                               exitCode: finished,
-                               duration: Date().timeIntervalSince(started))
-        guard result.succeeded else {
-            throw ScriptError.exited(finished, result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+        let run = ScriptRun(output: collector.output,
+                            errorOutput: collector.errorOutput,
+                            exitCode: status,
+                            duration: Date().timeIntervalSince(started))
+        guard run.succeeded else {
+            throw ScriptError.exited(status, run.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
-        return result
+        return run
     }
 
     // MARK: - Plumbing
@@ -150,17 +148,54 @@ enum ScriptExecutionEngine {
     /// A deliberately small environment. Inheriting the app's own would hand a
     /// script whatever launchd happened to give Gruppen, which is neither
     /// predictable nor the user's shell.
-    private nonisolated static func environment(for config: ScriptConfig) -> [String: String] {
-        var environment = [
+    private nonisolated static func environment(for action: ScriptAction) -> [String: String] {
+        [
             "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "HOME": NSHomeDirectory(),
             "LANG": "en_US.UTF-8",
             "TMPDIR": NSTemporaryDirectory()
         ]
-        for (key, value) in config.environment where !value.isEmpty {
-            environment[key] = value
+    }
+
+    /// The webhook action. No subprocess: `URLSession` already does this, and
+    /// shelling out to curl would mean a second thing to go wrong.
+    ///
+    /// A POST carries the incoming paths as JSON so the receiver knows what
+    /// triggered it; a GET carries nothing but the request itself.
+    private nonisolated static func callWebhook(_ action: ScriptAction,
+                                                paths: [URL],
+                                                timeout: TimeInterval) async throws -> ScriptRun {
+        guard let url = URL(string: action.webhookURL), url.scheme?.hasPrefix("http") == true else {
+            throw ScriptError.badWebhookURL(action.webhookURL)
         }
-        return environment
+
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = action.httpMethod.label
+        if action.httpMethod == .post {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body = ["paths": paths.map(\.path)]
+            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+
+        let started = Date()
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data, encoding: .utf8) ?? ""
+            let duration = Date().timeIntervalSince(started)
+            guard (200..<300).contains(status) else {
+                throw ScriptError.exited(Int32(status),
+                                         "HTTP \(status)\n" + body.prefix(500))
+            }
+            return ScriptRun(output: "HTTP \(status)" + (body.isEmpty ? "" : "\n" + body),
+                             errorOutput: "",
+                             exitCode: 0,
+                             duration: duration)
+        } catch let error as ScriptError {
+            throw error
+        } catch {
+            throw ScriptError.launchFailed(error.localizedDescription)
+        }
     }
 
     private nonisolated static func write(_ source: String, extension ext: String) throws -> URL {
@@ -168,7 +203,7 @@ enum ScriptExecutionEngine {
             .appendingPathComponent("gruppen-script-\(UUID().uuidString).\(ext)")
         do {
             try source.write(to: url, atomically: true, encoding: .utf8)
-            // Owner-only: the script is about to be executed, and /tmp is shared.
+            // Owner-only: this is about to be executed, and /tmp is shared.
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         } catch {
             throw ScriptError.launchFailed(error.localizedDescription)
@@ -177,7 +212,7 @@ enum ScriptExecutionEngine {
     }
 }
 
-/// Thread-safe accumulation of two pipes being drained from arbitrary queues.
+/// Thread-safe accumulation of two pipes drained from arbitrary queues.
 private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var outputData = Data()
@@ -194,14 +229,9 @@ private final class OutputCollector: @unchecked Sendable {
         lock.lock(); errorData.append(data); lock.unlock()
     }
 
-    func markTimedOut() {
-        lock.lock(); timedOut = true; lock.unlock()
-    }
+    func markTimedOut() { lock.lock(); timedOut = true; lock.unlock() }
 
-    var didTimeOut: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return timedOut
-    }
+    var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
 
     var output: String {
         lock.lock(); defer { lock.unlock() }
@@ -214,8 +244,8 @@ private final class OutputCollector: @unchecked Sendable {
     }
 }
 
-/// Guarantees a continuation is resumed exactly once, whichever of the launch
-/// failure and the termination handler gets there first.
+/// Guarantees a continuation resumes exactly once, whichever of the launch
+/// failure and the termination handler reaches it first.
 private final class Resumed: @unchecked Sendable {
     private let lock = NSLock()
     private var done = false

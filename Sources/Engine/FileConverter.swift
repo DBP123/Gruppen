@@ -94,7 +94,11 @@ enum FileConverter {
     /// Converts each file and returns the results. Off the main actor: every
     /// path here is either a subprocess or a render.
     nonisolated static func convert(_ urls: [URL], to target: Target) throws -> [URL] {
-        try urls.map { try convert($0, to: target) }
+        // One pool per file: converting a folder of images otherwise piles up
+        // every intermediate until the whole batch finishes.
+        try urls.map { url in
+            try autoreleasepool { try convert(url, to: target) }
+        }
     }
 
     nonisolated static func convert(_ url: URL, to target: Target) throws -> URL {
@@ -224,19 +228,21 @@ enum FileConverter {
         }
     }
 
-    /// Next to the original when that is writable — a converted file belongs
-    /// beside the one it came from — and in scratch when it is not, which is the
-    /// case for anything dragged out of a read-only location.
+    /// **Always scratch, never beside the original.**
+    ///
+    /// Writing next to the source meant converting a photo left a second file in
+    /// the folder you were only *looking* at, whether you wanted it or not. A
+    /// conversion is now a thing held on the shelf: it lives in the stash's
+    /// temporary directory, and it becomes a real file in a real place at the
+    /// moment you drag it somewhere — which is the same moment you decide you
+    /// want it. Scratch is cleared at launch, so one you never take is one that
+    /// cleans itself up.
     private nonisolated static func destination(for url: URL, ext: String) -> URL {
-        let folder = url.deletingLastPathComponent()
         let base = url.deletingPathExtension().lastPathComponent
-        let writable = FileManager.default.isWritableFile(atPath: folder.path)
-        let directory = writable ? folder : IngestionManager.scratch
-
-        var candidate = directory.appendingPathComponent("\(base).\(ext)")
+        var candidate = IngestionManager.scratch.appendingPathComponent("\(base).\(ext)")
         var counter = 1
         while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = directory.appendingPathComponent("\(base)-\(counter).\(ext)")
+            candidate = IngestionManager.scratch.appendingPathComponent("\(base)-\(counter).\(ext)")
             counter += 1
         }
         return candidate

@@ -1,284 +1,194 @@
 # Gruppen
 
+A macOS workspace manager with a drop shelf built into the notch.
 
-Version 2.0 — workspace manager plus a stash/clipboard engine with notch and
-shelf overlays.
+Group your applications, launch a whole group with one click or one hotkey, and
+close the group when you're done with that context. Then use the same app as a
+staging area for files: drag anything toward the notch, park it, and drag it out
+somewhere else — or hand it to a script.
 
-A macOS workspace manager. Group your applications, launch a whole group with
-one click or one hotkey, and force close the group when you're done with that
-context.
+Written in Swift and SwiftUI against Apple's own frameworks. **No third-party
+dependencies, no Xcode project, no analytics, no network calls** except one:
+dropping a link to a remote image fetches that image.
 
-Native SwiftUI, built with the Xcode Command Line Tools — there is no Xcode
-project and no third-party dependency.
+Requires **macOS 13 (Ventura) or later**.
 
-## Build
+---
+
+## Install
+
+Download the `.dmg` from [Releases](../../releases), open it, and drag Gruppen to
+Applications.
+
+The app is **ad-hoc signed**, not notarised — there's no paid developer account
+behind it — so Gatekeeper will refuse the first launch. Open it once with
+**right-click → Open**, then **Open** in the dialog. macOS remembers after that.
+
+If it still refuses:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Gruppen.app
+```
+
+The released build is **Apple Silicon**. On an Intel Mac, build from source (see
+below) — `build.sh` compiles for whatever architecture it runs on.
+
+---
+
+## Gruppen (workspaces)
+
+A *Gruppe* is a named set of applications.
+
+- **Activate** launches every app in the group; **deactivate** closes them.
+- **Hotkeys.** Record a global shortcut per Gruppe and toggle it from anywhere.
+  These use Carbon's `RegisterEventHotKey`, so Gruppen does **not** need
+  Accessibility permission.
+- **Sequenced launch.** Optionally start apps in list order with a delay between
+  each, and close them in reverse.
+- **Partial state.** When only some of a Gruppe is running, you decide whether
+  the primary action finishes the launch or closes what's up.
+- **Menu bar.** Toggle any Gruppe without opening the window. The dropdown can
+  show a live CPU/RAM/thread readout of Gruppen itself.
+- **Snapshot.** Build a Gruppe from whatever is running right now.
+
+Closing a group force-quits its apps. Anything with unsaved work will say so
+first, the same as pressing ⌘Q.
+
+## The Stash
+
+A shelf for files in transit — the thing you want when the source and the
+destination can't be on screen at the same time.
+
+**Three ways to open one, all of them passive:**
+
+| Trigger | What happens |
+| --- | --- |
+| Drag toward the notch | A tray drops out of the bezel |
+| Shake a drag left-right | A floating shelf appears at the pointer |
+| Drag to the left or right screen edge | A floating shelf appears there |
+
+**What it accepts.** Files, folders, text selections, images, links, and *file
+promises* — the IOU that Safari, Photos and Mail hand over instead of a file.
+Anything that isn't already a file is written to one, so a snippet of text or an
+image dragged off a web page can be dragged straight into Finder afterwards.
+
+**What you can do with what's on it:**
+
+- Drag items back out, individually. Files come out byte-for-byte and
+  name-for-name identical.
+- Click to select, **shift-click** to select several.
+- **Convert** — images to PNG/JPEG/HEIC/TIFF/PDF, documents to
+  PDF/DOCX/RTF/HTML/TXT, audio to M4A/WAV/AIFF. Only conversions that make sense
+  for the selection are offered. Uses `sips`, `textutil`, `afconvert` and
+  CoreGraphics.
+- **Zip** the shelf or just the selection into your download folder.
+- **Quick Look**, or copy the POSIX path.
+- **Drop onto a Gruppe chip** to open the files with that workspace's apps.
+
+## Script Builder
+
+Attach a script to a Gruppe. Dropping files on that Gruppe runs the script with
+their paths instead of opening them.
+
+Pick a preset — *move files*, *transform each file*, *run a command*, *copy
+paths* — fill in the fields, and you have a working automation without writing
+anything. Open the source drawer to see exactly what will run, and edit it if you
+want; once you do, the preset stops writing over your version.
+
+Bash, Zsh, Python 3 and JavaScript (JXA). The interpreter row shows the resolved
+path, or tells you it isn't installed.
+
+**On safety:** dropped paths are passed as **arguments** — `$1`, `$2`, `"$@"` —
+never pasted into the script text, so a file named `; echo hi` is a file name and
+not a command. Preset parameters travel as environment variables for the same
+reason. Scripts run with a minimal environment, and one that's still going after
+60 seconds is stopped.
+
+A script can do anything you can do in a terminal. Read what's in the drawer
+before you enable one.
+
+## Guardrails
+
+Listed in the sidebar, marked *planned*, and honest about it — it renders a
+placeholder rather than a mock-up of features that don't exist yet.
+
+---
+
+## Idle cost
+
+Gruppen sits at **0.0% CPU** when you aren't using it, and that's a design
+constraint rather than a happy accident:
+
+- No polling. The running-apps tracker listens for `NSWorkspace` notifications
+  instead of walking the process list on a timer.
+- The stash triggers are invisible drop targets that the window server
+  hit-tests anyway, plus a drag monitor that only exists between mouse-down and
+  mouse-up.
+- The performance readout samples only while the menu is open.
+- The script engine is dormant until a drop happens.
+
+## Where your data lives
+
+| What | Where |
+| --- | --- |
+| Gruppen, hotkeys, scripts | `~/Library/Application Support/Gruppen/groups.json` |
+| Preferences | `UserDefaults` (`com.dhilanpatel.gruppen`) |
+| Activity log | `~/Library/Logs/Gruppen.log` (rotates at 512 KB) |
+| Staged files from the stash | `$TMPDIR/Gruppen-Stash`, cleared at launch |
+
+Nothing is sent anywhere. To remove Gruppen completely, delete the app and those
+paths.
+
+Launch-at-login uses `SMAppService`. JXA scripts that drive other apps may make
+macOS ask for Automation permission — that's the system asking on the script's
+behalf, not Gruppen.
+
+---
+
+## Build from source
+
+Requires the Xcode Command Line Tools (`xcode-select --install`). There is no
+Xcode project — `build.sh` calls `swiftc` over `Sources/` directly.
 
 ```bash
 ./build.sh              # build into ./build
 ./build.sh --install    # build, then replace /Applications/Gruppen.app
 ./build.sh --run        # build and launch
-./build.sh --dmg        # package build/Gruppen-<version>.dmg for sharing
+./build.sh --dmg        # package build/Gruppen-<version>.dmg
 ```
 
-Regenerate the app icon after changing `Tools/makeicon.swift`:
+Regenerate the app icon after editing `Tools/makeicon.swift`:
 
 ```bash
 swift Tools/makeicon.swift && ./build.sh
 ```
 
-## Using it
-
-- **+ New Gruppe** creates a group. **Edit** opens its configuration sheet.
-- Add apps from a picker rooted at `/Applications`, or drag `.app` bundles onto
-  the list from Finder.
-- **Launch** starts every app in the Gruppe. Apps already running are left
-  alone, and nothing steals focus unless you turn that on in Konfiguration.
-- **Terminate** force closes the Gruppe's apps.
-- **When partly running** — some apps up, some down, is the one genuinely
-  ambiguous state. Each Gruppe decides for itself: on, the button reads
-  **Launch Rest** and starts what is missing; off, it reads **Terminate** and
-  closes what is up. The card button, the context menu, the menu bar item and
-  the global shortcut all resolve through the same rule.
-- **Global shortcut** — click the field, press the combination you want. It
-  binds system-wide and toggles the Gruppe from any app.
-- Search filters by Gruppe name *or* by application name.
-- **Snapshot** turns whatever you have open right now into a Gruppe: a
-  pre-checked list of your running windowed apps, which you can trim or top up
-  with apps that aren't running.
-- **Suggested Gruppen** chips appear when a preset rule matches what is
-  installed. One click creates the Gruppe.
-- **Strict Execution Sequence** (per Gruppe) launches apps 1→N in list order
-  and terminates them N→1 in reverse, pausing a configurable 0–3s between
-  steps. Drag rows to set the order; each row shows an illuminated step badge.
-- **Colour** is any hex. Five quick-select swatches (Guards Red, Acid Green,
-  Industrial Orange, Signal Yellow, Cobalt) sit next to a native colour picker.
-
-## Konfiguration
-
-Opened from the header button, the menu bar item, or `⌘,`.
-
-| Setting | Effect |
-| --- | --- |
-| Launch at startup | Registers Gruppen as a login item via `SMAppService` |
-| Show in menu bar | Menu bar item for toggling Gruppen without the window |
-| Show Dock icon | Turn off for a menu-bar-only app |
-| Focus apps when launching | Bring windows forward instead of opening behind your work |
-| Termination behaviour | Force quit immediately, or quit gracefully with a 3s/10s leash |
-| Rescan Applications | Re-evaluate presets, repair moved `.app` paths, drop stale icons |
-| Show suggested Gruppen | Hide the preset chips on the overview entirely |
-
-Menu bar and Dock icon can't both be switched off — the last one on refuses,
-so the app is always reachable.
-
-## Behaviour worth knowing
-
-- **Status is polled every two seconds.** macOS posts no launch or terminate
-  notifications for `LSUIElement` menu-bar apps, which is most of what ends up
-  in a Gruppe, so notifications alone leave the indicators stale.
-- **Helpers count as the app.** Some apps hand off to a helper and exit —
-  Backdrop leaves only `Backdrop.app/Contents/Resources/BackdropWallpaper.app`
-  behind. Any running process inside the app bundle counts, otherwise those
-  apps read as stopped and deactivation has nothing to close.
-- **Shared apps are protected.** An app in two Gruppen is spared when one is
-  terminated while the other is still active.
-- **Reactivating cancels a pending force quit.** With a grace period set,
-  deactivation resolves the exact processes to close up front and only kills
-  those. Relaunching during the grace period cancels the kill, so apps you
-  just started are never caught by an earlier deactivation's timer.
-- **Sequenced termination is LIFO on purpose** — the last app launched is the
-  first closed, which is what you want when later apps depend on earlier ones.
-  Relaunching mid-sequence cancels the in-flight sequence rather than letting
-  the two interleave.
-- **Adding apps to a sequenced Gruppe appends** rather than sorting
-  alphabetically; in a sequence, order *is* the configuration.
-- **Recording releases existing hotkeys**, so pressing an already-bound
-  combination records it instead of firing it. Escape cancels, Delete clears.
-- **Gruppen never force quits itself**, even if you add it to a Gruppe.
-- **One window, one instance.** The main scene is a `Window`, not a
-  `WindowGroup`, so it cannot be duplicated. Copies of the bundle in different
-  locations are separate processes to LaunchServices, so a second Gruppen
-  really can start — it detects the running one, focuses it, and quits.
-  Clicking the Dock icon with the window closed brings that window back.
-- Shortcuts macOS or another app already owns show struck through and dimmed
-  rather than silently failing.
-
-## Performance
-
-The main thread must stay idle when nothing is happening. Two rules earn that:
-
-- **Never hand a `@Published` property straight to a SwiftUI binding that the
-  framework writes back to.** `@Published` republishes on *every* assignment,
-  identical or not, because it fires in `willSet` — ahead of any `didSet`
-  equality guard. `MenuBarExtra(isInserted:)` writes back on each scene update,
-  so `$settings.showMenuBar` span the main thread at 100% forever. The binding
-  filters no-op writes instead.
-- **The application index is pull-only.** Preset matching is a handful of
-  `fileExists` calls, run at launch and when you press Rescan — never on a
-  timer. The directory walk happens off the main actor; the LaunchServices
-  lookups that repair moved bundles stay on it.
-- **Sequencing uses `Task.sleep`, not a polling loop.** One cancellable task
-  per Gruppe, nothing spinning between steps.
-- **The poll builds its lookup once.** Resolving "is this app running" used to
-  filter the whole process list per app, allocating an array each time and
-  touching `bundleURL` — an expensive cross-process property — once per app per
-  process. It now builds a bundle-id set and a path list once per tick and
-  probes them. Measured on 23 apps against 81 processes: **10.3 ms → 0.51 ms**
-  per poll, ~20× less work every two seconds.
-- **Aggregate counts are cached, not recomputed in `body`.** The status bar
-  reads `activeCount` / `runningTotal`, maintained when the data changes.
-- **App icons are cached.** `NSWorkspace.icon(forFile:)` hits IconServices per
-  call and returns a fresh `NSImage` each time, so uncached icons both cost I/O
-  and make SwiftUI treat every image as changed.
-
-Idle cost is ~0% CPU. If that regresses, `sample Gruppen 5` will show it:
-a busy `AppGraph.updateGraph` means a view-update loop, not slow work.
-
-## Design
-
-"Industrial Dark" — strict monospace for data, high-contrast orange and green
-accents, precise hairline borders. Tokens live in `Sources/Theme.swift`.
-
-The vocabulary follows the app icon's switch panel, kept deliberately quiet so
-the UI stays readable:
-
-- **`LED`** — a Gruppe's colour renders as an indicator lamp with a specular
-  glint, lit when the Gruppe is active or its apps are running and a dark lens
-  otherwise. Only lit lamps bloom, so the glow means something.
-- **`.bezel()`** — hairline highlight along the top edge, the way light catches
-  moulded plastic.
-- Primary buttons carry a lit-cap gradient, echoing the illuminated rocker.
-- The active rail glows in the Gruppe's colour.
-- **`.recessed()`** — the inverse of the bezel: dark along the top lip, light
-  along the bottom. Inputs, key caps and icon sockets are milled *into* the
-  panel; cards sit *on* it, with a gradient and a drop shadow.
-- **`.grain()`** — a 128×128 noise tile, generated once and reused, gives flat
-  surfaces a moulded finish. Note that `.overlay` blending is a no-op at
-  mid-grey, so the noise spans 56–200; clustered values are invisible at any
-  opacity.
-- Header and footer are separate plates: a highlight along their top edge and a
-  hard shadow along the bottom.
-
-### App icon
-
-Drop a square PNG at `Resources/icon-source.png` and rerun the icon script; it
-always wins over the drawn fallback.
-
-```bash
-swift Tools/makeicon.swift && ./build.sh --install
-```
-
-Any Gruppe colour is a hex string. `Color` derives the whole lamp from it —
-`lensTint` (unlit smoked lens), `litCore` (near-white filament), `lensGradient`
-and `bloom` — so a dark navy and a bright yellow both read as genuinely lit.
-Unparseable hex falls back to `#FF6B00` rather than crashing on stored data.
-
-Two colours deviate from the original spec, both for contrast:
-
-| Token | Spec | Used | Why |
-| --- | --- | --- | --- |
-| `--text-muted` | `#525866` | `#7E8695` | 2.42:1 → 4.71:1; it carries the smallest type in the UI |
-| Primary button text | `#FFF` | `#0A0B0D` | 3.30:1 → 5.95:1 on `--accent-orange` |
-
-## Stash
-
-A shelf for things in transit. Drag anything to the notch, to either screen
-edge, or shake the pointer mid-drag; a small non-activating panel appears, you
-drop into it, and you drag back out wherever you needed it. Dragging an item out
-removes it, and emptying the shelf closes it.
-
-### The Passive Sentinel pattern
-
-The triggers cost nothing because Gruppen never asks where the cursor is.
-Instead it hands the window server three microscopic transparent `NSPanel`s —
-one across the notch (via `auxiliaryTopLeftArea`/`auxiliaryTopRightArea`, with a
-top-centre band as fallback) and a 4pt strip down each screen edge. The window
-server is already hit-testing every drag; a sentinel simply receives
-`draggingEntered` when one crosses it. No polling, no timer, no cursor tracking.
-
-### The armed drag monitor
-
-Shake detection uses an event-driven lifecycle rather than a permanent monitor:
-
-| Event | Effect |
-| --- | --- |
-| `.leftMouseDown` | **arms** the `.leftMouseDragged` monitor |
-| `.leftMouseUp` | **disarms** it immediately |
-
-While you are not holding the button, the only live monitor is a mouse-down
-watcher that fires once per click. Inside the armed monitor, evaluation is
-throttled to ~60Hz (`timestamp` delta ≥ 0.016), uses integer maths, and discards
-anything under 5pt as jitter. Three direction reversals inside 0.5s confirm a
-shake.
-
-**Deferred IPC:** `NSPasteboard(name: .drag)` is not touched until the shake has
-already been confirmed. Reading a pasteboard is cross-process traffic, so it
-happens once, after the cheap arithmetic has already said yes.
-
 ## Layout
 
-Tools are self-contained: a page, optionally its own settings pane, and nothing
-the rest of the app has to know about.
-
-| Path | Purpose |
-| --- | --- |
-| `Core/Model.swift` | `AppEntry`, `AppGroup`, `Shortcut`, running-instance matching |
-| `Core/GroupStore.swift` | Persistence, editing, launch/terminate, hotkeys, index |
-| `Core/AppSettings.swift` | App-wide preferences |
-| `Core/Hotkeys.swift` | Carbon global hotkeys and the key recorder |
-| `Core/Presets.swift` | Static preset rules and disk matching |
-| `Design/Theme.swift` | Tokens, lamp optics, button styles, surface modifiers |
-| `Design/Components.swift` | Shared rows, sections, toggles — the panel chrome |
-| `Navigation/ToolPage.swift` | The tool enum: icon, badge, summary, availability |
-| `Navigation/NavigationModel.swift` | Selected page, rail state, settings-pane state |
-| `Navigation/SidebarView.swift` | Collapsible tool rail |
-| `Navigation/RootView.swift` | Sidebar + `ToolHost` + tool header |
-| `Tools/Workspaces/*` | The Workspaces tool: page, grid, editor, snapshot, settings |
-| `Tools/General/GeneralSettingsPane.swift` | App-wide settings page |
-| `GruppenApp.swift` | Scene, menu bar, app delegate |
-| `Tools/makeicon.swift` | Builds `Resources/AppIcon.icns` from `icon-source.png` |
-
-`build.sh` compiles `$(find Sources -name '*.swift')`, so a new file is picked
-up by existing anywhere under `Sources/`.
-
-## Adding a tool
-
-1. Add a case to `ToolPage` with its icon, badge and summary.
-2. Drop a view in `Sources/Tools/<Tool>/`.
-3. Add one line to the `switch` in `ToolHost`.
-
-Set `hasSettingsPane` if it needs isolated settings; the header grows a control
-that swaps the tool for its own pane, with no separate window. Tools whose
-`isImplemented` is false render an honest "not built yet" placeholder rather
-than mock controls.
-
-Gruppen are stored as readable JSON at
-`~/Library/Application Support/Gruppen/groups.json`, migrated automatically
-from the app's former name. Every launch and kill is recorded in
-`~/Library/Logs/Gruppen.log` (capped at 512 KB), which is the fastest way to
-answer "what closed my app?".
-
-## Shipping beyond this machine
-
-The build is **ad-hoc signed**, which is fine locally but Gatekeeper will block
-it on another Mac. To distribute it you need a Developer ID certificate, then:
-
-```bash
-codesign --force --options runtime --sign "Developer ID Application: NAME (TEAMID)" "build/Gruppen.app"
-xcrun notarytool submit "build/Gruppen.app.zip" --apple-id APPLE_ID --team-id TEAMID --wait
-xcrun stapler staple "build/Gruppen.app"
+```
+Sources/
+  App/        NSApplication lifecycle, the scene, the menu bar extra
+  Core/       Models, persistence, hotkeys, settings
+  Design/     Theme tokens and shared controls
+  Engine/     Running-app tracking, icons, zip, conversion, scripts, routing
+  Pages/      One directory per tool: Workspaces, Scripts, Settings, Navigation
+  Stash/      Shelf windows, drop handling, ingestion, the notch tray
 ```
 
-`SMAppService` login items are also more reliable from a properly signed app
-installed in `/Applications`. If registration fails, the Konfiguration window
-shows the system's error inline rather than leaving the switch lying.
+A note for anyone reading the code: the comments explain *why* a thing is the
+way it is, usually because the obvious version was tried first and measured.
+Several of them record numbers — window edge highlights, notch geometry,
+compression levels — that were surprising enough to be worth writing down.
 
-## Testing
+## Contributing
 
-`GroupStore(fileURL:)` takes an explicit store location, and tests must pass
-one — `FileManager`'s application-support lookup does **not** respect `$HOME`,
-so overriding the environment is not enough to isolate a test from live data.
+Issues and pull requests are welcome. Two house rules:
 
-UI can be snapshotted headlessly by hosting a view in an offscreen `NSWindow`
-and calling `cacheDisplay(in:to:)`. `ImageRenderer` does not rasterise
-`ScrollView` or `LazyVGrid` content and will silently produce empty bodies.
->>>>>>> d75669e (Group Launch + Full Stash complete)
+1. **No third-party dependencies.** If AppKit can do it, AppKit does it.
+2. **Nothing that runs when idle.** No timers, no polling loops. If you need to
+   know when something changed, find the notification.
+
+## Licence
+
+Not chosen yet — until a `LICENSE` file lands here, no permissions are granted
+beyond reading the source and building it for yourself.
