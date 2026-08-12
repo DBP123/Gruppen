@@ -8,6 +8,7 @@ import SwiftUI
 /// not app settings.
 struct GeneralSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var navigation: NavigationModel
 
     var body: some View {
         SettingsScroll {
@@ -34,10 +35,13 @@ struct GeneralSettingsPane: View {
             }
 
             LabeledSection(label: "MONITORING") {
-                SettingToggle(title: "Show performance monitor",
-                              detail: "CPU and memory readout at the top of the menu bar dropdown",
+                SettingToggle(title: "Show system monitor",
+                              detail: "Live telemetry in the menu bar dropdown",
                               isOn: $settings.showPerformanceMonitor)
-                FootNote("Sampling runs only while that menu is open, so the readout costs nothing when it is closed.")
+                Button("Open Guardrails") { navigation.select(.guardrails) }
+                    .industrialButton(.secondary)
+                FootNote("Which hardware modules run, where each one shows, and what it costs are on the "
+                         + "Guardrails page — they belong with the hardware, not in application preferences.")
             }
 
             LabeledSection(label: "BUILD") {

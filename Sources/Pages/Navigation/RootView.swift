@@ -9,6 +9,7 @@ import SwiftUI
 /// view asked for an unbounded width. This owns all three.
 struct RootView: View {
     @EnvironmentObject private var navigation: NavigationModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 0) {
@@ -17,6 +18,11 @@ struct RootView: View {
         }
         .background(Theme.panel)
         .preferredColorScheme(.dark)
+        // `openWindow` only exists inside a scene, and the menu bar items are
+        // not in one. This is where it is handed over.
+        .onAppear {
+            MenuBarManager.shared.openMainWindow = { openWindow(id: WindowID.main) }
+        }
     }
 }
 
@@ -48,8 +54,10 @@ struct ToolHost: View {
             StashPage()
         case .scripts:
             ScriptBuilderView()
+        case .metrics:
+            MetricsView()
         case .guardrails:
-            ResourceGuardrailsView()
+            GuardrailsView()
         case .settings:
             GeneralSettingsPane()
         }

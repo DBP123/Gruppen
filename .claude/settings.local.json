@@ -34,7 +34,22 @@
       "Bash(./build.sh --install --dmg)",
       "Bash(rm -f /private/tmp/claude-501/probe-scripts.json)",
       "Bash(OUT=/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/builder3.png /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/scriptprobe)",
-      "Bash(awk '{print $5}')"
+      "Bash(awk '{print $5}')",
+      "Bash(/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/click 993 16)",
+      "Bash(screencapture -x -R 830,0,360,700 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/panel2.png)",
+      "Bash(/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/click2 993 12)",
+      "Bash(screencapture -x -R 975,20,320,740 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/panel5.png)",
+      "Bash(./build.sh --install --run)",
+      "Bash(/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/panelid)",
+      "Bash(/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/click2 1055 578)",
+      "Bash(/private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/panelstate)",
+      "Bash(break)",
+      "Bash(screencapture -x -R 53,196,760,701 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings.png)",
+      "Bash(osascript -e 'tell application \"Gruppen\" to activate')",
+      "Bash(screencapture -x -R 53,196,700,701 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings.png)",
+      "Bash(screencapture -x -R 600,560,550,340 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings2.png)",
+      "Bash(screencapture -x -R 640,700,510,300 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings2.png)",
+      "Bash(screencapture -x -R 750,0,762,36 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/strip.png)"
     ]
   }
 }

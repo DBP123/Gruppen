@@ -3,6 +3,9 @@ import SwiftUI
 /// Only one window remains: Settings is a page inside it, not a separate scene.
 enum WindowID {
     static let main = "main"
+    /// Also how the one window is found again when it has been closed and the
+    /// app is reopened from the Dock or from a menu bar item.
+    static let mainWindowTitle = "Gruppen"
 }
 
 /// Every tool Gruppen hosts, present and planned.
@@ -13,6 +16,7 @@ enum Page: String, CaseIterable, Identifiable {
     case workspaces = "Workspaces"
     case stash = "Stash"
     case scripts = "Script Builder"
+    case metrics = "Metrics"
     case guardrails = "Resource Guardrails"
     case settings = "Settings"
 
@@ -23,6 +27,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .workspaces: return "square.grid.2x2.fill"
         case .stash: return "tray.2.fill"
         case .scripts: return "chevron.left.forwardslash.chevron.right"
+        case .metrics: return "chart.bar.doc.horizontal"
         case .guardrails: return "cpu"
         case .settings: return "gearshape.fill"
         }
@@ -34,6 +39,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .workspaces: return "Workspaces"
         case .stash: return "Stash"
         case .scripts: return "Scripts"
+        case .metrics: return "Metrics"
         case .guardrails: return "Guardrails"
         case .settings: return "Settings"
         }
@@ -45,7 +51,8 @@ enum Page: String, CaseIterable, Identifiable {
         case .workspaces: return "SYSTEM OVERVIEW"
         case .stash: return "SHELF"
         case .scripts: return "AUTOMATION"
-        case .guardrails: return "PLANNED"
+        case .metrics: return "DATA"
+        case .guardrails: return "TELEMETRY"
         case .settings: return "KONFIGURATION"
         }
     }
@@ -54,8 +61,7 @@ enum Page: String, CaseIterable, Identifiable {
     /// honest placeholder rather than a mock-up of features that don't exist.
     var isImplemented: Bool {
         switch self {
-        case .workspaces, .stash, .scripts, .settings: return true
-        case .guardrails: return false
+        case .workspaces, .stash, .scripts, .metrics, .guardrails, .settings: return true
         }
     }
 
@@ -63,7 +69,7 @@ enum Page: String, CaseIterable, Identifiable {
     var hasSettingsPane: Bool {
         switch self {
         case .workspaces, .stash: return true
-        case .scripts, .guardrails, .settings: return false
+        case .scripts, .metrics, .guardrails, .settings: return false
         }
     }
 
@@ -75,8 +81,10 @@ enum Page: String, CaseIterable, Identifiable {
             return "A shelf for files in transit. Drag to the notch or shake to open it."
         case .scripts:
             return "Attach a script to a Gruppe. Dropping files on it runs the script with their paths."
+        case .metrics:
+            return "Capture system events, keep the fields you want, and export the table."
         case .guardrails:
-            return "Watch CPU, memory and battery draw, and act when a Gruppe misbehaves."
+            return "Every hardware module, and what each one costs to keep watching."
         case .settings:
             return "Application-wide preferences."
         }

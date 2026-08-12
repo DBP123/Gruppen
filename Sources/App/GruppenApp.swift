@@ -7,15 +7,14 @@ struct GruppenApp: App {
     @StateObject private var stash: StashCoordinator
         @StateObject private var settings = AppSettings.shared
     @StateObject private var navigation = NavigationModel()
-    @StateObject private var monitor = PerformanceMonitor()
+    @StateObject private var widgets = WidgetManager.shared
     @StateObject private var scripts: ScriptLibrary
     @StateObject private var triggers: ScriptTriggerCoordinator
+    @StateObject private var metrics: MetricLibrary
+    @StateObject private var collector: MetricsCollector
+    @StateObject private var metricStore: MetricStoreBox
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-
-    /// Also used to find the window again when the app is reopened from the
-    /// Dock after its window was closed.
-    static let mainWindowTitle = "Gruppen"
 
     init() {
         // The panels need the engine and the store, so they are built here and
@@ -30,6 +29,13 @@ struct GruppenApp: App {
         let triggers = ScriptTriggerCoordinator(library: scripts)
         _scripts = StateObject(wrappedValue: scripts)
         _triggers = StateObject(wrappedValue: triggers)
+
+        // Metrics: definitions in JSON, captured rows in SQLite.
+        let metrics = MetricLibrary()
+        let metricStore = MetricStore()
+        _metrics = StateObject(wrappedValue: metrics)
+        _metricStore = StateObject(wrappedValue: MetricStoreBox(metricStore))
+        _collector = StateObject(wrappedValue: MetricsCollector(library: metrics, store: metricStore))
     }
 
     private func applyStashSetting() {
@@ -37,15 +43,18 @@ struct GruppenApp: App {
     }
 
     var body: some Scene {
-        Window(Self.mainWindowTitle, id: WindowID.main) {
+        Window(WindowID.mainWindowTitle, id: WindowID.main) {
             RootView()
                 .environmentObject(store)
                 .environmentObject(settings)
                 .environmentObject(navigation)
                 .environmentObject(stash)
-                .environmentObject(monitor)
+                .environmentObject(widgets)
                 .environmentObject(scripts)
                 .environmentObject(triggers)
+                .environmentObject(metrics)
+                .environmentObject(collector)
+                .environmentObject(metricStore)
                 .frame(minWidth: 860, minHeight: 560)
                 .onAppear {
                     settings.applyActivationPolicy()
@@ -54,12 +63,24 @@ struct GruppenApp: App {
                     // Arms whatever the library already had active. Nothing runs
                     // until one of those events actually fires.
                     triggers.rearm()
+                    collector.rearm()
+                    // The menu bar is `NSStatusItem`s rather than a
+                    // `MenuBarExtra`, because that scene type owns exactly one
+                    // item and the point is to have several. It lives outside
+                    // the scene graph, so it is handed what its panel needs.
+                    MenuBarManager.shared.attach(store: store,
+                                                 navigation: navigation,
+                                                 settings: settings)
                     AppDelegate.willTerminate = {
                         stash.disable()
                         triggers.disarm()
+                        collector.disarm()
+                        widgets.shutdown()
+                        MenuBarManager.shared.shutdown()
                     }
                 }
                 .onChange(of: settings.stashEnabled) { _ in applyStashSetting() }
+                .onChange(of: settings.showMenuBar) { _ in MenuBarManager.shared.reconcile() }
         }
         .defaultSize(width: 1040, height: 740)
         .windowStyle(.hiddenTitleBar)
@@ -81,89 +102,10 @@ struct GruppenApp: App {
             }
         }
 
-        MenuBarExtra(isInserted: Binding(
-            get: { settings.showMenuBar },
-            set: { if $0 != settings.showMenuBar { settings.showMenuBar = $0 } }
-        )) {
-            MenuBarContent()
-                .environmentObject(store)
-                .environmentObject(navigation)
-                .environmentObject(stash)
-                .environmentObject(settings)
-                .environmentObject(monitor)
-        } label: {
-            Image(systemName: "square.stack.3d.up.fill")
-        }
     }
 }
 
-// MARK: - Menu bar
-
-private struct MenuBarContent: View {
-    @EnvironmentObject private var store: GroupStore
-    @EnvironmentObject private var navigation: NavigationModel
-    @EnvironmentObject private var stash: StashCoordinator
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var monitor: PerformanceMonitor
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        if settings.showPerformanceMonitor {
-            // A bare Text in a menu still highlights on hover even though it
-            // does nothing. A Section header is inert by construction.
-            Section { EmptyView() } header: { PerformanceReadout() }
-            Divider()
-        }
-
-        if store.groups.isEmpty {
-            Text("No Gruppen yet")
-        } else {
-            ForEach(store.groups) { group in
-                Button {
-                    store.toggle(group)
-                } label: {
-                    Text("\(store.primaryAction(for: group).label) \(group.name)")
-                }
-                .disabled(group.apps.isEmpty)
-            }
-        }
-
-        Divider()
-        Button("Open Gruppen") {
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: WindowID.main)
-        }
-        Button("Konfiguration…") {
-            navigation.select(.settings)
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: WindowID.main)
-        }
-        Divider()
-        Button("Quit Gruppen") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
-    }
-
-}
-
-/// The CPU/RAM line in the menu bar dropdown.
-///
-/// The figure is read *as this line is built*, which is the only way it is ever
-/// current: while an `NSMenu` is tracking the mouse, SwiftUI does not reliably
-/// run an update pass, so a readout waiting on a `@Published` sample showed its
-/// placeholder and nothing else, forever. Building the string from a live
-/// reading means the menu always opens on a real number. `onAppear` still leases
-/// the timer, so the line also ticks over if an update does get through.
-private struct PerformanceReadout: View {
-    @EnvironmentObject private var monitor: PerformanceMonitor
-
-    var body: some View {
-        Text(text)
-            .onAppear { monitor.begin() }
-            .onDisappear { monitor.end() }
-    }
-
-    private var text: String {
-        let sample = monitor.reading()
-        return "CPU \(sample.cpuDescription)   RAM \(sample.memoryDescription)   \(sample.threadCount) threads"
-    }
-}
+// The menu bar dropdown lives in `Sources/Pages/Telemetry/MonitorPanel.swift`.
+// It replaced an `NSMenu` full of `Section` headers, and with it the old
+// `PerformanceMonitor` — its three figures are now the `.footprint` module,
+// on the same demand-driven footing as everything else in the panel.

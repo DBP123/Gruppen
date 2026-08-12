@@ -73,11 +73,6 @@ struct ScriptBuilderView: View {
             Text("No scripts yet")
                 .font(Theme.sans(13))
                 .foregroundStyle(Theme.textSecondary)
-            Text("A script runs on an event you choose and is not tied to a Gruppe.")
-                .font(Theme.mono(10))
-                .foregroundStyle(Theme.textMuted)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

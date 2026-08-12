@@ -116,6 +116,13 @@ enum Theme {
     static let machined = Color(hex: 0x0D0D0F)
     static let machinedBorder = Color(hex: 0x1A1A1C)
 
+    /// Milled-aluminium housing, and the lit edge along its top lip. Used by
+    /// the menu bar monitor, which is a piece of equipment rather than a page.
+    static let housing = Color(hex: 0x09090B)
+    static let housingEdge = Color(hex: 0x2C2C2E)
+    /// A data well: instrument glass, darker than anything around it.
+    static let well = Color.black
+
     // Borders
     static let borderSubtle = Color.white.opacity(0.07)
     static let borderStrong = Color.white.opacity(0.14)
