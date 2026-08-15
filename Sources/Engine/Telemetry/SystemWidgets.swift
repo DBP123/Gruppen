@@ -23,6 +23,19 @@ final class MemorySampler: TelemetrySampler {
         /// File-backed pages the kernel is keeping around; reclaimable.
         var cached: UInt64
         var swapUsed: UInt64
+        var swapTotal: UInt64
+        /// Pages per second moving between RAM and disk. The figure that says
+        /// whether "memory is full" actually costs you anything: a machine can
+        /// sit at 95% used and page nothing, and that is fine.
+        var pageInRate: Double
+        var pageOutRate: Double
+        /// Compressor activity, same units.
+        var compressRate: Double
+        var decompressRate: Double
+        /// Pages the kernel had to take back from a process, per second.
+        var faultRate: Double
+        /// The five processes holding the most memory, largest first.
+        var consumers: [MemoryConsumer] = []
 
         var used: UInt64 { wired &+ app &+ compressed }
         var usedFraction: Double { total > 0 ? Double(used) / Double(total) : 0 }
@@ -44,6 +57,49 @@ final class MemorySampler: TelemetrySampler {
         return value
     }()
 
+    /// The cumulative counters a rate is differenced against. `vm_statistics64`
+    /// reports these as totals since boot, so a rate needs the previous pass —
+    /// which is why they live on the sampler and not in the reading.
+    private struct Counters {
+        var pageIns: UInt64
+        var pageOuts: UInt64
+        var compressions: UInt64
+        var decompressions: UInt64
+        var faults: UInt64
+    }
+
+    private var previous: (counters: Counters, at: Date)?
+
+    /// One process's memory footprint.
+    struct MemoryConsumer: Equatable, Identifiable {
+        var pid: pid_t
+        var name: String
+        var footprint: UInt64
+        var id: pid_t { pid }
+    }
+
+    /// The heaviest processes by phys_footprint — the same figure Activity
+    /// Monitor's "Memory" column shows, and the one that actually corresponds to
+    /// pressure on the machine.
+    private static func consumers() -> [MemoryConsumer] {
+        var pids = [pid_t](repeating: 0, count: 8192)
+        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return [] }
+
+        var rows: [MemoryConsumer] = []
+        var nameBuffer = [CChar](repeating: 0, count: 256)
+        for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
+            let pid = pids[index]
+            guard pid > 0, let usage = processUsage(of: pid), usage.ri_phys_footprint > 0 else { continue }
+            guard proc_name(pid, &nameBuffer, 256) > 0 else { continue }
+            rows.append(MemoryConsumer(pid: pid,
+                                       name: String(cString: nameBuffer),
+                                       footprint: usage.ri_phys_footprint))
+        }
+        rows.sort { $0.footprint > $1.footprint }
+        return Array(rows.prefix(5))
+    }
+
     func sample() -> Reading? {
         var stats = vm_statistics64()
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size)
@@ -61,14 +117,46 @@ final class MemorySampler: TelemetrySampler {
                                                                 UInt64(stats.internal_page_count))
         var swap = xsw_usage()
         var swapSize = MemoryLayout<xsw_usage>.size
-        let swapUsed = sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0 ? swap.xsu_used : 0
+        let hasSwap = sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0
+
+        let now = Date()
+        let counters = Counters(pageIns: stats.pageins,
+                                pageOuts: stats.pageouts,
+                                compressions: stats.compressions,
+                                decompressions: stats.decompressions,
+                                faults: UInt64(stats.faults))
+        defer { previous = (counters, now) }
+
+        // First tick is a baseline: rates read zero rather than reporting the
+        // machine's entire uptime as though it had just happened.
+        var rates = (into: 0.0, out: 0.0, compress: 0.0, decompress: 0.0, fault: 0.0)
+        if let previous {
+            let elapsed = now.timeIntervalSince(previous.at)
+            if elapsed > 0.05 {
+                func rate(_ new: UInt64, _ old: UInt64) -> Double {
+                    new >= old ? Double(new - old) / elapsed : 0
+                }
+                rates = (rate(counters.pageIns, previous.counters.pageIns),
+                         rate(counters.pageOuts, previous.counters.pageOuts),
+                         rate(counters.compressions, previous.counters.compressions),
+                         rate(counters.decompressions, previous.counters.decompressions),
+                         rate(counters.faults, previous.counters.faults))
+            }
+        }
 
         return Reading(total: Self.installed,
                        wired: UInt64(stats.wire_count) &* page,
                        app: anonymous &* page,
                        compressed: UInt64(stats.compressor_page_count) &* page,
                        cached: (UInt64(stats.external_page_count) &+ UInt64(stats.purgeable_count)) &* page,
-                       swapUsed: swapUsed)
+                       swapUsed: hasSwap ? swap.xsu_used : 0,
+                       swapTotal: hasSwap ? swap.xsu_total : 0,
+                       pageInRate: rates.into,
+                       pageOutRate: rates.out,
+                       compressRate: rates.compress,
+                       decompressRate: rates.decompress,
+                       faultRate: rates.fault,
+                       consumers: Self.consumers())
     }
 }
 
@@ -79,7 +167,12 @@ final class MemoryTelemetryWidget: TelemetryModule<MemorySampler> {
     override func historyValue(for reading: MemorySampler.Reading) -> Double? { reading.usedFraction }
 
     override var pinnedSummary: String? {
-        reading.map { "MEM \(Format.bytes($0.used))" }
+        reading.map { Format.bytes($0.used) }
+    }
+
+    /// In use, over the part of it that is wired and cannot be handed back.
+    override var pinnedStack: (String, String)? {
+        reading.map { (Format.bytes($0.used), "W \(Format.bytes($0.wired))") }
     }
 }
 
@@ -99,6 +192,9 @@ final class NetworkSampler: TelemetrySampler {
         var downTotal: UInt64
         var upTotal: UInt64
         var interfaces: Int
+        /// Who is actually using it, busiest first. Empty when per-process
+        /// attribution is unavailable — see `NetworkTalkers`.
+        var talkers: [NetworkTalkers.Talker] = []
     }
 
     /// `IFT_ETHER`. Wired and wireless links both report as this; tunnels,
@@ -107,9 +203,28 @@ final class NetworkSampler: TelemetrySampler {
     private static let ethernet: UInt8 = 0x06
 
     private var previous: (down: UInt64, up: UInt64, at: Date)?
+    /// The per-process subscription is opened on the first sample and closed by
+    /// `teardown`, on the same terms as every other kernel object here.
+    private var attribution = false
+
+    func teardown() {
+        guard attribution else { return }
+        attribution = false
+        NetworkTalkers.shared?.stop()
+    }
+
+    deinit {
+        guard attribution else { return }
+        Telemetry.queue.async { NetworkTalkers.shared?.stop() }
+    }
 
     func sample() -> Reading? {
         guard let (down, up, interfaces) = Self.counters() else { return nil }
+        if !attribution {
+            attribution = true
+            NetworkTalkers.shared?.start()
+        }
+        let talkers = NetworkTalkers.shared?.sample() ?? []
         let now = Date()
         defer { previous = (down, up, now) }
         guard let previous else { return nil }
@@ -125,7 +240,8 @@ final class NetworkSampler: TelemetrySampler {
                        up: Double(upDelta) / elapsed,
                        downTotal: down,
                        upTotal: up,
-                       interfaces: interfaces)
+                       interfaces: interfaces,
+                       talkers: Array(talkers.prefix(5)))
     }
 
     private static func counters() -> (UInt64, UInt64, Int)? {
@@ -191,6 +307,13 @@ final class NetworkTelemetryWidget: TelemetryModule<NetworkSampler> {
     override var pinnedSummary: String? {
         reading.map { "↓\(Format.rate($0.down)) ↑\(Format.rate($0.up))" }
     }
+
+    /// Down over up. This is the module the stacked mode exists for: the two
+    /// rates side by side take a fifth of a menu bar, and one above the other
+    /// takes a tenth of it.
+    override var pinnedStack: (String, String)? {
+        reading.map { ("↓\(Format.rate($0.down))", "↑\(Format.rate($0.up))") }
+    }
 }
 
 // MARK: - Thermal and power
@@ -211,13 +334,16 @@ final class ThermalSampler: TelemetrySampler {
         var isCharging: Bool
         var onExternalPower: Bool
         var minutesRemaining: Int?
-        /// Degrees Celsius off the SMC, hottest sensor in each cluster.
-        var performanceCores: Double?
-        var efficiencyCores: Double?
-        var graphics: Double?
+        /// Named zones off the SMC, each carrying the key it was read from.
+        var cpuDie: AppleSiliconTelemetry.Zone?
+        var efficiencyCores: AppleSiliconTelemetry.Zone?
+        var gpuDie: AppleSiliconTelemetry.Zone?
+        var batteryDie: AppleSiliconTelemetry.Zone?
         /// Watts drawn by the whole machine.
         var systemPower: Double?
-        var fans: [Double] = []
+        /// Actual against commanded speed, per fan.
+        var fans: [AppleSiliconTelemetry.Fan] = []
+
 
         var stateLabel: String {
             switch state {
@@ -230,8 +356,15 @@ final class ThermalSampler: TelemetrySampler {
         }
 
         /// The figure a reader actually wants: the hottest cluster on the die.
-        var hottest: Double? {
-            [performanceCores, efficiencyCores, graphics].compactMap { $0 }.max()
+        var hottest: Double? { hottestZone?.celsius }
+
+        /// The hottest zone, and the human name for whichever one it is.
+        var hottestZone: (label: String, celsius: Double)? {
+            let zones: [(String, AppleSiliconTelemetry.Zone?)] = [
+                ("CPU", cpuDie), ("EFF", efficiencyCores), ("GPU", gpuDie),
+            ]
+            return zones.compactMap { label, zone in zone.map { (label, $0.celsius) } }
+                .max { $0.1 < $1.1 }
         }
 
         /// 0…1, for the segmented gauge.
@@ -279,12 +412,14 @@ final class ThermalSampler: TelemetrySampler {
             AppleSiliconTelemetry.shared.acquire()
         }
         if let zones = AppleSiliconTelemetry.shared.thermal() {
-            reading.performanceCores = zones.performanceCores
+            reading.cpuDie = zones.cpuDie
             reading.efficiencyCores = zones.efficiencyCores
-            reading.graphics = zones.graphics
+            reading.gpuDie = zones.gpuDie
+            reading.batteryDie = zones.battery
             reading.systemPower = zones.systemPower
             reading.fans = zones.fans
         }
+
 
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
@@ -314,16 +449,31 @@ final class ThermalTelemetryWidget: TelemetryModule<ThermalSampler> {
     init() { super.init(kind: .thermal, sampler: ThermalSampler()) }
 
     override func historyValue(for reading: ThermalSampler.Reading) -> Double? {
-        reading.performanceCores
+        reading.cpuDie?.celsius
     }
 
     /// A die temperature is the thing worth two centimetres of menu bar; the
     /// pressure state is the fallback on a machine with no readable sensors.
     override var pinnedSummary: String? {
         guard let reading else { return nil }
-        if let hottest = reading.hottest { return String(format: "%.0f°C", hottest) }
-        if let percent = reading.batteryPercent { return "\(reading.stateLabel) \(percent)%" }
+        // Which sensor, not just a floating number: on a machine where the GPU
+        // is the hottest thing, "48°C" and "GPU 48°C" are different statements.
+        if let zone = reading.hottestZone {
+            return String(format: "%@ %.0f°C", zone.label, zone.celsius)
+        }
+        // No readable sensors: the pressure state on its own. The battery used
+        // to be appended here and is now the second line of the stacked form,
+        // which is what keeps this inside the item's fixed width.
         return reading.stateLabel
+    }
+
+    /// Temperature over draw — the two halves of the same question.
+    override var pinnedStack: (String, String)? {
+        guard let reading else { return nil }
+        let top = reading.hottest.map { String(format: "%.0f°C", $0) } ?? reading.stateLabel
+        if let watts = reading.systemPower { return (top, String(format: "%.1f W", watts)) }
+        if let percent = reading.batteryPercent { return (top, "BAT \(percent)%") }
+        return (top, reading.stateLabel)
     }
 }
 
@@ -342,12 +492,21 @@ final class SiliconSampler: TelemetrySampler {
         var renderer: Double
         var tiler: Double
         var gpuMemory: UInt64
+        var coreCount: Int = 0
         var neuralEngine: AppleSiliconTelemetry.EngineState?
         var videoEngine: AppleSiliconTelemetry.EngineState?
         var imageEngine: AppleSiliconTelemetry.EngineState?
     }
 
     private var hardware = false
+
+    /// Apple Silicon has no separate video memory — the GPU allocates from the
+    /// same unified pool as everything else, so the ceiling a VRAM figure should
+    /// be read against is the installed RAM.
+    static var memoryPool: UInt64 { MemorySampler.installed }
+
+    /// GPU core count, read once from the device tree.
+    static let cores: Int = AppleSiliconTelemetry.graphicsCoreCount
 
     func teardown() {
         guard hardware else { return }
@@ -375,6 +534,7 @@ final class SiliconSampler: TelemetrySampler {
                        renderer: graphics.rendererUtilization,
                        tiler: graphics.tilerUtilization,
                        gpuMemory: graphics.memoryInUse,
+                       coreCount: Self.cores,
                        neuralEngine: silicon.neuralEngineState(),
                        videoEngine: silicon.videoEngineState(),
                        imageEngine: silicon.imageEngineState())
@@ -388,7 +548,12 @@ final class SiliconTelemetryWidget: TelemetryModule<SiliconSampler> {
     override func historyValue(for reading: SiliconSampler.Reading) -> Double? { reading.gpu }
 
     override var pinnedSummary: String? {
-        reading.map { String(format: "GPU %.0f%%", $0.gpu * 100) }
+        reading.map { String(format: "%.0f%%", $0.gpu * 100) }
+    }
+
+    /// Load over the memory the accelerator is holding.
+    override var pinnedStack: (String, String)? {
+        reading.map { (String(format: "GPU %.0f%%", $0.gpu * 100), Format.bytes($0.gpuMemory)) }
     }
 }
 
@@ -593,6 +758,19 @@ enum Format {
         if value < 1_000_000 { return String(format: "%.0f KB/s", value / 1_000) }
         if value < 1_000_000_000 { return String(format: "%.1f MB/s", value / 1_000_000) }
         return String(format: "%.2f GB/s", value / 1_000_000_000)
+    }
+
+    /// Thousands separated, for counts that run to four digits.
+    static func count(_ value: Int) -> String {
+        guard value >= 1000 else { return "\(value)" }
+        return "\(value / 1000),\(String(format: "%03d", value % 1000))"
+    }
+
+    /// Thousands separated, because a four-digit RPM reads as a year otherwise.
+    static func rpm(_ value: Double) -> String {
+        let rounded = Int(max(value, 0).rounded())
+        guard rounded >= 1000 else { return "\(rounded)" }
+        return "\(rounded / 1000),\(String(format: "%03d", rounded % 1000))"
     }
 
     static func percent(_ fraction: Double, decimals: Int = 0) -> String {

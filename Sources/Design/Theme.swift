@@ -122,6 +122,26 @@ enum Theme {
     static let housingEdge = Color(hex: 0x2C2C2E)
     /// A data well: instrument glass, darker than anything around it.
     static let well = Color.black
+    /// The trace colour every plot is drawn in. Emerald rather than the panel's
+    /// orange: orange is what this app uses for *controls the user has armed*,
+    /// and a line that is merely reporting should not read as a switch being on.
+    static let trace = Color(hex: 0x10B981)
+    /// Performance cores, and anything else that wants to read as the *fast*
+    /// half of a pair next to `trace`.
+    static let cyan = Color(hex: 0x00F0FF)
+    /// The two warning steps for threshold gating. Amber is "working", crimson
+    /// is "past where you want it".
+    static let purple = Color(hex: 0xA855F7)
+    static let blue = Color(hex: 0x3B82F6)
+    static let amber = Color(hex: 0xF5A524)
+    /// The battery's own palette, from the state matrix: a neutral shell, and
+    /// three fill steps that say how much is left without reading the number.
+    static let cellShell = Color(hex: 0x8E8E93)
+    static let cellHigh = Color(hex: 0x22C55E)
+    static let cellMedium = Color(hex: 0xEAB308)
+    static let cellLow = Color(hex: 0xEF4444)
+    static let cellHold = Color(hex: 0xF59E0B)
+    static let crimson = Color(hex: 0xE0245E)
 
     // Borders
     static let borderSubtle = Color.white.opacity(0.07)
@@ -145,6 +165,19 @@ enum Theme {
     static let red = Color(hex: 0xFF5F56)
     /// Near-black on orange measures 5.95:1; the spec's white was 3.30:1.
     static let onAccent = Color(hex: 0x0A0B0D)
+
+    /// A module's domain colour, from `WidgetKind.domainIndex`. Thermal (4)
+    /// has no fixed colour — it is gated on temperature — so it falls back to
+    /// the neutral trace and callers override it.
+    static func domain(_ index: Int) -> Color {
+        switch index {
+        case 0: return cyan
+        case 1: return purple
+        case 2: return trace
+        case 3: return blue
+        default: return trace
+        }
+    }
 
     static let radiusSm: CGFloat = 4
     static let radiusMd: CGFloat = 8

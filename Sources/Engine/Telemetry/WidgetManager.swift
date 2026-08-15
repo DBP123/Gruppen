@@ -31,6 +31,9 @@ final class WidgetManager: ObservableObject {
     @Published private(set) var panelVisible: Set<WidgetKind>
     /// Modules carrying their own standalone item in the menu bar.
     @Published private(set) var menuBarPinned: Set<WidgetKind>
+    /// How each pinned module draws its item. Only holds the ones the user has
+    /// actually chosen; everything else falls back to the module's default.
+    @Published private(set) var menuBarModes: [WidgetKind: MenuBarDisplayMode]
     @Published private(set) var isPanelOpen = false
 
     /// Instantiated modules — and *only* the instantiated ones. A kind missing
@@ -45,6 +48,7 @@ final class WidgetManager: ObservableObject {
         static let telemetry = "monitorArmedWidgets"
         static let panel = "monitorEnabledWidgets"
         static let pinned = "monitorPinnedWidgets"
+        static let modes = "monitorMenuBarModes"
     }
 
     private let defaults = UserDefaults.standard
@@ -61,6 +65,14 @@ final class WidgetManager: ObservableObject {
         telemetryEnabled = stored(Keys.telemetry) ?? Set(WidgetKind.configurable)
         panelVisible = stored(Keys.panel) ?? initial
         menuBarPinned = stored(Keys.pinned) ?? []
+
+        let rawModes = store.dictionary(forKey: Keys.modes) as? [String: String] ?? [:]
+        menuBarModes = Dictionary(uniqueKeysWithValues: rawModes.compactMap {
+            (key, value) -> (WidgetKind, MenuBarDisplayMode)? in
+            guard let kind = WidgetKind(rawValue: key),
+                  let mode = MenuBarDisplayMode(rawValue: value) else { return nil }
+            return (kind, mode)
+        })
 
         // The master switch lives in `AppSettings` with the rest of the
         // preferences. It posts on change, so this needs no polling and no
@@ -95,6 +107,34 @@ final class WidgetManager: ObservableObject {
     }
 
     // MARK: Demand
+
+    /// Modules whose own popover is open right now.
+    ///
+    /// Separate from `isPanelOpen`, because each standalone menu bar item has
+    /// its own popover showing only its own module. Opening one raises exactly
+    /// that module to the interactive rate and leaves every other module where
+    /// it was.
+    @Published private(set) var openDetails: Set<WidgetKind> = []
+
+    func detailDidOpen(_ kind: WidgetKind) {
+        guard !openDetails.contains(kind) else { return }
+        openDetails.insert(kind)
+        reconcile()
+    }
+
+    func detailDidClose(_ kind: WidgetKind) {
+        guard openDetails.contains(kind) else { return }
+        openDetails.remove(kind)
+        reconcile()
+    }
+
+    /// Brings the modules in line with the stored preferences.
+    ///
+    /// Called once at launch. Without it a module pinned to the menu bar has an
+    /// item but no sampler behind it until something else — opening the panel,
+    /// touching a switch — happens to reconcile, and until then the item sits on
+    /// a dash for however long the app is left alone.
+    func start() { reconcile() }
 
     func panelDidOpen() {
         guard !isPanelOpen else { return }
@@ -133,6 +173,24 @@ final class WidgetManager: ObservableObject {
         reconcile()
     }
 
+    /// How a pinned module draws its menu bar item.
+    func mode(for kind: WidgetKind) -> MenuBarDisplayMode {
+        menuBarModes[kind] ?? kind.defaultMenuBarMode
+    }
+
+    /// Changing this rebuilds the item's contents and its fixed width, and
+    /// nothing else — the module underneath is untouched, still sampling at the
+    /// same rate it was.
+    func setMode(_ newMode: MenuBarDisplayMode, for kind: WidgetKind) {
+        guard kind.isPinnable, mode(for: kind) != newMode else { return }
+        var result = menuBarModes
+        result[kind] = newMode
+        menuBarModes = result
+        defaults.set(Dictionary(uniqueKeysWithValues: result.map { ($0.key.rawValue, $0.value.rawValue) }),
+                     forKey: Keys.modes)
+        onModulesChanged?()
+    }
+
     /// Returns the new set and writes it out. Deliberately *not* an `inout`
     /// helper that also reconciles: `@Published` is a property wrapper, so an
     /// inout access is a get-modify-set around a temporary, and calling
@@ -153,21 +211,20 @@ final class WidgetManager: ObservableObject {
         modules[kind] as? T
     }
 
-    /// Calls back whenever a live module publishes, with the one-liner and the
-    /// figure a menu bar item shows. Replaces any previous observer.
-    func observe(_ kind: WidgetKind, _ handler: @escaping (String, Double?) -> Void) {
+    /// Calls back whenever a live module publishes, with everything a menu bar
+    /// item could draw. Replaces any previous observer.
+    func observe(_ kind: WidgetKind, _ handler: @escaping (MenuBarSample) -> Void) {
         guard let module = modules[kind] else { return }
         module.onPublish = { [weak module] in
-            guard let module, let summary = module.pinnedSummary else { return }
-            handler(summary, module.pinnedValue)
+            guard let sample = module?.menuBarSample else { return }
+            handler(sample)
         }
     }
 
-    /// The current one-liner, for an item that has just been created and has no
+    /// The current reading, for an item that has just been created and has no
     /// reason to sit on a dash until the next tick.
-    func currentSummary(_ kind: WidgetKind) -> (String, Double?)? {
-        guard let module = modules[kind], let summary = module.pinnedSummary else { return nil }
-        return (summary, module.pinnedValue)
+    func currentSample(_ kind: WidgetKind) -> MenuBarSample? {
+        modules[kind]?.menuBarSample
     }
 
     /// Whether a module is alive right now. Exists for the test harness, which
@@ -183,7 +240,12 @@ final class WidgetManager: ObservableObject {
         let inPanel = panelOrder
 
         for kind in WidgetKind.allCases {
-            let panelActive = isPanelOpen && (kind == .footprint ? monitorEnabled : inPanel.contains(kind))
+            let inSharedPanel = isPanelOpen && (kind == .footprint ? monitorEnabled : inPanel.contains(kind))
+            // A module's own popover is as good a reason to be live as the
+            // shared panel, and it is the only reason for modules the user has
+            // taken out of that panel entirely.
+            let inOwnPopover = monitorEnabled && telemetryEnabled.contains(kind) && openDetails.contains(kind)
+            let panelActive = inSharedPanel || inOwnPopover
             let barPinned = pinned.contains(kind)
 
             guard panelActive || barPinned else {
@@ -210,6 +272,8 @@ final class WidgetManager: ObservableObject {
         case .memory: return MemoryTelemetryWidget()
         case .network: return NetworkTelemetryWidget()
         case .thermal: return ThermalTelemetryWidget()
+        case .power: return PowerTelemetryWidget()
+        case .storage: return StorageTelemetryWidget()
         case .processes: return ProcessTelemetryWidget()
         case .footprint: return FootprintTelemetryWidget()
         }
@@ -219,6 +283,7 @@ final class WidgetManager: ObservableObject {
     /// harness between cases.
     func shutdown() {
         isPanelOpen = false
+        openDetails.removeAll()
         for (_, module) in modules { module.stopFetching() }
         modules.removeAll()
         onModulesChanged?()

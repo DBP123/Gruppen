@@ -18,7 +18,7 @@ struct SidebarView: View {
             brand
 
             VStack(spacing: 4) {
-                ForEach(Page.allCases) { page in
+                ForEach(Page.available) { page in
                     SidebarItem(page: page,
                                 selected: navigation.page == page,
                                 collapsed: collapsed) {

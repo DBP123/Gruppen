@@ -20,8 +20,9 @@ enum Telemetry {
     /// with the app it is monitoring reports its own interference.
     static let queue = DispatchQueue(label: "com.dhilanpatel.gruppen.telemetry", qos: .utility)
 
-    /// Points kept for a sparkline. At the panel's 2 Hz that is 24 seconds.
-    static let historyLength = 48
+    /// Points kept for a sparkline: sixty, which is the window the plots
+    /// normalise across and thirty seconds at the panel's 2 Hz.
+    static let historyLength = 60
 
     /// The dropdown is open: 2 Hz.
     static let panelRate: TimeInterval = 0.5
@@ -36,6 +37,8 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
     case memory
     case network
     case thermal
+    case power
+    case storage
     case processes
     /// Gruppen's own footprint. Part of the panel's chrome rather than a module
     /// the user arranges, so it is neither hideable nor pinnable.
@@ -49,7 +52,9 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
         case .silicon: return "Graphics & Engines"
         case .memory: return "Memory"
         case .network: return "Network"
-        case .thermal: return "Thermal & Power"
+        case .thermal: return "Thermal"
+        case .power: return "Power & Battery"
+        case .storage: return "Storage"
         case .processes: return "Processes"
         case .footprint: return "Gruppen"
         }
@@ -62,7 +67,9 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
         case .silicon: return "GPU / ENGINES"
         case .memory: return "MEMORY"
         case .network: return "NETWORK"
-        case .thermal: return "THERMAL / POWER"
+        case .thermal: return "THERMAL"
+        case .power: return "POWER / BATTERY"
+        case .storage: return "STORAGE / NVME"
         case .processes: return "PROCESSES"
         case .footprint: return "GRUPPEN"
         }
@@ -75,6 +82,8 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
         case .memory: return "memorychip"
         case .network: return "network"
         case .thermal: return "thermometer.medium"
+        case .power: return "bolt.fill"
+        case .storage: return "internaldrive"
         case .processes: return "list.bullet.rectangle"
         case .footprint: return "square.stack.3d.up.fill"
         }
@@ -86,7 +95,9 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
         case .silicon: return "GPU utilisation, and whether the Neural and media engines are awake"
         case .memory: return "Wired, app, compressed and swap against installed RAM"
         case .network: return "Throughput across every active interface"
-        case .thermal: return "Cluster die temperatures, system draw, thermal pressure and battery"
+        case .thermal: return "Die temperatures across every sensor group, and fan speeds"
+        case .power: return "System draw, battery flow, charge state and cell health"
+        case .storage: return "APFS capacity, live read and write throughput, and drive identity"
         case .processes: return "The five processes using the most CPU right now"
         case .footprint: return "What Gruppen itself is costing you"
         }
@@ -98,6 +109,67 @@ enum WidgetKind: String, CaseIterable, Identifiable, Codable {
     /// Process rows are a table; there is no sensible one-line form for the
     /// menu bar, so this one cannot be pinned.
     var isPinnable: Bool { isConfigurable && self != .processes }
+
+    /// The smallest range a plot will scale itself to.
+    ///
+    /// Plots here are normalised across the window — `(value − min) / (max −
+    /// min)` — so a processor moving between 5% and 8% uses the full height of
+    /// the graph instead of hugging the bottom of a 0–100 scale. That is the
+    /// whole point, and it is also the whole danger: applied literally, a
+    /// machine sitting at 0.2% turns a tenth of a percent of noise into a
+    /// full-height sawtooth, which is a graph that looks alarming and says
+    /// nothing.
+    ///
+    /// So the denominator has a floor. Below it the trace flattens out, which
+    /// is the honest picture of a quantity that is not moving; above it the
+    /// normalisation takes over completely. Three points of CPU is deliberately
+    /// small enough that the 5%-to-8% case still fills the frame.
+    var plotFloor: Double {
+        switch self {
+        case .cpu, .silicon, .memory: return 0.03     // 3 percentage points
+        case .thermal: return 2                       // 2 °C
+        case .power: return 2                         // 2 W
+        case .storage: return 1_000_000               // 1 MB/s
+        case .network: return 50_000                  // 50 KB/s
+        case .processes, .footprint: return 0.03
+        }
+    }
+
+    /// The three-letter tag a menu bar item wears, so a number in the menu bar
+    /// is never a mystery. Three characters exactly: the badge is a fixed width
+    /// and a four-letter one would either clip or resize the item.
+    var badge: String {
+        switch self {
+        case .cpu: return "CPU"
+        case .silicon: return "GPU"
+        case .memory: return "MEM"
+        case .network: return "NET"
+        case .thermal: return "TMP"
+        case .power: return "PWR"
+        case .storage: return "SSD"
+        case .processes: return "PRC"
+        case .footprint: return "APP"
+        }
+    }
+
+    /// Which domain colour this module wears, as an index rather than a `Color`:
+    /// `WidgetKind` lives in the engine and must not reach into the design
+    /// layer. `Theme.domain(_:)` turns it back into a colour.
+    ///
+    /// Thermal is deliberately absent — its colour is a function of the
+    /// temperature, not of the module.
+    var domainIndex: Int {
+        switch self {
+        case .cpu: return 0            // cyan
+        case .silicon: return 1        // electric purple
+        case .memory: return 2         // emerald
+        case .network: return 3        // bright blue
+        case .thermal: return 4        // dynamic
+        case .power: return 2          // emerald
+        case .storage: return 0        // cyan
+        case .processes, .footprint: return 2
+        }
+    }
 
     static var configurable: [WidgetKind] { allCases.filter(\.isConfigurable) }
 }
@@ -115,8 +187,15 @@ protocol GruppenWidget: AnyObject {
     var isMenuBarPinned: Bool { get set }
     /// The menu bar one-liner, or nil while nothing has been read yet.
     var pinnedSummary: String? { get }
+    /// The two figures a stacked menu bar item shows, top over bottom.
+    var pinnedStack: (String, String)? { get }
+    /// Charge and power state, when the module has a battery to draw.
+    var pinnedBattery: (percent: Int, state: PowerFlow.State, condition: PowerFlow.Condition)? { get }
     /// The number a menu bar micro-graph plots, if this module has a shape.
     var pinnedValue: Double? { get }
+    /// Everything a menu bar item can draw, in one value. Nil until the module
+    /// has read something.
+    var menuBarSample: MenuBarSample? { get }
     /// Run after every published reading. This is what lets a standalone menu
     /// bar item update without a clock of its own.
     var onPublish: (() -> Void)? { get set }
@@ -242,6 +321,45 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
 
     var pinnedSummary: String? { nil }
 
+    var pinnedStack: (String, String)? { nil }
+
+    /// Charge and state, for the one module that draws a battery.
+    var pinnedBattery: (percent: Int, state: PowerFlow.State, condition: PowerFlow.Condition)? { nil }
+
     /// The newest plotted point, which is what a menu bar graph wants.
     var pinnedValue: Double? { history.last }
+
+    /// Assembled once per reading rather than three times per redraw check.
+    var menuBarSample: MenuBarSample? {
+        guard let summary = pinnedSummary else { return nil }
+        let stack = pinnedStack
+        return MenuBarSample(summary: summary,
+                             top: stack?.0,
+                             bottom: stack?.1,
+                             value: pinnedValue,
+                             batteryPercent: pinnedBattery?.percent,
+                             powerState: pinnedBattery?.state,
+                             condition: pinnedBattery?.condition)
+    }
+}
+
+/// A reading reduced to exactly what a menu bar item is able to draw.
+///
+/// The three forms travel together because the item can be switched between
+/// them at any moment, and a form that was not on screen when it changed must
+/// still be current the instant it becomes visible — without having published
+/// anything in the meantime.
+struct MenuBarSample: Equatable {
+    /// The one-liner. What `.numeric` draws.
+    var summary: String
+    /// The two halves of `.stacked`, if the module has a second figure.
+    var top: String?
+    var bottom: String?
+    /// The point `.sparkline` plots.
+    var value: Double?
+    /// Charge and power state, for the battery item, which draws a cell rather
+    /// than a trace.
+    var batteryPercent: Int?
+    var powerState: PowerFlow.State?
+    var condition: PowerFlow.Condition?
 }

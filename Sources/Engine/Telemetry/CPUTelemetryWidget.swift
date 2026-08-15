@@ -22,11 +22,18 @@ final class CPUSampler: TelemetrySampler {
         /// cluster. Nil on a machine whose device tree does not split them.
         var performance: Double?
         var efficiency: Double?
+        /// The clusters themselves, core by core, in device-tree order. Empty on
+        /// a machine whose device tree does not name the clusters.
+        var performanceCores: [Double] = []
+        var efficiencyCores: [Double] = []
+        /// Threads and processes alive right now, across the whole machine.
+        var threads: Int
+        var processes: Int
 
         var busy: Double { min(user + system, 1) }
         var coreCount: Int { cores.count }
 
-        static let empty = Reading(user: 0, system: 0, cores: [])
+        static let empty = Reading(user: 0, system: 0, cores: [], threads: 0, processes: 0)
     }
 
     /// user, system, idle, nice — the four states we read, per core.
@@ -83,11 +90,44 @@ final class CPUSampler: TelemetrySampler {
             values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
         }
 
+        let census = Self.census()
         return Reading(user: userTicks / allTicks,
                        system: systemTicks / allTicks,
                        cores: cores,
                        performance: mean(performance),
-                       efficiency: mean(efficiency))
+                       efficiency: mean(efficiency),
+                       performanceCores: performance,
+                       efficiencyCores: efficiency,
+                       threads: census.threads,
+                       processes: census.processes)
+    }
+
+    /// Threads and processes alive across the machine.
+    ///
+    /// There is no single call for this — the kernel will tell you about one
+    /// task at a time and no more, so Activity Monitor's thread count is a
+    /// sweep, and so is this one. `PROC_PIDTASKINFO` is the cheap half of
+    /// `proc_pidinfo`: it does not touch the process's memory maps, which is
+    /// what makes ~190 of them affordable at 2 Hz. Measured at 0.4 ms.
+    private static func census() -> (threads: Int, processes: Int) {
+        var pids = [pid_t](repeating: 0, count: 8192)
+        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return (0, 0) }
+
+        var threads = 0, processes = 0
+        var info = proc_taskinfo()
+        let size = Int32(MemoryLayout<proc_taskinfo>.size)
+        for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
+            let pid = pids[index]
+            guard pid > 0 else { continue }
+            processes += 1
+            // Anything owned by another user simply refuses; it still counts as
+            // a process, it just cannot be asked how many threads it has.
+            if proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size {
+                threads += Int(info.pti_threadnum)
+            }
+        }
+        return (threads, processes)
     }
 
     private static func read() -> [Ticks]? {
@@ -139,6 +179,20 @@ final class CPUTelemetryWidget: TelemetryModule<CPUSampler> {
     override func historyValue(for reading: CPUSampler.Reading) -> Double? { reading.busy }
 
     override var pinnedSummary: String? {
-        reading.map { String(format: "CPU %.0f%%", $0.busy * 100) }
+        reading.map { String(format: "%.0f%%", $0.busy * 100) }
+    }
+
+    /// The clusters, when the device tree named them — that split is the most
+    /// useful thing two lines of menu bar can say about an Apple Silicon
+    /// processor, since a machine can be flat out on its efficiency cores and
+    /// barely warm. User and system time is the fallback elsewhere.
+    override var pinnedStack: (String, String)? {
+        guard let reading else { return nil }
+        if let performance = reading.performance, let efficiency = reading.efficiency {
+            return (String(format: "P %.0f%%", performance * 100),
+                    String(format: "E %.0f%%", efficiency * 100))
+        }
+        return (String(format: "USR %.0f%%", reading.user * 100),
+                String(format: "SYS %.0f%%", reading.system * 100))
     }
 }

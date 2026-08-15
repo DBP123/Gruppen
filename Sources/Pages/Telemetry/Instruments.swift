@@ -121,24 +121,42 @@ struct MicroStat: View {
 /// The series is drawn right-aligned, so a module that has only just started
 /// grows in from the right edge rather than stretching two points across the
 /// whole well.
-struct Sparkline: View {
+/// A trace, normalised across its own window.
+///
+/// The scale is `(value − min) / (max − min)` over the trailing sixty samples
+/// rather than a fixed 0–100. A processor idling between 5% and 8% used to draw
+/// a dead flat line along the bottom of a percentage scale; normalised, those
+/// three points fill the frame and you can see the shape of what the machine is
+/// doing. `plotFloor` stops that turning a motionless quantity into a
+/// full-height sawtooth of noise.
+///
+/// `Equatable` and rendered through `.equatable()`: the values are the whole of
+/// its state, so SwiftUI can skip the body entirely when they have not changed.
+struct Sparkline: View, Equatable {
     var values: [Double]
-    /// Ceiling for the vertical scale. Zero means "scale to the tallest sample",
-    /// which is what a throughput plot wants and a percentage plot does not.
-    var maximum: Double = 1
-    var tint: Color = Theme.orange
+    /// Smallest range the vertical scale will collapse to.
+    var floor: Double = 0.03
+    var tint: Color = Theme.trace
     var height: CGFloat = 26
+
+    static func == (a: Sparkline, b: Sparkline) -> Bool {
+        a.values == b.values && a.floor == b.floor && a.height == b.height
+    }
 
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
-            let ceiling = maximum > 0 ? maximum : max(values.max() ?? 1, 1)
-            let slots = max(Telemetry.historyLength - 1, 1)
+            let scaled = PlotScale.normalise(values, floor: floor)
+            let slots = max(PlotScale.window - 1, 1)
             let step = size.width / CGFloat(slots)
-            let points = values.enumerated().map { index, value -> CGPoint in
-                let slot = CGFloat(slots - (values.count - 1 - index))
-                let fraction = min(max(value / ceiling, 0), 1)
-                return CGPoint(x: slot * step, y: size.height * (1 - CGFloat(fraction)))
+            // Right-aligned: a half-filled history occupies the right-hand part
+            // of the frame rather than being stretched across all of it.
+            let points = scaled.enumerated().map { index, fraction -> CGPoint in
+                let slot = CGFloat(slots - (scaled.count - 1 - index))
+                // Half the stroke inset top and bottom, so a trace pinned to
+                // either edge is not sliced in half by the frame.
+                let usable = size.height - 1.5
+                return CGPoint(x: slot * step, y: 0.75 + usable * (1 - CGFloat(fraction)))
             }
 
             ZStack {
@@ -149,14 +167,14 @@ struct Sparkline: View {
                         path.addLine(to: CGPoint(x: points[points.count - 1].x, y: size.height))
                         path.closeSubpath()
                     }
-                    .fill(LinearGradient(colors: [tint.opacity(0.30), tint.opacity(0.02)],
+                    .fill(LinearGradient(colors: [tint.opacity(0.20), tint.opacity(0)],
                                          startPoint: .top, endPoint: .bottom))
 
                     Path { path in
                         path.move(to: points[0])
                         for point in points.dropFirst() { path.addLine(to: point) }
                     }
-                    .stroke(tint, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                    .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
                 }
             }
         }

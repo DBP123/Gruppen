@@ -49,7 +49,19 @@
       "Bash(screencapture -x -R 53,196,700,701 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings.png)",
       "Bash(screencapture -x -R 600,560,550,340 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings2.png)",
       "Bash(screencapture -x -R 640,700,510,300 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/settings2.png)",
-      "Bash(screencapture -x -R 750,0,762,36 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/strip.png)"
+      "Bash(screencapture -x -R 750,0,762,36 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/f093521a-9566-43e8-a383-12d881bd82d6/scratchpad/strip.png)",
+      "Read(//private/tmp/claude-501/-Users-dhilanpatel-Gruppen/**)",
+      "Bash(osascript -e 'quit app \"Gruppen\"')",
+      "Bash(defaults write *)",
+      "Bash(screencapture -x -R 1150,0,362,26 one.png)",
+      "Bash(sips -Z 1200 one.png)",
+      "Bash(screencapture -x -R 950,0,562,26 one2.png)",
+      "Bash(sips -Z 1400 one2.png)",
+      "Bash(defaults read *)",
+      "Bash(screencapture -x -R 1000,0,300,26 spark.png)",
+      "Bash(sips -Z 1200 spark.png)",
+      "Bash(screencapture -x -R 880,0,200,26 spark2.png)",
+      "Bash(sips -Z 1000 spark2.png)"
     ]
   }
 }

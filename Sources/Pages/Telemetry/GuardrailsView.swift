@@ -22,6 +22,7 @@ struct GuardrailsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                SystemHeroBanner()
                 master
                 modules
                 legend
@@ -74,14 +75,14 @@ struct GuardrailsView: View {
                 CostLine(mark: "0.5 Hz", detail: "Modules with their own menu bar item, whether or not it is open.")
                 CostLine(mark: "0 Hz", detail: "Everything else. Not paused — the module and its kernel handles "
                          + "are destroyed, and rebuilt when you ask for them again.")
+                CostLine(mark: "DRAW", detail: "A menu bar item redraws only when its figure changes or its "
+                         + "line moves by a pixel, and it never changes width. A reading that looks "
+                         + "the same costs nothing to show.")
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .machined(cornerRadius: Theme.radiusMd, fill: Theme.well)
 
-            FootNote("Die temperatures and system power come from the SMC; GPU load comes from the accelerator. "
-                     + "The Neural and media engines publish a power state rather than a load figure, so that is "
-                     + "what the panel shows for them.")
         }
     }
 }
@@ -112,7 +113,29 @@ private struct ModuleRow: View {
 
     private var armed: Bool { widgets.isArmed(kind) }
 
+    /// The appearance picker only exists while the module has an item to apply
+    /// it to. A control for a thing that is not there is worse than no control.
+    private var showsAppearance: Bool { armed && kind.isPinnable && widgets.isPinned(kind) }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            switches
+            if showsAppearance {
+                DashedRule().padding(.top, 10)
+                appearance.padding(.top, 10)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                .fill(hovering ? Color.white.opacity(0.03) : .clear)
+        )
+        .machined(cornerRadius: Theme.radiusSm)
+        .onHover { hovering = $0 }
+    }
+
+    private var switches: some View {
         HStack(spacing: 0) {
             HStack(spacing: 11) {
                 Image(systemName: kind.glyph)
@@ -145,14 +168,33 @@ private struct ModuleRow: View {
                     .help("A table has no one-line form for the menu bar")
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                .fill(hovering ? Color.white.opacity(0.03) : .clear)
-        )
-        .machined(cornerRadius: Theme.radiusSm)
-        .onHover { hovering = $0 }
+    }
+
+    /// What the standalone item looks like.
+    private var appearance: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("MENU BAR STYLE")
+                    .font(Theme.mono(9, .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(Theme.textMuted)
+                Text(widgets.mode(for: kind).detail)
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: Binding(get: { widgets.mode(for: kind) },
+                                          set: { widgets.setMode($0, for: kind) })) {
+                ForEach(MenuBarDisplayMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .frame(width: 214)
+        }
     }
 }
 

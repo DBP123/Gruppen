@@ -92,6 +92,10 @@ struct MonitorPanel: View {
             if let widget = manager.module(NetworkTelemetryWidget.self, .network) { NetworkWell(widget: widget) }
         case .thermal:
             if let widget = manager.module(ThermalTelemetryWidget.self, .thermal) { ThermalWell(widget: widget) }
+        case .power:
+            if let widget = manager.module(PowerTelemetryWidget.self, .power) { PowerWell(widget: widget) }
+        case .storage:
+            if let widget = manager.module(StorageTelemetryWidget.self, .storage) { StorageWell(widget: widget) }
         case .processes:
             if let widget = manager.module(ProcessTelemetryWidget.self, .processes) { ProcessWell(widget: widget) }
         case .footprint:
@@ -202,6 +206,59 @@ private struct PanelAction: View {
 
 // MARK: - Wells
 
+/// Capacity and the two rates, compactly.
+private struct StorageWell: View {
+    @ObservedObject var widget: StorageTelemetryWidget
+
+    var body: some View {
+        WidgetWell(kind: .storage,
+                   readout: widget.reading.map { Format.bytes($0.effectiveFree) + " FREE" } ?? "—") {
+            if let reading = widget.reading {
+                SegmentedBar(segments: [
+                    .init(fraction: reading.total > 0
+                          ? Double(reading.used &- min(reading.purgeable, reading.used)) / Double(reading.total) : 0,
+                          tint: .white),
+                    .init(fraction: reading.total > 0
+                          ? Double(reading.purgeable) / Double(reading.total) : 0,
+                          tint: Theme.amber.opacity(0.75)),
+                ], height: 8)
+                HStack(spacing: 0) {
+                    MicroStat(label: "READ", value: Format.rate(reading.readRate), tint: Theme.cyan)
+                    Spacer(minLength: 4)
+                    MicroStat(label: "WRITE", value: Format.rate(reading.writeRate), tint: Theme.amber)
+                    Spacer(minLength: 4)
+                    MicroStat(label: "IOPS",
+                              value: Format.count(Int((reading.readOps + reading.writeOps).rounded())))
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// The compact power line for the shared panel: charge, and the two draw
+/// figures kept distinct.
+private struct PowerWell: View {
+    @ObservedObject var widget: PowerTelemetryWidget
+
+    var body: some View {
+        WidgetWell(kind: .power, readout: widget.reading.map { "\($0.flow.percent)%" } ?? "—") {
+            if let flow = widget.reading?.flow {
+                HStack(spacing: 0) {
+                    BatteryGlyph(percent: flow.percent, state: flow.state)
+                    Spacer(minLength: 8)
+                    MicroStat(label: "SYS", value: String(format: "%.1f W", flow.systemLoad))
+                    Spacer(minLength: 4)
+                    MicroStat(label: flow.batteryPower >= 0 ? "INTO CELL" : "FROM CELL",
+                              value: String(format: "%.1f W", abs(flow.batteryPower)),
+                              tint: flow.batteryPower >= 0 ? Theme.trace : Theme.amber)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
 private struct CPUWell: View {
     @ObservedObject var widget: CPUTelemetryWidget
 
@@ -224,7 +281,7 @@ private struct CPUWell: View {
                     .frame(width: 78, alignment: .leading)
 
                     VStack(spacing: 4) {
-                        Sparkline(values: widget.history, maximum: 1, tint: Theme.orange, height: 24)
+                        Sparkline(values: widget.history, floor: WidgetKind.cpu.plotFloor, height: 24).equatable()
                         CoreBars(cores: reading.cores, height: 16)
                     }
                 }
@@ -255,7 +312,7 @@ private struct SiliconWell: View {
                             MicroStat(label: "TILE", value: Format.percent(reading.tiler))
                         }
                         .frame(width: 78, alignment: .leading)
-                        Sparkline(values: widget.history, maximum: 1, tint: Theme.orange, height: 44)
+                        Sparkline(values: widget.history, floor: WidgetKind.silicon.plotFloor, height: 44).equatable()
                     }
                     // These publish a power state, not a load. An honest lamp
                     // beats an invented percentage.
@@ -304,7 +361,7 @@ private struct MemoryWell: View {
                         Readout(value: Format.bytes(reading.used),
                                 tint: reading.pressure > 0.8 ? Theme.red : Theme.textPrimary)
                         Spacer(minLength: 4)
-                        Sparkline(values: widget.history, maximum: 1, tint: Theme.green, height: 22)
+                        Sparkline(values: widget.history, floor: WidgetKind.memory.plotFloor, height: 22).equatable()
                             .frame(width: 118)
                     }
                     SegmentedBar(segments: [
@@ -360,8 +417,9 @@ private struct NetworkWell: View {
                         .frame(width: 100, alignment: .leading)
 
                         ZStack {
-                            Sparkline(values: widget.history, maximum: ceiling, tint: Theme.green, height: 30)
-                            Sparkline(values: widget.upHistory, maximum: ceiling, tint: Theme.orange, height: 30)
+                            Sparkline(values: widget.history, floor: WidgetKind.network.plotFloor, height: 30).equatable()
+                            Sparkline(values: widget.upHistory, floor: WidgetKind.network.plotFloor,
+                                      tint: Theme.orange, height: 30).equatable()
                         }
                     }
                     HStack(spacing: 10) {
@@ -426,27 +484,26 @@ private struct ThermalWell: View {
 
                     if reading.hottest != nil || reading.systemPower != nil {
                         HStack(spacing: 0) {
-                            if let performance = reading.performanceCores {
-                                MicroStat(label: "P", value: String(format: "%.0f°", performance))
+                            if let cpu = reading.cpuDie {
+                                MicroStat(label: "CPU", value: String(format: "%.0f°", cpu.celsius))
                                 Spacer(minLength: 4)
                             }
-                            if let efficiency = reading.efficiencyCores {
-                                MicroStat(label: "E", value: String(format: "%.0f°", efficiency))
+                            if let gpu = reading.gpuDie {
+                                MicroStat(label: "GPU", value: String(format: "%.0f°", gpu.celsius))
                                 Spacer(minLength: 4)
                             }
-                            if let graphics = reading.graphics {
-                                MicroStat(label: "GPU", value: String(format: "%.0f°", graphics))
+                            if let battery = reading.batteryDie {
+                                MicroStat(label: "BATT", value: String(format: "%.0f°", battery.celsius))
                                 Spacer(minLength: 4)
                             }
                             if let power = reading.systemPower {
                                 MicroStat(label: "DRAW", value: String(format: "%.1f W", power),
-                                          tint: Theme.orange)
+                                          tint: ThermalDetailTint.power(power))
                                 Spacer(minLength: 4)
                             }
-                            if let fan = reading.fans.max(), fan > 0 {
-                                MicroStat(label: "FAN", value: String(format: "%.0f", fan))
-                            } else if reading.fans.isEmpty == false {
-                                MicroStat(label: "FAN", value: "OFF")
+                            if let fan = reading.fans.max(by: { $0.actual < $1.actual }) {
+                                MicroStat(label: "FAN",
+                                          value: fan.actual > 0 ? String(format: "%.0f", fan.actual) : "OFF")
                             }
                         }
                         .fixedSize(horizontal: false, vertical: true)

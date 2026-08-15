@@ -147,6 +147,21 @@ final class AppleSiliconTelemetry {
     /// and either "E" or "M" for the efficiency cluster depending on the
     /// generation — this machine says "M" — so anything that is not "P" is the
     /// efficiency side.
+    /// GPU cores, from the accelerator's own device-tree node. Read once.
+    static let graphicsCoreCount: Int = {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                  IOServiceMatching("AGXAccelerator"))
+        guard service != 0 else { return 0 }
+        defer { IOObjectRelease(service) }
+        for key in ["gpu-core-count", "GPUConfigurationVariable"] {
+            guard let value = property(of: service, key) else { continue }
+            if let count = asInt(value) { return count }
+            if let table = value as? [String: Any],
+               let count = (table["num_cores"] as? NSNumber)?.intValue { return count }
+        }
+        return 0
+    }()
+
     static let coreLayout: [CoreKind] = {
         let root = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
         guard root != 0 else { return [] }
@@ -194,32 +209,79 @@ final class AppleSiliconTelemetry {
 
     // MARK: SMC
 
+    /// One fan, as the SMC describes it: what it is doing and what it has been
+    /// told to do. The gap between the two is the interesting part — a target
+    /// above the actual speed means the machine has just decided it is getting
+    /// hot and the fan has not caught up yet.
+    struct Fan: Equatable {
+        var actual: Double
+        var target: Double
+        var minimum: Double
+        var maximum: Double
+
+        /// 0…1 across the fan's own usable range, for a gauge.
+        var load: Double {
+            let span = maximum - minimum
+            return span > 0 ? min(max((actual - minimum) / span, 0), 1) : 0
+        }
+    }
+
+    /// A named thermal zone, carrying the SMC key it came from.
+    ///
+    /// The key travels with the value on purpose. "CPU die 38°C" is a claim
+    /// about a sensor, and which sensor it was is the difference between a
+    /// diagnostic and a decoration.
+    struct Zone: Equatable {
+        var key: String
+        var celsius: Double
+    }
+
     struct ThermalReading: Equatable {
-        /// Degrees Celsius, hottest sensor in each cluster.
-        var performanceCores: Double?
-        var efficiencyCores: Double?
-        var graphics: Double?
+        /// Hottest sensor on the performance cluster — the Apple Silicon
+        /// equivalent of the `TC0P` these machines do not have.
+        var cpuDie: Zone?
+        var efficiencyCores: Zone?
+        var gpuDie: Zone?
+        /// `TB0T`. Present on every Mac with a battery, Intel or Apple Silicon.
+        var battery: Zone?
         /// Watts drawn by the whole machine, when the machine reports it.
         var systemPower: Double?
-        /// RPM. Empty on a fanless Mac; zero while the fans are stopped.
-        var fans: [Double]
+        /// Empty on a fanless Mac.
+        var fans: [Fan]
+
+        var hottest: Double? {
+            [cpuDie, efficiencyCores, gpuDie].compactMap { $0?.celsius }.max()
+        }
     }
 
     func thermal() -> ThermalReading? {
         guard smc != 0 else { return nil }
-        func hottest(_ keys: [SMCKey]) -> Double? {
-            let values = keys.compactMap { read($0) }.filter { $0 > 5 && $0 < 130 }
-            return values.max()
+        func hottest(_ keys: [SMCKey]) -> Zone? {
+            keys.compactMap { key -> Zone? in
+                guard let value = read(key), value > 5, value < 130 else { return nil }
+                return Zone(key: Self.name(of: key.code), celsius: value)
+            }
+            .max { $0.celsius < $1.celsius }
+        }
+        let fans = zip(sensors.fansActual, sensors.fansTarget).compactMap { actual, target -> Fan? in
+            guard let speed = read(actual) else { return nil }
+            return Fan(actual: max(speed, 0),
+                       target: read(target).map { max($0, 0) } ?? 0,
+                       minimum: sensors.fanMinimum,
+                       maximum: sensors.fanMaximum)
         }
         let reading = ThermalReading(
-            performanceCores: hottest(sensors.performance),
+            cpuDie: hottest(sensors.performance),
             efficiencyCores: hottest(sensors.efficiency),
-            graphics: hottest(sensors.graphics),
+            gpuDie: hottest(sensors.graphics),
+            battery: sensors.battery.flatMap { key in
+                read(key).flatMap { $0 > 5 && $0 < 130 ? Zone(key: Self.name(of: key.code), celsius: $0) : nil }
+            },
             systemPower: sensors.power.flatMap(read).map { max($0, 0) },
-            fans: sensors.fans.compactMap(read))
+            fans: fans)
         // A machine that answered nothing at all is worth reporting as nothing,
         // rather than as a well full of dashes.
-        guard reading.performanceCores != nil || reading.systemPower != nil else { return nil }
+        guard reading.cpuDie != nil || reading.systemPower != nil else { return nil }
         return reading
     }
 
@@ -236,7 +298,15 @@ final class AppleSiliconTelemetry {
         var performance: [SMCKey] = []
         var efficiency: [SMCKey] = []
         var graphics: [SMCKey] = []
-        var fans: [SMCKey] = []
+        /// Paired by index: fan *n*'s actual speed and its commanded target.
+        var fansActual: [SMCKey] = []
+        var fansTarget: [SMCKey] = []
+        /// The fan envelope is fixed for a given machine, so it is read once at
+        /// discovery and carried as a number rather than costing two SMC round
+        /// trips on every tick.
+        var fanMinimum: Double = 0
+        var fanMaximum: Double = 0
+        var battery: SMCKey?
         var power: SMCKey?
     }
 
@@ -250,7 +320,9 @@ final class AppleSiliconTelemetry {
 
     /// Names of the keys worth keeping, remembered so a machine only ever pays
     /// the 630 ms discovery walk once.
-    private static let cacheKey = "smcSensorKeys"
+    /// Versioned: the set grew fan targets and the battery zone, and a cache
+    /// written before that would resolve into a half-populated sensor set.
+    private static let cacheKey = "smcSensorKeys2"
 
     private func openSMC() {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -281,11 +353,15 @@ final class AppleSiliconTelemetry {
             case "p": set.performance.append(key)
             case "e": set.efficiency.append(key)
             case "g": set.graphics.append(key)
-            case "f": set.fans.append(key)
+            case "f": set.fansActual.append(key)
+            case "t": set.fansTarget.append(key)
+            case "b": set.battery = key
             case "w": set.power = key
             default: return nil
             }
         }
+        set.fanMinimum = keyInfo(for: "F0Mn").flatMap(read) ?? 0
+        set.fanMaximum = keyInfo(for: "F0Mx").flatMap(read) ?? 0
         return set.performance.isEmpty && set.power == nil ? nil : set
     }
 
@@ -293,7 +369,9 @@ final class AppleSiliconTelemetry {
         set.performance.map { "p:\(Self.name(of: $0.code))" }
             + set.efficiency.map { "e:\(Self.name(of: $0.code))" }
             + set.graphics.map { "g:\(Self.name(of: $0.code))" }
-            + set.fans.map { "f:\(Self.name(of: $0.code))" }
+            + set.fansActual.map { "f:\(Self.name(of: $0.code))" }
+            + set.fansTarget.map { "t:\(Self.name(of: $0.code))" }
+            + (set.battery.map { ["b:\(Self.name(of: $0.code))"] } ?? [])
             + (set.power.map { ["w:\(Self.name(of: $0.code))"] } ?? [])
     }
 
@@ -319,10 +397,18 @@ final class AppleSiliconTelemetry {
             case name.hasPrefix("Tg"), name.hasPrefix("TG"): group = 2
             case name.hasPrefix("F") && name.hasSuffix("Ac"): group = 3
             case name == "PSTR": group = 4
+            // `TB0T` is the one key the brief named that these machines
+            // actually have; `TC0P` and `TG0P` are Intel and answer nothing.
+            case name == "TB0T": group = 5
+            case name.hasPrefix("F") && name.hasSuffix("Tg"): group = 6
             default: continue
             }
             guard let resolved = keyInfo(for: name) else { continue }
-            if group == 4 { set.power = resolved } else { candidates.append((group, resolved)) }
+            switch group {
+            case 4: set.power = resolved
+            case 5: set.battery = resolved
+            default: candidates.append((group, resolved))
+            }
         }
 
         // Read every candidate once, keep the hottest handful per cluster.
@@ -342,7 +428,16 @@ final class AppleSiliconTelemetry {
             default: set.graphics = ranked
             }
         }
-        set.fans = candidates.filter { $0.prefixGroup == 3 }.map(\.key)
+        // Sorted by name so fan 0's actual speed lines up with fan 0's target.
+        func ordered(_ group: Int) -> [SMCKey] {
+            candidates.filter { $0.prefixGroup == group }
+                .map(\.key)
+                .sorted { Self.name(of: $0.code) < Self.name(of: $1.code) }
+        }
+        set.fansActual = ordered(3)
+        set.fansTarget = ordered(6)
+        set.fanMinimum = keyInfo(for: "F0Mn").flatMap(read) ?? 0
+        set.fanMaximum = keyInfo(for: "F0Mx").flatMap(read) ?? 0
         return set
     }
 
