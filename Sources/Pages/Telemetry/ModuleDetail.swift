@@ -106,15 +106,21 @@ private struct StatRow: View {
                 .font(Theme.mono(9.5))
                 .tracking(0.5)
                 .foregroundStyle(Theme.textMuted)
+                .fixedSize()
             Spacer(minLength: 6)
             if let detail {
                 Text(detail)
                     .font(Theme.mono(9.5).monospacedDigit())
                     .foregroundStyle(Theme.textMuted)
             }
+            // A long value shrinks rather than truncating. "7 days, 8 hours,
+            // 7 minutes" is a few points wider than this popover, and a figure
+            // cut off at "7 minut…" is worse than one set slightly small.
             Text(value)
                 .font(Theme.mono(11, .medium).monospacedDigit())
                 .foregroundStyle(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
         }
     }
 }
@@ -765,6 +771,11 @@ enum ThermalDetailTint {
 /// machine they are not even the same sign.
 private struct PowerDetail: View {
     @ObservedObject var widget: PowerTelemetryWidget
+    /// Persisted rather than `@State`: the popover is torn down every time it
+    /// closes, and a section that forgets it was open is worse than one that
+    /// never folded.
+    @AppStorage("powerHistoryExpanded") private var showingHistory = false
+    @AppStorage("powerEnergyExpanded") private var showingEnergy = false
 
     var body: some View {
         if let reading = widget.reading {
@@ -804,17 +815,29 @@ private struct PowerDetail: View {
 
             // The two figures that used to be confused with each other.
             Well {
-                // Plain words, because these three are the panel's most
-                // misread rows: two of them are watts and look interchangeable.
-                StatRow(label: "CURRENT POWER CONSUMPTION",
+                PowerRailHeader(condition: flow.condition)
+                DashedRule()
+                // The rail, as three figures that add up. Signed, because the
+                // sign is the whole story: the pack either takes current or
+                // gives it, and a bare magnitude hides which.
+                StatRow(label: "SYSTEM LOAD",
                         value: String(format: "%.1f W", flow.systemLoad),
-                        tint: ThermalDetailTint.power(flow.systemLoad))
-                StatRow(label: flow.batteryPower >= 0 ? "BATTERY CHARGE RATE" : "BATTERY DISCHARGE LOAD",
-                        value: String(format: "%.1f W", abs(flow.batteryPower)),
-                        tint: flow.batteryPower >= 0 ? Theme.trace : Theme.amber)
+                        tint: Theme.textPrimary)
+                // Three states, not two. A pack that is neither taking nor
+                // giving current is doing nothing, and painting that green read
+                // as "charging" — so zero is neutral, current in is the same
+                // cyan as the charging glyph, and current out is amber.
+                let idle = abs(flow.batteryPower) < 0.5
+                StatRow(label: "PACK CHARGE RATE",
+                        value: idle ? "0.0 W"
+                                    : String(format: "%@%.1f W",
+                                             flow.batteryPower > 0 ? "+" : "−",
+                                             abs(flow.batteryPower)),
+                        tint: idle ? Theme.textPrimary
+                                   : (flow.batteryPower > 0 ? Theme.cyan : Theme.cellMedium))
                 if flow.isPluggedIn {
                     StatRow(label: "ADAPTER INPUT",
-                            value: String(format: "%.1f W", flow.adapterInput),
+                            value: String(format: "+%.1f W", flow.adapterInput),
                             tint: Theme.cyan,
                             detail: flow.adapterRating.map { String(format: "%.0f W rated", $0) })
                 }
@@ -825,13 +848,19 @@ private struct PowerDetail: View {
             }
 
             Well {
+                // mAh, not Wh: watt-hours are derived through a voltage that
+                // rises as the pack fills, so a "full capacity" in Wh grows by
+                // about 13% between empty and full. Milliamp-hours are what the
+                // controller actually counts and they do not move.
                 StatRow(label: "CHARGE",
-                        value: String(format: "%.1f / %.1f Wh", flow.remainingEnergy, flow.fullEnergy))
+                        value: String(format: "%@ / %@ mAh",
+                                      Format.count(Int(flow.chargemAh)),
+                                      Format.count(Int(flow.capacitymAh))))
                 if let cycles = reading.cycleCount {
                     StatRow(label: "CYCLE COUNT", value: "\(cycles)")
                 }
                 if let health = reading.health {
-                    StatRow(label: "STATE OF HEALTH",
+                    StatRow(label: "BATTERY HEALTH",
                             value: Format.percent(health, decimals: 0),
                             tint: health < 0.8 ? Theme.amber : Theme.trace)
                 }
@@ -839,6 +868,17 @@ private struct PowerDetail: View {
                     StatRow(label: "CELL TEMPERATURE", value: String(format: "%.1f °C", celsius),
                             tint: ThermalDetailTint.heat(celsius))
                 }
+            }
+
+            // Folded away by default. It is history rather than telemetry —
+            // useful when you are asking why the machine woke at 3am, and noise
+            // the rest of the time.
+            Fold(title: "ENERGY IMPACT", expanded: $showingEnergy) {
+                EnergyImpactRows()
+            }
+
+            Fold(title: "POWER HISTORY", expanded: $showingHistory) {
+                UptimeRows()
             }
         } else {
             Waiting()
@@ -856,6 +896,130 @@ private struct PowerDetail: View {
         return nil
     }
 
+}
+
+/// A well that folds away, with its title as the hinge.
+///
+/// The whole header is the hit target, not just the chevron — a 9pt glyph is not
+/// something to ask anyone to aim at.
+private struct Fold<Content: View>: View {
+    let title: String
+    @Binding var expanded: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        Well {
+            Button {
+                withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Theme.textMuted)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text(title)
+                        .font(Theme.mono(9, .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(Theme.textMuted)
+                    Spacer(minLength: 6)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                DashedRule()
+                content
+            }
+        }
+    }
+}
+
+/// The ten processes costing the most energy.
+///
+/// The monitor is started in `onAppear` and destroyed in `onDisappear`, both of
+/// which only fire while the fold is open, so a collapsed section runs no timer
+/// and sweeps no processes.
+private struct EnergyImpactRows: View {
+    @StateObject private var monitor = EnergyImpactMonitor()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TableHeader(columns: [("PROCESS", .leading, nil), ("IMPACT", .trailing, 52)])
+            if monitor.rows.isEmpty {
+                // The first tick has counters but no interval to divide by, so
+                // there is genuinely nothing to show for one second.
+                Text("Measuring…")
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.textMuted)
+                    .padding(.vertical, 3)
+            } else {
+                ForEach(monitor.rows) { row in
+                    HStack(spacing: 8) {
+                        Text(row.name)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 6)
+                        Text(String(format: "%.1f", row.score))
+                            .font(Theme.mono(10.5, .medium).monospacedDigit())
+                            .foregroundStyle(EnergyTint.of(row.score))
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .onAppear { monitor.start() }
+        .onDisappear { monitor.stop() }
+    }
+}
+
+/// Same gating idea as the thermal and power readouts: the number carries its
+/// own verdict, so you do not have to know what counts as a lot.
+private enum EnergyTint {
+    static func of(_ score: Double) -> Color {
+        if score >= 50 { return Theme.cellLow }
+        if score >= 15 { return Theme.amber }
+        return Theme.textPrimary
+    }
+}
+
+/// When the machine last booted, slept and woke, and why.
+///
+/// The snapshot is read in `onAppear`, which only fires when the fold is open,
+/// so a collapsed section costs nothing at all. It is never re-read while it is
+/// visible and does not need to be: the machine cannot sleep while you are
+/// looking at the popover, and the elapsed strings are recomputed against
+/// `Date()` on every draw, so the minutes still tick up.
+private struct UptimeRows: View {
+    @State private var snapshot = UptimeSnapshot.empty
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Since(label: "LAST BOOT", date: snapshot.bootedAt)
+            Since(label: "LAST SLEEP", date: snapshot.sleptAt)
+            Since(label: "LAST WAKE", date: snapshot.wokeAt)
+            StatRow(label: "SLEEP REASON", value: snapshot.sleepReason ?? "—",
+                    tint: Theme.textSecondary)
+            StatRow(label: "WAKE REASON", value: snapshot.wakeReason ?? "—",
+                    tint: Theme.textSecondary)
+        }
+        .onAppear { snapshot = UptimeService.read() }
+    }
+}
+
+/// One "how long ago" row. A missing date is a real answer — a Mac that has not
+/// slept since it booted has no last sleep — so it shows a dash rather than a
+/// zero that would read as "just now".
+private struct Since: View {
+    let label: String
+    let date: Date?
+
+    var body: some View {
+        StatRow(label: label,
+                value: date.map { UptimeService.elapsed(since: $0) } ?? "—")
+    }
 }
 
 /// A battery, drawn rather than borrowed from SF Symbols, so the fill is a real
@@ -880,7 +1044,12 @@ struct BatteryGlyph: View {
     static func tint(_ percent: Int, _ condition: PowerFlow.Condition) -> Color {
         switch condition {
         case .fault: return Theme.cellLow
-        case .charging, .acPassthrough: return Theme.cellHigh
+        // Charging is cyan — it reads as "energy going in" rather than as
+        // another shade of the healthy-charge green, so a glance tells you the
+        // direction of flow and not just the level.
+        case .charging: return Theme.cyan
+        case .acPassthrough: return Theme.cellHigh
+        case .adapterAssist: return Theme.cellMedium
         case .optimizedHold: return Theme.cellHold
         case .lowPowerMode: return Theme.cellMedium
         case .discharging:
@@ -904,6 +1073,7 @@ struct BatteryGlyph: View {
     private var symbol: String? {
         switch condition {
         case .charging: return "bolt.fill"
+        case .adapterAssist: return "powerplug.fill"
         case .acPassthrough: return "powerplug.fill"
         case .optimizedHold: return "pause.fill"
         case .lowPowerMode: return "arrow.down"
@@ -1378,5 +1548,56 @@ private struct Blades: Shape {
             path.closeSubpath()
         }
         return path
+    }
+}
+
+
+/// The header of the power rail card: what the rail is doing, as a lit tag.
+private struct PowerRailHeader: View {
+    let condition: PowerFlow.Condition
+
+    /// Green when the pack is gaining, amber when it is giving, neutral when it
+    /// is resting — so the tag agrees with the sign on the row below it.
+    private var tint: Color {
+        switch condition {
+        case .charging: return Theme.cyan
+        case .acPassthrough: return Theme.cellHigh
+        case .adapterAssist, .lowPowerMode, .discharging: return Theme.cellMedium
+        case .optimizedHold: return Theme.cellHold
+        case .fault: return Theme.cellLow
+        }
+    }
+
+    private var tag: String {
+        switch condition {
+        case .charging: return "CHARGING"
+        case .adapterAssist: return "ASSIST"
+        case .acPassthrough: return "AC"
+        case .optimizedHold: return "HOLD"
+        case .lowPowerMode: return "LOW POWER"
+        case .discharging: return "DISCHARGING"
+        case .fault: return "FAULT"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("POWER RAIL TELEMETRY")
+                .font(Theme.mono(9, .semibold)).tracking(0.9)
+                .foregroundStyle(Theme.textMuted)
+            Spacer(minLength: 8)
+            HStack(spacing: 5) {
+                Circle().fill(tint).frame(width: 5, height: 5)
+                Text(tag)
+                    .font(Theme.mono(8.5, .semibold)).tracking(0.7)
+                    .foregroundStyle(tint)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous).fill(tint.opacity(0.12))
+            )
+        }
     }
 }

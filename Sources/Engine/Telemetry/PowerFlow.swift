@@ -34,9 +34,22 @@ struct PowerFlow: Equatable {
     var isFull: Bool
     var percent: Int
 
-    /// Watt-hours in the pack, and its full-charge capacity.
+    /// Watt-hours in the pack right now, and what it would hold at full.
+    ///
+    /// Both are computed from the *instantaneous* pack voltage, which is correct
+    /// for `remainingEnergy` — it is the energy actually available this second,
+    /// and it is what the runtime estimate divides. It is misleading for
+    /// `fullEnergy`: a cell's terminal voltage rises as it charges, so the same
+    /// pack's "full capacity" appears to grow from about 71 Wh to 80 Wh purely
+    /// as it fills. Anything shown to a reader as a fixed property of the
+    /// hardware uses `chargemAh` below instead, which does not move.
     var remainingEnergy: Double
     var fullEnergy: Double
+
+    /// Charge in milliamp-hours: what the pack holds now, and what it holds when
+    /// full. Stable regardless of voltage, so this is the pair the UI shows.
+    var chargemAh: Double = 0
+    var capacitymAh: Double = 0
 
     /// Whether the pack is present and healthy at all.
     var isPresent: Bool = true
@@ -51,9 +64,10 @@ struct PowerFlow: Equatable {
     /// with, and it runs most-urgent first.
     enum Condition: Equatable {
         case fault              // no cell, or the pack is reporting a problem
-        case charging           // current flowing in
+        case charging           // current flowing into the pack
+        case adapterAssist      // plugged in, but demand exceeds what the charger gives
         case acPassthrough      // full, running from the adapter
-        case optimizedHold      // plugged in, deliberately paused below full
+        case optimizedHold      // plugged in, resting, deliberately below full
         case lowPowerMode       // throttled
         case discharging        // on the cell
 
@@ -61,6 +75,7 @@ struct PowerFlow: Equatable {
             switch self {
             case .fault: return "Hardware Fault"
             case .charging: return "Active Charge"
+            case .adapterAssist: return "Adapter Assist"
             case .acPassthrough: return "AC Passthrough"
             case .optimizedHold: return "Optimized Hold"
             case .lowPowerMode: return "Low Power Mode"
@@ -69,16 +84,34 @@ struct PowerFlow: Equatable {
         }
     }
 
+    /// Below this, current into or out of the pack is noise rather than flow.
+    private static let flowThreshold = 0.5
+
     var condition: Condition {
         if hasFault || !isPresent { return .fault }
-        if isCharging && batteryPower > 0.1 { return .charging }
-        if isPluggedIn && (isFull || percent >= 100) { return .acPassthrough }
-        // Plugged in, not full, and deliberately not charging: this is what
-        // Optimized Battery Charging looks like from outside — macOS holding
-        // the cell short of full until it thinks you need it.
-        if isPluggedIn && !isCharging { return .optimizedHold }
-        if isLowPower { return .lowPowerMode }
-        return .discharging
+
+        // Current going *into* the pack is charging, full stop — whether or not
+        // macOS has an 80% limit armed. The previous version also required the
+        // `IsCharging` flag and a limit-capped charge could satisfy one without
+        // the other, so a battery visibly filling was reported as "Optimized
+        // Hold".
+        if batteryPower > Self.flowThreshold { return .charging }
+
+        guard isPluggedIn else {
+            return isLowPower ? .lowPowerMode : .discharging
+        }
+
+        // Plugged in and the pack is *draining*: the machine wants more than the
+        // charger can supply, so the battery is making up the difference. This
+        // is a real and fairly common state under load, and it used to fall
+        // through every branch — which is how a plugged-in Mac ended up
+        // reporting "On Battery" and "Optimized Hold" while charging.
+        if batteryPower < -Self.flowThreshold { return .adapterAssist }
+
+        if isFull || percent >= 100 { return .acPassthrough }
+        // Plugged in, resting, below full: macOS is holding the cell short of
+        // full on purpose.
+        return .optimizedHold
     }
 
     /// The one-line status under the headline.
@@ -86,6 +119,7 @@ struct PowerFlow: Equatable {
         switch condition {
         case .fault: return "CELL NOT DETECTED"
         case .charging: return "CURRENT FLOWING"
+        case .adapterAssist: return "PACK SUPPLEMENTING CHARGER"
         case .acPassthrough: return "FULLY CHARGED"
         case .optimizedHold: return "PAUSED AT \(percent)%"
         case .lowPowerMode: return "THROTTLE ACTIVE"
@@ -227,6 +261,8 @@ struct PowerFlow: Equatable {
             percent: Self.chargePercent(fields, currentmAh: currentmAh, maxmAh: maxmAh),
             remainingEnergy: currentmAh / 1000 * volts,
             fullEnergy: maxmAh / 1000 * volts,
+            chargemAh: currentmAh,
+            capacitymAh: maxmAh,
             isPresent: (number("BatteryInstalled", in: fields) ?? 1) != 0,
             // A named health condition — "Service Battery", "Check Battery" —
             // is the pack telling you something is wrong. Empty means fine.

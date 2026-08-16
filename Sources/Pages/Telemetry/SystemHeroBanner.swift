@@ -8,7 +8,9 @@ import SwiftUI
 /// into a `static let` and never sampled. None of it belongs in a telemetry
 /// module: a serial number does not have a history and cannot be plotted.
 struct MacIdentity {
-    var marketingName: String
+    /// What the owner calls this machine — the name set in System Settings and
+    /// shown on the network, e.g. "Dhilan's MacBook Pro".
+    var computerName: String
     var modelIdentifier: String
     var serialNumber: String
     var chip: String
@@ -37,20 +39,20 @@ struct MacIdentity {
             return String(decoding: data.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
 
-        // `product-name` is the marketing string — "MacBook Pro (14-inch,
-        // Nov 2023)". It is not present on every Mac, and `hw.model` — the model
-        // identifier, "Mac15,6" — always is, so that is the fallback rather than
-        // a guessed lookup table that would rot with every new machine.
+        // Apple Silicon does not publish a marketing name anywhere readable:
+        // there is no `product-name` in the device tree, only the model
+        // identifier "Mac17,9", which says nothing to a reader. The name the
+        // owner gave the machine is both present on every Mac and the one they
+        // actually recognise, so that is the headline; the identifier stays
+        // below as a spec.
         let identifier = sysctlString("hw.model") ?? "Mac"
-        let marketing = text("product-name")
-            ?? (property("product") as? [String: Any]).flatMap { $0["product-name"] as? String }
-            ?? identifier
+        let name = Host.current().localizedName ?? identifier
 
         let info = ProcessInfo.processInfo.operatingSystemVersion
         let build = sysctlString("kern.osversion") ?? "—"
 
         return MacIdentity(
-            marketingName: marketing,
+            computerName: name,
             modelIdentifier: identifier,
             serialNumber: text("IOPlatformSerialNumber") ?? "—",
             chip: CPUSampler.brand,
@@ -125,7 +127,7 @@ struct SystemHeroBanner: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(mac.marketingName)
+                    Text(mac.computerName)
                         .font(Theme.sans(15, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Text("\(mac.systemVersion)  ·  Build \(mac.buildNumber)")
@@ -139,7 +141,6 @@ struct SystemHeroBanner: View {
                     VStack(alignment: .leading, spacing: 4) {
                         SpecLine("MODEL", mac.modelIdentifier)
                         SpecLine("SERIAL", mac.serialNumber)
-                        SpecLine("SYSTEM", mac.systemVersion)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 

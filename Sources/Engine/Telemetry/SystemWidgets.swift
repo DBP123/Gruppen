@@ -642,7 +642,9 @@ final class ProcessSampler: TelemetrySampler {
 /// 125/3. Treating them as nanoseconds reports every process at 1/41.67 of its
 /// real load, which looks entirely plausible on a quiet machine and is why this
 /// is checked against a process burning a known number of threads.
-private func processUsage(of pid: pid_t) -> rusage_info_v4? {
+/// Internal rather than file-private: `EnergyImpactSampler` needs the same two
+/// corrections, and a second copy of them is a second chance to get them wrong.
+func processUsage(of pid: pid_t) -> rusage_info_v4? {
     var info = rusage_info_v4()
     let result = withUnsafeMutablePointer(to: &info) { pointer in
         pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
@@ -655,7 +657,7 @@ private func processUsage(of pid: pid_t) -> rusage_info_v4? {
 }
 
 /// Total CPU seconds a process has consumed, converted out of mach units.
-private func processCPUSeconds(_ usage: rusage_info_v4) -> Double {
+func processCPUSeconds(_ usage: rusage_info_v4) -> Double {
     Double(usage.ri_user_time &+ usage.ri_system_time) * machTickSeconds
 }
 

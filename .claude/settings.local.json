@@ -61,7 +61,14 @@
       "Bash(screencapture -x -R 1000,0,300,26 spark.png)",
       "Bash(sips -Z 1200 spark.png)",
       "Bash(screencapture -x -R 880,0,200,26 spark2.png)",
-      "Bash(sips -Z 1000 spark2.png)"
+      "Bash(sips -Z 1000 spark2.png)",
+      "Bash(open -a /Applications/Gruppen.app)",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Gruppen\" to get {description, position} of every menu bar item of menu bar 2')",
+      "Bash(screencapture -x -R1120,20,340,660 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/pop4.png)",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Gruppen\" to click menu bar item 3 of menu bar 2')",
+      "Bash(screencapture -x -R1125,25,320,610 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/power.png)",
+      "Bash(osascript -e 'tell application \"System Events\" to click at {1202, 477}')",
+      "Bash(screencapture -x -R1125,25,320,700 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/power-open.png)"
     ]
   }
 }
