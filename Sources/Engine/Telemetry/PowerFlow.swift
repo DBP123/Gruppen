@@ -10,15 +10,31 @@ import IOKit.ps
 /// 4503` — exactly, to the milliwatt. That is worth knowing because it means
 /// these are measurements rather than an estimate assembled from percentages.
 ///
-/// They come from `AppleSmartBattery`'s `PowerTelemetryData`, which the SMC's
-/// own `PSTR` key does not cover: `PSTR` is the *system* draw and says nothing
-/// about the charger or the pack.
+/// ## Which instrument answers which question
 ///
-/// Both are read, and the panel shows both. They do not agree exactly — 5.59 W
-/// from `PSTR` against 4.7 W of `SystemLoad` in one reading here — because they
-/// are measured at different points: the SMC's figure is the whole system rail,
-/// the battery controller's is what it sees leaving the pack side. Neither is
-/// wrong, and averaging them would invent a third number that nothing measured.
+/// There are two sources here and they are **not** interchangeable, which is the
+/// single most important thing about this file:
+///
+/// - **`PSTR`, from the SMC** — the live system rail. Re-reads on demand and
+///   changes on every read.
+/// - **`AppleSmartBattery`'s `PowerTelemetryData`** — the pack controller's own
+///   accounting. It reconciles beautifully (`SystemPowerIn 10817 = SystemLoad
+///   6314 + BatteryPower 4503`, to the milliwatt) but it is republished **once
+///   every 60 seconds**, measured.
+///
+/// That cadence was the cause of a real bug. `SystemLoad` was driving the
+/// "system draw" readout, so after any burst of work the panel latched the high
+/// figure and held it — 19.2 W, or 74 W after something heavier — while the
+/// machine sat idle underneath. Watched side by side for 30 s, `PSTR` fell
+/// 19.3 W → 5.8 W and changed on all 31 reads; `SystemLoad` did not move once.
+/// The number was never wrong, it was just up to a minute old and presented as
+/// if it were live.
+///
+/// So: anything instantaneous comes from `PSTR`. The pack's own state — charge,
+/// percentage, cycle count, health, and the charge rate into the cell — comes
+/// from the controller, where a minute's lag is invisible because those things
+/// genuinely move slowly. And because that node only changes once a minute,
+/// reading it at the panel's 2 Hz was 120 reads per change; it is cached instead.
 struct PowerFlow: Equatable {
     /// What the machine itself is consuming.
     var systemLoad: Double
@@ -199,14 +215,61 @@ struct PowerFlow: Equatable {
     /// So on mains, when the reported number is absent or zero, the input is
     /// reconstructed from what it must be: everything the system is burning,
     /// plus anything going into the cell.
+    /// What the adapter is supplying.
+    ///
+    /// **Measured, not derived — and that is a correction of a mistake.**
+    ///
+    /// Deriving it as `systemDraw + packFlow` looks obviously right: source
+    /// equals the sum of its destinations, so the tree in the panel adds up by
+    /// construction. It is wrong here because the two terms are on different
+    /// clocks. The draw is live off `PSTR`; the pack's flow comes from the
+    /// controller and is up to a minute old. Subtracting a stale number from a
+    /// fresh one does not give you a fresh answer, it gives you the difference
+    /// between two moments — and on a machine that had been busy and went quiet
+    /// it produced `ADAPTER INPUT 0.0 W` while plugged into a 94 W charger,
+    /// because a live 7.1 W draw was being netted against a stale −16.2 W of
+    /// pack assist.
+    ///
+    /// `SystemPowerIn` is the controller's own measurement of the adapter, taken
+    /// on the same clock as `BatteryPower`, so those two agree with each other.
+    /// The tree therefore shows one live row and two slow ones, which is honest
+    /// about what each instrument knows; a sum that always balanced would only
+    /// have been hiding the seam.
     private static func adapterInput(reported: Double?, system: Double,
                                      battery: Double, plugged: Bool) -> Double {
         guard plugged else { return 0 }
         if let reported, reported > 0.05 { return reported }
-        return system + max(battery, 0)
+        // No adapter figure at all: fall back to the sum, which at least shares
+        // the sign convention. Signed, so a pack that is assisting correctly
+        // means the adapter is carrying *less* than the system is burning.
+        return max(system + battery, 0)
     }
 
-    static func read() -> PowerFlow? {
+    /// How long a read of the pack controller stays good for.
+    ///
+    /// The node republishes once a minute, so anything under that is free
+    /// accuracy; five seconds keeps the panel responsive to a cable being
+    /// plugged in — `ExternalConnected` lives on the same node — while cutting
+    /// the reads from 120 per change to 12.
+    static let controllerTTL: TimeInterval = 5
+
+    /// Live system draw, in watts, from the SMC's `PSTR`.
+    ///
+    /// Nil on a Mac that has no such key, in which case the caller falls back to
+    /// the controller's slow figure — stale beats absent.
+    static func liveSystemDraw() -> Double? {
+        AppleSiliconTelemetry.shared.thermal()?.systemPower
+    }
+
+    /// Exposes the adapter arithmetic to the tests. The identity it encodes —
+    /// source equals the sum of its two destinations — is the whole claim the
+    /// power tree makes on screen, so it is worth asserting directly.
+    static func probeAdapter(reported: Double? = nil, system: Double,
+                             battery: Double, plugged: Bool) -> Double {
+        adapterInput(reported: reported, system: system, battery: battery, plugged: plugged)
+    }
+
+    static func read(liveDraw: Double? = liveSystemDraw()) -> PowerFlow? {
         let service = IOServiceGetMatchingService(kIOMainPortDefault,
                                                   IOServiceMatching("AppleSmartBattery"))
         guard service != 0 else { return nil }
@@ -245,15 +308,20 @@ struct PowerFlow: Equatable {
               maxmAh > 0
         else { return nil }
 
+        // The live rail first. The controller's `SystemLoad` is only reached for
+        // on a machine with no `PSTR`, and its own difference only when that is
+        // missing too.
+        let load = liveDraw ?? systemWatts ?? max((inputWatts ?? 0) - batteryWatts, 0)
+
         return PowerFlow(
-            // Falling back to the difference keeps the three figures consistent
-            // on a machine that reports only two of them.
-            systemLoad: systemWatts ?? max((inputWatts ?? 0) - batteryWatts, 0),
+            systemLoad: load,
             batteryPower: batteryWatts,
-            adapterInput: Self.adapterInput(reported: inputWatts,
-                                            system: systemWatts ?? 0,
-                                            battery: batteryWatts,
-                                            plugged: plugged),
+            // Derived from the live draw rather than read, so the three rows of
+            // the power tree add up on screen. `SystemPowerIn` is the controller's
+            // own figure for the same thing and would disagree with the live one
+            // by however much the machine's load has changed in the last minute.
+            adapterInput: Self.adapterInput(reported: inputWatts, system: load,
+                                            battery: batteryWatts, plugged: plugged),
             adapterRating: number("Watts", in: adapter),
             isCharging: charging,
             isPluggedIn: plugged,
@@ -308,15 +376,50 @@ final class PowerSampler: TelemetrySampler {
     /// twice — one sampler, whichever of the two modules is alive.
     private let processes = ProcessSampler()
 
+    /// The last read of the pack controller, and when it was taken.
+    ///
+    /// Two IORegistry property fetches — `read()` and `condition()` — against a
+    /// node that republishes once a minute. At the panel's 2 Hz that was 240
+    /// fetches per change. Held for `controllerTTL` instead.
+    private var cachedFlow: PowerFlow?
+    private var cachedExtras: (cycles: Int?, health: Double?, celsius: Double?)?
+    private var cachedAt: Date?
+
     func sample() -> Reading? {
-        guard let flow = PowerFlow.read() else { return nil }
-        let extras = PowerFlow.condition()
+        // The live half, every tick: this is the figure that actually moves.
+        let draw = PowerFlow.liveSystemDraw()
+
+        let stale = cachedAt.map { Date().timeIntervalSince($0) >= PowerFlow.controllerTTL } ?? true
+        if stale || cachedFlow == nil {
+            guard let flow = PowerFlow.read(liveDraw: draw) else { return nil }
+            cachedFlow = flow
+            cachedExtras = PowerFlow.condition()
+            cachedAt = Date()
+        }
+        guard var flow = cachedFlow, let extras = cachedExtras else { return nil }
+
+        // Re-derive the two figures that hang off the live draw, so a cached
+        // pack state never drags a stale wattage back onto the screen.
+        // Only the draw is re-derived. The adapter row is the controller's own
+        // measurement and belongs to the cached snapshot with the pack flow it
+        // agrees with; recomputing it against the live draw is exactly the
+        // clock-mixing that produced a 0 W adapter.
+        flow.systemLoad = draw ?? flow.systemLoad
+
         return Reading(flow: flow,
                        cycleCount: extras.cycles,
                        health: extras.health,
                        temperature: extras.celsius,
                        isLowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
                        consumers: processes.sample()?.top ?? [])
+    }
+
+    /// Drops the cached pack state, so a module rebuilt after the panel was
+    /// closed does not open on a reading from whenever it last ran.
+    func teardown() {
+        cachedFlow = nil
+        cachedExtras = nil
+        cachedAt = nil
     }
 }
 

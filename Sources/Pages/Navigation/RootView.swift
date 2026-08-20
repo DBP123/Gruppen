@@ -48,16 +48,23 @@ struct ToolHost: View {
     @ViewBuilder
     private var content: some View {
         switch navigation.page {
-        case .workspaces:
-            if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
+        case .telemetry:
+            // Guardrails is the dashboard's settings pane rather than a rail
+            // entry of its own: it is the list of what the dashboard is allowed
+            // to show and what each one costs, which belongs behind the thing it
+            // configures.
+            if navigation.showingSettingsPane { GuardrailsView() } else { TelemetryDashboardView() }
         case .stash:
             StashPage()
         case .scripts:
             ScriptBuilderView()
+        case .workspaces:
+            if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
         case .metrics:
+            // Unreachable in a release build — `Page.isInThisBuild` keeps it out
+            // of the rail — but still compiled, so the tool does not rot while
+            // it is switched off.
             MetricsView()
-        case .guardrails:
-            GuardrailsView()
         case .settings:
             GeneralSettingsPane()
         }
@@ -89,7 +96,7 @@ private struct ToolHeader: View {
                 .tracking(1.3)
                 .foregroundStyle(Theme.textSecondary)
 
-            Chip(text: inSettings ? "TOOL SETTINGS" : page.badge,
+            Chip(text: inSettings ? page.settingsPaneBadge : page.badge,
                  tint: page.isImplemented ? Theme.orange : Theme.textMuted,
                  size: 9)
 

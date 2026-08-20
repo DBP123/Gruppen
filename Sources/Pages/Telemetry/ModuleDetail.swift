@@ -18,7 +18,7 @@ struct ModuleDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             DetailHeader(kind: kind)
-            content
+            ModuleDetailContent(kind: kind)
         }
         .padding(12)
         .frame(width: 292, alignment: .leading)
@@ -29,9 +29,22 @@ struct ModuleDetail: View {
                 .frame(height: 1)
         }
     }
+}
+
+/// The readout itself, without any chrome around it.
+///
+/// Split out of `ModuleDetail` so the dashboard card and the menu bar popover
+/// render the *same* view rather than two copies of it. The chrome differs —
+/// a popover is a fixed 292pt slab, a card is a flexible grid cell — but what a
+/// processor readout contains must not.
+struct ModuleDetailContent: View {
+    let kind: WidgetKind
+    @ObservedObject private var manager = WidgetManager.shared
+
+    init(kind: WidgetKind) { self.kind = kind }
 
     @ViewBuilder
-    private var content: some View {
+    var body: some View {
         switch kind {
         case .cpu:
             if let widget = manager.module(CPUTelemetryWidget.self, .cpu) { CPUDetail(widget: widget) }
@@ -54,7 +67,54 @@ struct ModuleDetail: View {
         case .silicon:
             if let widget = manager.module(SiliconTelemetryWidget.self, .silicon) { SiliconDetail(widget: widget) }
             else { Waiting() }
-        case .processes, .footprint:
+        case .processes:
+            if let widget = manager.module(ProcessTelemetryWidget.self, .processes) { ProcessDetail(widget: widget) }
+            else { Waiting() }
+        case .footprint:
+            // Gruppen's own line has a home already, at the foot of the
+            // dropdown. Repeating it as a card would be the app taking up a
+            // whole cell to talk about itself.
+            Waiting()
+        }
+    }
+}
+
+/// The heaviest processes, as a card.
+///
+/// The dropdown renders this through `ProcessWell`, which brings its own
+/// titled housing; on the dashboard the card supplies that, so this is the
+/// table on its own.
+private struct ProcessDetail: View {
+    @ObservedObject var widget: ProcessTelemetryWidget
+
+    var body: some View {
+        if let reading = widget.reading {
+            VStack(alignment: .leading, spacing: 5) {
+                TableHeader(columns: [("PROCESS", .leading, nil),
+                                      ("MEMORY", .trailing, 62),
+                                      ("CPU", .trailing, 46)])
+                ForEach(reading.top) { row in
+                    HStack(spacing: 8) {
+                        Text(row.name)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Text(Format.bytes(row.footprint))
+                            .font(Theme.mono(9.5).monospacedDigit())
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 62, alignment: .trailing)
+                        Text(Format.percent(row.cpu, decimals: 1))
+                            .font(Theme.mono(10, .medium).monospacedDigit())
+                            .foregroundStyle(row.cpu > 0.5 ? Theme.orange : Theme.textSecondary)
+                            .frame(width: 46, alignment: .trailing)
+                    }
+                }
+                StatRow(label: "PROCESSES LIVE", value: "\(reading.total)")
+                    .padding(.top, 2)
+            }
+        } else {
             Waiting()
         }
     }
@@ -122,6 +182,30 @@ private struct StatRow: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.78)
         }
+    }
+}
+
+/// Current into or out of the pack.
+///
+/// Three states, not two. A pack that is neither taking nor giving current is
+/// doing nothing, and painting that green read as "charging" — so zero is
+/// neutral, current in is the wall colour, and current out is the warning one.
+private struct PackChargeRow: View {
+    let watts: Double
+    var prefix: String = ""
+    var detail: String?
+
+    /// Below this the reading is sensor noise rather than a flow.
+    private static let threshold = 0.5
+
+    var body: some View {
+        let idle = abs(watts) < Self.threshold
+        StatRow(label: prefix + "PACK CHARGE RATE",
+                value: idle ? "0.0 W"
+                            : String(format: "%@%.1f W", watts > 0 ? "+" : "−", abs(watts)),
+                tint: idle ? Theme.textPrimary
+                           : (watts > 0 ? Theme.cellWall : Theme.cellWarn),
+                detail: detail)
     }
 }
 
@@ -813,33 +897,38 @@ private struct PowerDetail: View {
                           tint: Theme.trace, height: 26).equatable()
             }
 
-            // The two figures that used to be confused with each other.
+            // Where the power is coming from and where it is going, as a tree
+            // rather than a list. On the adapter there is one source and two
+            // destinations, and the indentation says so: the two children add up
+            // to the parent by construction.
             Well {
                 PowerRailHeader(condition: flow.condition)
                 DashedRule()
-                // The rail, as three figures that add up. Signed, because the
-                // sign is the whole story: the pack either takes current or
-                // gives it, and a bare magnitude hides which.
-                StatRow(label: "SYSTEM LOAD",
-                        value: String(format: "%.1f W", flow.systemLoad),
-                        tint: Theme.textPrimary)
-                // Three states, not two. A pack that is neither taking nor
-                // giving current is doing nothing, and painting that green read
-                // as "charging" — so zero is neutral, current in is the same
-                // cyan as the charging glyph, and current out is amber.
-                let idle = abs(flow.batteryPower) < 0.5
-                StatRow(label: "PACK CHARGE RATE",
-                        value: idle ? "0.0 W"
-                                    : String(format: "%@%.1f W",
-                                             flow.batteryPower > 0 ? "+" : "−",
-                                             abs(flow.batteryPower)),
-                        tint: idle ? Theme.textPrimary
-                                   : (flow.batteryPower > 0 ? Theme.cyan : Theme.cellMedium))
                 if flow.isPluggedIn {
+                    // The parent and the pack row are the charger controller's
+                    // own measurements, which it republishes once a minute; the
+                    // draw between them is live off the SMC. They will not add
+                    // up exactly, and the tag says so rather than leaving a
+                    // reader to wonder why the arithmetic looks wrong.
                     StatRow(label: "ADAPTER INPUT",
-                            value: String(format: "+%.1f W", flow.adapterInput),
-                            tint: Theme.cyan,
+                            value: String(format: "%.1f W", flow.adapterInput),
+                            tint: Theme.cellWall,
                             detail: flow.adapterRating.map { String(format: "%.0f W rated", $0) })
+                    StatRow(label: "├─ SYSTEM POWER DRAW",
+                            value: String(format: "%.1f W", flow.systemLoad),
+                            tint: Theme.textPrimary,
+                            detail: "live")
+                    PackChargeRow(watts: flow.batteryPower, prefix: "└─ ", detail: "60 s")
+                } else {
+                    // On battery the two are the same measurement — everything
+                    // the machine burns comes out of the pack — so showing them
+                    // as separate rows would be the same number twice.
+                    StatRow(label: "NET SYSTEM DRAW",
+                            value: String(format: "%.1f W", flow.systemLoad),
+                            tint: Theme.textPrimary)
+                    StatRow(label: "BATTERY DISCHARGE RATE",
+                            value: String(format: "−%.1f W", abs(flow.batteryPower)),
+                            tint: Theme.cellWarn)
                 }
             }
 
@@ -1038,24 +1127,34 @@ struct BatteryGlyph: View {
 
     /// Fill colour.
     ///
-    /// Discharging is the case that matters: a static white bar tells you
-    /// nothing you did not already know, so it steps green → yellow → red as the
-    /// charge falls, and you can read the state without reading the number.
+    /// One rule, applied in one place, because the colour *is* the reading: a
+    /// glance has to answer "how full" and "which way is it flowing" without
+    /// anyone parsing a number.
+    ///
+    /// Cyan means wall power and nothing else. It is never a charge level, so a
+    /// cyan cell always means the machine is running off the adapter, whether it
+    /// is topping the pack up, holding it at a limit, or sitting full. Every
+    /// other state is on battery, and steps down a five-band scale.
     static func tint(_ percent: Int, _ condition: PowerFlow.Condition) -> Color {
+        // A pack in trouble is the one thing that outranks the flow direction.
+        if condition == .fault { return Theme.cellEmpty }
+        // `adapterAssist` is plugged in but *draining* — the charger cannot keep
+        // up — so it is deliberately not cyan. It is a battery level, and it
+        // should look like one.
         switch condition {
-        case .fault: return Theme.cellLow
-        // Charging is cyan — it reads as "energy going in" rather than as
-        // another shade of the healthy-charge green, so a glance tells you the
-        // direction of flow and not just the level.
-        case .charging: return Theme.cyan
-        case .acPassthrough: return Theme.cellHigh
-        case .adapterAssist: return Theme.cellMedium
-        case .optimizedHold: return Theme.cellHold
-        case .lowPowerMode: return Theme.cellMedium
-        case .discharging:
-            if percent < 20 { return Theme.cellLow }
-            if percent < 50 { return Theme.cellMedium }
-            return Theme.cellHigh
+        case .charging, .acPassthrough, .optimizedHold: return Theme.cellWall
+        default: return level(percent)
+        }
+    }
+
+    /// The discharge scale, in the five bands the spec names.
+    static func level(_ percent: Int) -> Color {
+        switch percent {
+        case 51...: return Theme.cellFull      // 100–51
+        case 26...50: return Theme.cellHalf     // 50–26
+        case 16...25: return Theme.cellWarn     // 25–16
+        case 6...15: return Theme.cellCritical  // 15–6
+        default: return Theme.cellEmpty         // 5–0
         }
     }
 
@@ -1097,15 +1196,26 @@ struct BatteryGlyph: View {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(Color.white.opacity(0.05))
 
-                RoundedRectangle(cornerRadius: radius * 0.6, style: .continuous)
-                    .fill(fill)
-                    .overlay { if mode == .high { HazardStripes() } }
-                    .clipShape(RoundedRectangle(cornerRadius: radius * 0.6, style: .continuous))
-                    .padding(height * 0.1)
-                    .frame(width: max(level > 0 ? height * 0.3 : 0,
-                                      (width - height * 0.2) * level),
-                           alignment: .leading)
-                    .animation(.easeOut(duration: 0.4), value: level)
+                // 1:1 with the percentage, measured rather than approximated.
+                //
+                // The track is the shell inset by its wall thickness on each
+                // side, so the fill's width is exactly `usable × level` — 50%
+                // covers half the track, to the pixel. Two things used to break
+                // that: a `max(…, height * 0.3)` floor that drew 2% and 10% the
+                // same size, and a `.padding` applied before the `.frame`, which
+                // made the frame width include the inset and left the bar short
+                // of the end at 100%.
+                GeometryReader { geometry in
+                    let inset = height * 0.1
+                    let usable = max(geometry.size.width - inset * 2, 0)
+                    RoundedRectangle(cornerRadius: radius * 0.6, style: .continuous)
+                        .fill(fill)
+                        .overlay { if mode == .high { HazardStripes() } }
+                        .clipShape(RoundedRectangle(cornerRadius: radius * 0.6, style: .continuous))
+                        .frame(width: usable * level, height: geometry.size.height - inset * 2)
+                        .offset(x: inset, y: inset)
+                        .animation(.easeOut(duration: 0.4), value: level)
+                }
 
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(shell, lineWidth: max(1, height * 0.1))
@@ -1556,15 +1666,14 @@ private struct Blades: Shape {
 private struct PowerRailHeader: View {
     let condition: PowerFlow.Condition
 
-    /// Green when the pack is gaining, amber when it is giving, neutral when it
-    /// is resting — so the tag agrees with the sign on the row below it.
+    /// The same rule as the cell itself: wall power is cyan, everything running
+    /// off the pack is not. The tag and the glyph must never disagree about
+    /// which side of that line the machine is on.
     private var tint: Color {
         switch condition {
-        case .charging: return Theme.cyan
-        case .acPassthrough: return Theme.cellHigh
-        case .adapterAssist, .lowPowerMode, .discharging: return Theme.cellMedium
-        case .optimizedHold: return Theme.cellHold
-        case .fault: return Theme.cellLow
+        case .charging, .acPassthrough, .optimizedHold: return Theme.cellWall
+        case .adapterAssist, .lowPowerMode, .discharging: return Theme.cellWarn
+        case .fault: return Theme.cellEmpty
         }
     }
 

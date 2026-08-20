@@ -36,6 +36,7 @@ final class NavigationModel: ObservableObject {
         let available = Page.available
         guard !available.contains(page) else { return }
         page = available.first ?? .settings
+        showingSettingsPane = false
     }
 
     private enum Keys {
@@ -48,13 +49,26 @@ final class NavigationModel: ObservableObject {
     init() {
         defaults.register(defaults: [Keys.collapsed: false])
         sidebarCollapsed = defaults.bool(forKey: Keys.collapsed)
-        page = defaults.string(forKey: Keys.page).flatMap(Page.init(rawValue:)) ?? .workspaces
+        // Telemetry is the landing page, and also the fallback when the stored
+        // selection names a tool that no longer exists — which it will once,
+        // for anyone upgrading from a build whose rail still had Guardrails.
+        page = defaults.string(forKey: Keys.page).flatMap(Page.init(rawValue:)) ?? .telemetry
         Self.shared = self
         retreatIfUnavailable()
     }
 
     func select(_ page: Page) {
         self.page = page
+    }
+
+    /// Straight to Guardrails, which is no longer a page of its own but the
+    /// telemetry dashboard's settings pane. Order matters: setting `page` clears
+    /// any pane that belonged to the tool being left, so the pane is opened
+    /// second.
+    func openGuardrails() {
+        guard Page.available.contains(.telemetry) else { return }
+        page = .telemetry
+        showingSettingsPane = true
     }
 
     func toggleSidebar() {

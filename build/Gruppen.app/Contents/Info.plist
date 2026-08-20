@@ -8,8 +8,8 @@
     <key>CFBundleIdentifier</key><string>com.dhilanpatel.gruppen</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>4.23</string>
-    <key>CFBundleVersion</key><string>202608152335</string>
+    <key>CFBundleShortVersionString</key><string>1.04</string>
+    <key>CFBundleVersion</key><string>202608190832</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>

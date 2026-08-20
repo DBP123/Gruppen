@@ -141,6 +141,23 @@ enum Theme {
     static let cellMedium = Color(hex: 0xEAB308)
     static let cellLow = Color(hex: 0xEF4444)
     static let cellHold = Color(hex: 0xF59E0B)
+
+    // MARK: Battery scale
+    //
+    // Five discharge bands and one wall-power colour. Kept apart from the
+    // general palette because they are a *scale*: the whole point is that a
+    // glance at the colour tells you the level, so nothing else in the app may
+    // borrow them and no band may be reused for a different meaning.
+    //
+    // `cellWall` is not `Theme.cyan` (0x00F0FF) on purpose — that one is the
+    // processor's domain colour, and a battery that turned processor-cyan while
+    // charging would collide with it in the menu bar.
+    static let cellWall = Color(hex: 0x06B6D4)
+    static let cellFull = Color(hex: 0x22C55E)
+    static let cellHalf = Color(hex: 0xF4F4F5)
+    static let cellWarn = Color(hex: 0xF97316)
+    static let cellCritical = Color(hex: 0xEF4444)
+    static let cellEmpty = Color(hex: 0xDC2626)
     static let crimson = Color(hex: 0xE0245E)
 
     // Borders

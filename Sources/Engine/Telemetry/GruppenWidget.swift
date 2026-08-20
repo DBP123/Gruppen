@@ -24,8 +24,16 @@ enum Telemetry {
     /// normalise across and thirty seconds at the panel's 2 Hz.
     static let historyLength = 60
 
-    /// The dropdown is open: 2 Hz.
+    /// The dropdown is open: 2 Hz. It holds a handful of compact wells and it is
+    /// open for seconds at a time.
     static let panelRate: TimeInterval = 0.5
+    /// The dashboard is open: 1 Hz.
+    ///
+    /// Half the dropdown's rate, because it is a page of eight dense cards you
+    /// leave open rather than a glance you dismiss — every tick redraws all of
+    /// them, and rendering, not sampling, is what this page costs. At 1 Hz the
+    /// figures still read as live and the draw work halves.
+    static let dashboardRate: TimeInterval = 1.0
     /// Closed, but pinned to the menu bar: 0.5 Hz.
     static let pinnedRate: TimeInterval = 2.0
 }

@@ -117,7 +117,7 @@ struct MonitorPanel: View {
                 MenuBarManager.shared.showMainWindow()
             }
             PanelAction(title: "Telemetry Settings", glyph: "slider.horizontal.3") {
-                navigation.select(.guardrails)
+                navigation.openGuardrails()
                 MenuBarManager.shared.showMainWindow()
             }
             PanelAction(title: "Quit Gruppen", glyph: "power", tint: Theme.red) {

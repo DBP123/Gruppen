@@ -68,7 +68,10 @@
       "Bash(osascript -e 'tell application \"System Events\" to tell process \"Gruppen\" to click menu bar item 3 of menu bar 2')",
       "Bash(screencapture -x -R1125,25,320,610 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/power.png)",
       "Bash(osascript -e 'tell application \"System Events\" to click at {1202, 477}')",
-      "Bash(screencapture -x -R1125,25,320,700 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/power-open.png)"
+      "Bash(screencapture -x -R1125,25,320,700 /private/tmp/claude-501/-Users-dhilanpatel-Gruppen/c0651683-3c69-4991-8ebe-b4b7e67a8487/scratchpad/power-open.png)",
+      "Bash(defaults delete *)",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Gruppen\" to click button 2 of group 1 of window 1')",
+      "Bash(osascript -e 'tell application \"System Events\" to tell process \"Gruppen\" to get {position, size} of window 1')"
     ]
   }
 }

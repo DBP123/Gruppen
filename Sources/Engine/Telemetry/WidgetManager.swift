@@ -98,6 +98,22 @@ final class WidgetManager: ObservableObject {
         return WidgetKind.configurable.filter { telemetryEnabled.contains($0) && panelVisible.contains($0) }
     }
 
+    /// Modules to lay out on the dashboard, in a fixed order.
+    ///
+    /// Every *armed* module, not the dropdown's subset. The two surfaces answer
+    /// different questions: the dropdown is a glance and has to stay short, so it
+    /// carries a chosen few; the dashboard is the page you open to look at the
+    /// machine, so it carries everything you have switched on. Tying it to the
+    /// dropdown's set instead would have left the new landing page blank for
+    /// anyone who had trimmed that list.
+    ///
+    /// Gruppen's own footprint is excluded: it already has a line at the foot of
+    /// the dropdown, and it is not a hardware module.
+    var dashboardOrder: [WidgetKind] {
+        guard monitorEnabled else { return [] }
+        return WidgetKind.configurable.filter { telemetryEnabled.contains($0) }
+    }
+
     /// Modules with their own menu bar item, left to right.
     var pinnedOrder: [WidgetKind] {
         guard monitorEnabled else { return [] }
@@ -145,6 +161,76 @@ final class WidgetManager: ObservableObject {
     func panelDidClose() {
         guard isPanelOpen else { return }
         isPanelOpen = false
+        reconcile()
+    }
+
+    /// Whether the dashboard page is on screen *and* the window showing it is
+    /// actually visible.
+    ///
+    /// The third demand source, alongside the dropdown and the menu bar pins,
+    /// and it obeys the same rule as both: it does not throttle the modules, it
+    /// decides whether they exist. Navigating to Stash or minimising the window
+    /// tears every dashboard module down — timer cancelled, SMC connection
+    /// closed, IORegistry handles released — and coming back builds them again.
+    /// A suspended timer would still be a timer.
+    @Published private(set) var isDashboardVisible = false
+
+    /// Dashboard cards the user has frozen.
+    ///
+    /// A frozen card holds the figures it had when you froze it and stops being
+    /// a reason for its module to run. Deliberately not persisted: a snapshot of
+    /// what the machine was doing before the app last quit is not information,
+    /// it is a stale number that looks live.
+    ///
+    /// Freezing removes *this surface's* demand, not everyone's. A module that
+    /// is also pinned to the menu bar keeps sampling for the item you asked for,
+    /// which is why the card renders a captured image rather than trusting the
+    /// module to stand still.
+    @Published private(set) var frozen: Set<WidgetKind> = []
+
+    func isFrozen(_ kind: WidgetKind) -> Bool { frozen.contains(kind) }
+
+    func setFrozen(_ kind: WidgetKind, _ on: Bool) {
+        guard frozen.contains(kind) != on else { return }
+        if on { frozen.insert(kind) } else { frozen.remove(kind) }
+        reconcile()
+    }
+
+    func thawAll() {
+        guard !frozen.isEmpty else { return }
+        frozen.removeAll()
+        reconcile()
+    }
+
+    /// Whether Gruppen is the app you are actually using.
+    ///
+    /// A second tier below visibility, and it exists because occlusion is
+    /// all-or-nothing: macOS only reports a window occluded when it is
+    /// *entirely* covered, so a browser that leaves a strip of the dashboard
+    /// showing keeps it at full rate. That is the usual shape of "hidden behind
+    /// something", and it was most of the drain.
+    ///
+    /// Partly visible is not nothing — figures may still be on screen — so this
+    /// slows the board to the menu bar's rate rather than stopping it. Fully
+    /// hidden still stops it dead.
+    @Published private(set) var isDashboardFocused = true
+
+    func dashboardDidChangeFocus(_ focused: Bool) {
+        guard isDashboardFocused != focused else { return }
+        isDashboardFocused = focused
+        guard isDashboardVisible else { return }
+        reconcile()
+    }
+
+    func dashboardDidAppear() {
+        guard !isDashboardVisible else { return }
+        isDashboardVisible = true
+        reconcile()
+    }
+
+    func dashboardDidDisappear() {
+        guard isDashboardVisible else { return }
+        isDashboardVisible = false
         reconcile()
     }
 
@@ -238,14 +324,21 @@ final class WidgetManager: ObservableObject {
     private func reconcile() {
         let pinned = pinnedOrder
         let inPanel = panelOrder
+        let onDashboardList = dashboardOrder
 
         for kind in WidgetKind.allCases {
             let inSharedPanel = isPanelOpen && (kind == .footprint ? monitorEnabled : inPanel.contains(kind))
+            // Must agree with `dashboardOrder` exactly: a module built here but
+            // not laid out there is a sampler running with nothing drawing it.
+            // A frozen card is showing a captured image, so it wants nothing
+            // from the module behind it.
+            let onDashboard = isDashboardVisible && onDashboardList.contains(kind)
+                && !frozen.contains(kind)
             // A module's own popover is as good a reason to be live as the
             // shared panel, and it is the only reason for modules the user has
             // taken out of that panel entirely.
             let inOwnPopover = monitorEnabled && telemetryEnabled.contains(kind) && openDetails.contains(kind)
-            let panelActive = inSharedPanel || inOwnPopover
+            let panelActive = inSharedPanel || inOwnPopover || onDashboard
             let barPinned = pinned.contains(kind)
 
             guard panelActive || barPinned else {
@@ -259,7 +352,15 @@ final class WidgetManager: ObservableObject {
             module.isMenuBarPinned = barPinned
             // Open dropdown wins: a pinned module the user is looking at should
             // move at the speed they are looking at it.
-            module.startFetching(rate: panelActive ? Telemetry.panelRate : Telemetry.pinnedRate)
+            // Fastest live surface wins. The dropdown and a module's own popover
+            // are glances, so they get 2 Hz; the dashboard is a page you leave
+            // open, so on its own it gets 1 Hz.
+            let rate: TimeInterval
+            if inSharedPanel || inOwnPopover { rate = Telemetry.panelRate }
+            else if onDashboard { rate = isDashboardFocused ? Telemetry.dashboardRate
+                                                            : Telemetry.pinnedRate }
+            else { rate = Telemetry.pinnedRate }
+            module.startFetching(rate: rate)
         }
         objectWillChange.send()
         onModulesChanged?()
@@ -283,6 +384,7 @@ final class WidgetManager: ObservableObject {
     /// harness between cases.
     func shutdown() {
         isPanelOpen = false
+        isDashboardVisible = false
         openDetails.removeAll()
         for (_, module) in modules { module.stopFetching() }
         modules.removeAll()

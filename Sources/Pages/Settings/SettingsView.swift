@@ -65,7 +65,7 @@ struct GeneralSettingsPane: View {
                 SettingToggle(title: "Show system monitor",
                               detail: "Live telemetry in the menu bar dropdown",
                               isOn: $settings.showPerformanceMonitor)
-                Button("Open Guardrails") { navigation.select(.guardrails) }
+                Button("Open Guardrails") { navigation.openGuardrails() }
                     .industrialButton(.secondary)
                 FootNote("Which hardware modules run, where each one shows, and what it costs are on the "
                          + "Guardrails page — they belong with the hardware, not in application preferences.")

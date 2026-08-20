@@ -41,11 +41,15 @@ extension Page {
     /// hiding it would lock the app into whatever state it was left in.
     var canBeHidden: Bool { self != .settings }
 
-    /// The tools the interface should offer. Everything that walks the page
-    /// list goes through this rather than `allCases`.
+    /// The tools the interface should offer, in rail order. Everything that
+    /// walks the page list goes through this rather than `allCases`.
+    ///
+    /// Two filters, and the order matters: a tool cut from the build is not
+    /// something the developer menu can switch back on, so the build check comes
+    /// first and the menu never lists it.
     @MainActor
     static var available: [Page] {
-        allCases.filter { !DeveloperSettings.shared.isHidden($0) }
+        allCases.filter(\.isInThisBuild).filter { !DeveloperSettings.shared.isHidden($0) }
     }
 }
 
@@ -179,7 +183,9 @@ struct DeveloperMenu: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(spacing: 6) {
-                ForEach(Page.allCases.filter(\.canBeHidden)) { page in
+                // Only tools this build actually has. Offering a switch for Data
+                // in a release build would be a control that does nothing.
+                ForEach(Page.allCases.filter(\.isInThisBuild).filter(\.canBeHidden)) { page in
                     ToolRow(page: page,
                             enabled: !draft.contains(page)) { on in
                         if on { draft.remove(page) } else { draft.insert(page) }
