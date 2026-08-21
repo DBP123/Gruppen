@@ -49,11 +49,11 @@ struct ToolHost: View {
     private var content: some View {
         switch navigation.page {
         case .telemetry:
-            // Guardrails is the dashboard's settings pane rather than a rail
+            // Telemetry settings is the dashboard's own pane rather than a rail
             // entry of its own: it is the list of what the dashboard is allowed
             // to show and what each one costs, which belongs behind the thing it
             // configures.
-            if navigation.showingSettingsPane { GuardrailsView() } else { TelemetryDashboardView() }
+            if navigation.showingSettingsPane { TelemetrySettingsView() } else { TelemetryDashboardView() }
         case .stash:
             StashPage()
         case .scripts:

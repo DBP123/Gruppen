@@ -244,14 +244,24 @@ final class AppleSiliconTelemetry {
         var gpuDie: Zone?
         /// `TB0T`. Present on every Mac with a battery, Intel or Apple Silicon.
         var battery: Zone?
-        /// Watts drawn by the whole machine, when the machine reports it.
-        var systemPower: Double?
         /// Empty on a fanless Mac.
         var fans: [Fan]
 
         var hottest: Double? {
             [cpuDie, efficiencyCores, gpuDie].compactMap { $0?.celsius }.max()
         }
+    }
+
+    /// Just the system rail, in watts.
+    ///
+    /// One SMC round-trip instead of the dozen `thermal()` makes. The power
+    /// module needs `PSTR` every tick and nothing else off this chip, and going
+    /// through the full thermal read to get it cost 1.78 ms a tick — every
+    /// sensor zone and both fans, read and thrown away. Each SMC call is about
+    /// 0.17 ms, so the saving is most of that.
+    func systemPower() -> Double? {
+        guard smc != 0, let key = sensors.power else { return nil }
+        return read(key).map { max($0, 0) }
     }
 
     func thermal() -> ThermalReading? {
@@ -277,11 +287,10 @@ final class AppleSiliconTelemetry {
             battery: sensors.battery.flatMap { key in
                 read(key).flatMap { $0 > 5 && $0 < 130 ? Zone(key: Self.name(of: key.code), celsius: $0) : nil }
             },
-            systemPower: sensors.power.flatMap(read).map { max($0, 0) },
             fans: fans)
         // A machine that answered nothing at all is worth reporting as nothing,
         // rather than as a well full of dashes.
-        guard reading.cpuDie != nil || reading.systemPower != nil else { return nil }
+        guard reading.cpuDie != nil else { return nil }
         return reading
     }
 

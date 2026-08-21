@@ -109,7 +109,7 @@ struct MacIdentity {
     }
 }
 
-/// The banner at the top of Guardrails.
+/// The banner at the top of the telemetry dashboard.
 ///
 /// Deliberately not a telemetry card: nothing in it moves, so it carries no
 /// gauges and no colour beyond the accent on the machine's name. It is there to

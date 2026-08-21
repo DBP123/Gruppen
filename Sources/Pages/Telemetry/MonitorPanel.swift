@@ -117,7 +117,7 @@ struct MonitorPanel: View {
                 MenuBarManager.shared.showMainWindow()
             }
             PanelAction(title: "Telemetry Settings", glyph: "slider.horizontal.3") {
-                navigation.openGuardrails()
+                navigation.openTelemetrySettings()
                 MenuBarManager.shared.showMainWindow()
             }
             PanelAction(title: "Quit Gruppen", glyph: "power", tint: Theme.red) {
@@ -482,7 +482,7 @@ private struct ThermalWell: View {
                         }
                     }
 
-                    if reading.hottest != nil || reading.systemPower != nil {
+                    if reading.hottest != nil {
                         HStack(spacing: 0) {
                             if let cpu = reading.cpuDie {
                                 MicroStat(label: "CPU", value: String(format: "%.0f°", cpu.celsius))
@@ -496,11 +496,8 @@ private struct ThermalWell: View {
                                 MicroStat(label: "BATT", value: String(format: "%.0f°", battery.celsius))
                                 Spacer(minLength: 4)
                             }
-                            if let power = reading.systemPower {
-                                MicroStat(label: "DRAW", value: String(format: "%.1f W", power),
-                                          tint: ThermalDetailTint.power(power))
-                                Spacer(minLength: 4)
-                            }
+                            // No wattage here either — see the note on the
+                            // thermal card. Watts belong to the power module.
                             if let fan = reading.fans.max(by: { $0.actual < $1.actual }) {
                                 MicroStat(label: "FAN",
                                           value: fan.actual > 0 ? String(format: "%.0f", fan.actual) : "OFF")

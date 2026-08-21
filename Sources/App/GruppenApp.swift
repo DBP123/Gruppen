@@ -63,7 +63,11 @@ struct GruppenApp: App {
                     // Arms whatever the library already had active. Nothing runs
                     // until one of those events actually fires.
                     triggers.rearm()
-                    collector.rearm()
+                    // Data is not in a release build, so its page cannot be
+                    // reached to disarm anything. Arming it anyway would leave a
+                    // machine that had metrics recording before the pivot still
+                    // recording them, with no page to see or stop it on.
+                    if Page.metrics.isInThisBuild { collector.rearm() }
                     // The menu bar is `NSStatusItem`s rather than a
                     // `MenuBarExtra`, because that scene type owns exactly one
                     // item and the point is to have several. It lives outside

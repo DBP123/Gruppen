@@ -340,7 +340,6 @@ final class ThermalSampler: TelemetrySampler {
         var gpuDie: AppleSiliconTelemetry.Zone?
         var batteryDie: AppleSiliconTelemetry.Zone?
         /// Watts drawn by the whole machine.
-        var systemPower: Double?
         /// Actual against commanded speed, per fan.
         var fans: [AppleSiliconTelemetry.Fan] = []
 
@@ -416,7 +415,6 @@ final class ThermalSampler: TelemetrySampler {
             reading.efficiencyCores = zones.efficiencyCores
             reading.gpuDie = zones.gpuDie
             reading.batteryDie = zones.battery
-            reading.systemPower = zones.systemPower
             reading.fans = zones.fans
         }
 
@@ -467,11 +465,15 @@ final class ThermalTelemetryWidget: TelemetryModule<ThermalSampler> {
         return reading.stateLabel
     }
 
-    /// Temperature over draw — the two halves of the same question.
+    /// Temperature over whatever else this module knows.
+    ///
+    /// Wattage used to be the second line. It has gone from the card, the
+    /// dropdown well and now from here too: the thermal module reports
+    /// temperatures, the power module reports watts, and the same figure in two
+    /// modules is two places that can disagree.
     override var pinnedStack: (String, String)? {
         guard let reading else { return nil }
         let top = reading.hottest.map { String(format: "%.0f°C", $0) } ?? reading.stateLabel
-        if let watts = reading.systemPower { return (top, String(format: "%.1f W", watts)) }
         if let percent = reading.batteryPercent { return (top, "BAT \(percent)%") }
         return (top, reading.stateLabel)
     }

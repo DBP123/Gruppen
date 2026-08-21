@@ -7,7 +7,7 @@ import Foundation
 /// whether the dropdown is open — and derives everything from those.
 ///
 /// A module runs when its telemetry is enabled **and** something is looking at
-/// it. That gives three switches per module, which is what the Guardrails page
+/// it. That gives three switches per module, which is what the telemetry settings
 /// puts in front of the user:
 ///
 /// | telemetry | in dropdown | pinned | dropdown open | module           |

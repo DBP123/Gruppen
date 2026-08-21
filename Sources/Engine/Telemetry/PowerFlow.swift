@@ -258,15 +258,7 @@ struct PowerFlow: Equatable {
     /// Nil on a Mac that has no such key, in which case the caller falls back to
     /// the controller's slow figure — stale beats absent.
     static func liveSystemDraw() -> Double? {
-        AppleSiliconTelemetry.shared.thermal()?.systemPower
-    }
-
-    /// Exposes the adapter arithmetic to the tests. The identity it encodes —
-    /// source equals the sum of its two destinations — is the whole claim the
-    /// power tree makes on screen, so it is worth asserting directly.
-    static func probeAdapter(reported: Double? = nil, system: Double,
-                             battery: Double, plugged: Bool) -> Double {
-        adapterInput(reported: reported, system: system, battery: battery, plugged: plugged)
+        AppleSiliconTelemetry.shared.systemPower()
     }
 
     static func read(liveDraw: Double? = liveSystemDraw()) -> PowerFlow? {
@@ -355,8 +347,41 @@ struct PowerFlow: Equatable {
 /// dozen SMC keys; this reads one IORegistry node at 0.23 ms, so pinning the
 /// battery to the menu bar no longer drags the sensor sweep along with it.
 final class PowerSampler: TelemetrySampler {
+    /// One quantity, four ways of reading it.
+    ///
+    /// The averages are over a *time* window rather than a sample count, because
+    /// the module's rate changes with what is looking at it — 1 Hz on the
+    /// dashboard, 2 Hz in a popover, 0.5 Hz pinned. "The last sixty samples"
+    /// would mean sixty seconds, thirty seconds or two minutes depending on
+    /// where you happened to be looking.
+    ///
+    /// Worth knowing before trusting the pack row's averages: the pack's flow
+    /// comes from a controller that republishes once a minute, so averaging it
+    /// smooths a staircase rather than a curve. The draw is live off the SMC and
+    /// averages properly.
+    struct Trend: Equatable {
+        var live: Double = 0
+        var avg10: Double = 0
+        var avg60: Double = 0
+        /// Highest seen since this module was built. Reset when it is torn down,
+        /// so it means "this session" rather than "since some forgotten burst".
+        var peak: Double = 0
+
+        func value(_ readout: RailReadout) -> Double {
+            switch readout {
+            case .live: return live
+            case .avg10: return avg10
+            case .avg60: return avg60
+            case .peak: return peak
+            }
+        }
+    }
+
     struct Reading: Equatable {
         var flow: PowerFlow
+        /// System draw and pack flow, each with its averages and peak.
+        var draw = Trend()
+        var pack = Trend()
         /// Charge cycles, and health as a percentage of the pack's design
         /// capacity — the two numbers that say how old a battery is.
         var cycleCount: Int?
@@ -364,17 +389,7 @@ final class PowerSampler: TelemetrySampler {
         var temperature: Double?
         /// Low Power Mode, as macOS reports it.
         var isLowPower: Bool = false
-        /// What is actually costing the battery: the processes burning the most
-        /// CPU. Apple's "Energy Impact" is a weighted blend of CPU, wake-ups,
-        /// GPU and disk that Apple has never published, so this reports the term
-        /// that dominates it and labels itself as CPU rather than inventing a
-        /// score and calling it energy.
-        var consumers: [ProcessSampler.Row] = []
     }
-
-    /// The process table is shared with the process module rather than swept
-    /// twice — one sampler, whichever of the two modules is alive.
-    private let processes = ProcessSampler()
 
     /// The last read of the pack controller, and when it was taken.
     ///
@@ -384,6 +399,11 @@ final class PowerSampler: TelemetrySampler {
     private var cachedFlow: PowerFlow?
     private var cachedExtras: (cycles: Int?, health: Double?, celsius: Double?)?
     private var cachedAt: Date?
+
+    /// Rolling window for the averages. Sixty seconds of it, trimmed by age.
+    private var history: [(at: Date, draw: Double, pack: Double)] = []
+    private var peakDraw: Double = 0
+    private var peakPack: Double = 0
 
     func sample() -> Reading? {
         // The live half, every tick: this is the figure that actually moves.
@@ -405,21 +425,56 @@ final class PowerSampler: TelemetrySampler {
         // agrees with; recomputing it against the live draw is exactly the
         // clock-mixing that produced a 0 W adapter.
         flow.systemLoad = draw ?? flow.systemLoad
+        record(draw: flow.systemLoad, pack: flow.batteryPower)
 
         return Reading(flow: flow,
+                       draw: trend(for: flow.systemLoad, keyPath: \.draw, peak: &peakDraw),
+                       pack: trend(for: flow.batteryPower, keyPath: \.pack, peak: &peakPack),
                        cycleCount: extras.cycles,
                        health: extras.health,
                        temperature: extras.celsius,
-                       isLowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
-                       consumers: processes.sample()?.top ?? [])
+                       isLowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+
+    /// Adds this tick to the window and returns the four readings.
+    ///
+    /// `record` is called once per sample before either trend is built, so both
+    /// share one window and one timestamp.
+    private func trend(for value: Double,
+                       keyPath: KeyPath<(at: Date, draw: Double, pack: Double), Double>,
+                       peak: inout Double) -> Trend {
+        func mean(_ seconds: TimeInterval) -> Double {
+            let cutoff = Date().addingTimeInterval(-seconds)
+            let window = history.filter { $0.at >= cutoff }
+            guard !window.isEmpty else { return value }
+            return window.reduce(0) { $0 + $1[keyPath: keyPath] } / Double(window.count)
+        }
+        // Peak is by magnitude so a pack discharging at 40 W registers as a peak
+        // the same way a 40 W charge would, but keeps its sign for display.
+        if abs(value) > abs(peak) { peak = value }
+        return Trend(live: value, avg10: mean(10), avg60: mean(60), peak: peak)
+    }
+
+    private func record(draw: Double, pack: Double) {
+        let now = Date()
+        history.append((now, draw, pack))
+        let cutoff = now.addingTimeInterval(-60)
+        if let first = history.first, first.at < cutoff {
+            history.removeAll { $0.at < cutoff }
+        }
     }
 
     /// Drops the cached pack state, so a module rebuilt after the panel was
-    /// closed does not open on a reading from whenever it last ran.
+    /// closed does not open on a reading from whenever it last ran. The window
+    /// and the peaks go with it — a "session peak" that survived the module
+    /// being destroyed would be a number from a session that has ended.
     func teardown() {
         cachedFlow = nil
         cachedExtras = nil
         cachedAt = nil
+        history.removeAll(keepingCapacity: false)
+        peakDraw = 0
+        peakPack = 0
     }
 }
 
@@ -472,5 +527,39 @@ final class PowerTelemetryWidget: TelemetryModule<PowerSampler> {
     override var pinnedStack: (String, String)? {
         guard let flow = reading?.flow else { return nil }
         return ("\(flow.percent)%", pinnedSummary ?? "—")
+    }
+}
+
+/// Which of a rail row's four readings to show.
+///
+/// Per-row and persisted, because the useful answer differs by row and by what
+/// you are doing: `live` when you are watching a build spike, `60s avg` when you
+/// want to know what the machine actually costs to run, `peak` when you are
+/// hunting for what tripped the fans.
+enum RailReadout: String, CaseIterable, Codable {
+    case live
+    case avg10
+    case avg60
+    case peak
+
+    /// The parenthetical after the row title.
+    var label: String {
+        switch self {
+        case .live: return "live"
+        case .avg10: return "10s avg"
+        case .avg60: return "60s avg"
+        case .peak: return "peak"
+        }
+    }
+
+    /// The pack row has no peak. A "highest charge rate this session" is the
+    /// charger's rated current and tells you nothing about the machine, whereas
+    /// a peak *draw* is a real diagnostic.
+    static let drawModes: [RailReadout] = [.live, .avg10, .avg60, .peak]
+    static let packModes: [RailReadout] = [.live, .avg10, .avg60]
+
+    func next(in modes: [RailReadout]) -> RailReadout {
+        guard let index = modes.firstIndex(of: self) else { return modes[0] }
+        return modes[(index + 1) % modes.count]
     }
 }

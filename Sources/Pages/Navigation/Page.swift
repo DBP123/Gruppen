@@ -69,7 +69,7 @@ enum Page: String, CaseIterable, Identifiable {
 
     /// Whether the tool carries its own isolated settings pane.
     ///
-    /// Telemetry's pane is Guardrails — which module is armed, which appears on
+    /// Telemetry's pane is its settings — which module is armed, which appears on
     /// the dashboard, which is pinned to the menu bar. It used to be a rail entry
     /// of its own, which put the dashboard and the switches that configure it in
     /// two different places.
@@ -83,7 +83,7 @@ enum Page: String, CaseIterable, Identifiable {
     /// Label for the settings-pane chip, since "TOOL SETTINGS" undersells a page
     /// that is really the telemetry cost model.
     var settingsPaneBadge: String {
-        self == .telemetry ? "GUARDRAILS" : "TOOL SETTINGS"
+        self == .telemetry ? "TELEMETRY SETTINGS" : "TOOL SETTINGS"
     }
 
     /// Whether this build offers the tool at all.

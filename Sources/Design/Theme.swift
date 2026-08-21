@@ -137,10 +137,7 @@ enum Theme {
     /// The battery's own palette, from the state matrix: a neutral shell, and
     /// three fill steps that say how much is left without reading the number.
     static let cellShell = Color(hex: 0x8E8E93)
-    static let cellHigh = Color(hex: 0x22C55E)
-    static let cellMedium = Color(hex: 0xEAB308)
     static let cellLow = Color(hex: 0xEF4444)
-    static let cellHold = Color(hex: 0xF59E0B)
 
     // MARK: Battery scale
     //

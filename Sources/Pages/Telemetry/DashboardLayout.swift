@@ -168,8 +168,6 @@ final class DashboardLayout: ObservableObject {
         return result
     }
 
-    func isLocked(_ kind: WidgetKind) -> Bool { slots[kind]?.locked ?? false }
-
     func toggleLock(_ kind: WidgetKind, in order: [WidgetKind], width: CGFloat) {
         let original = slot(for: kind, order: order, width: width)
         var slot = original
@@ -218,16 +216,6 @@ final class DashboardLayout: ObservableObject {
     private func write(_ slot: Slot, for kind: WidgetKind, unchangedFrom original: Slot) {
         guard slot != original else { return }
         slots[kind] = slot
-        persist()
-    }
-
-    /// Drop stored slots that have drifted back to exactly where the default
-    /// would put them, so the board does not accumulate entries that say
-    /// nothing — and so a widened window can go on reflowing those cards.
-    func tidy(order: [WidgetKind], width: CGFloat) {
-        let redundant = slots.filter { $0.value == Self.defaultSlot(for: $0.key, order: order, width: width) }
-        guard !redundant.isEmpty else { return }
-        for key in redundant.keys { slots.removeValue(forKey: key) }
         persist()
     }
 

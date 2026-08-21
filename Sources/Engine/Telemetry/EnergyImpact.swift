@@ -166,7 +166,7 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
 ///
 /// Not a `TelemetryModule`: this is a section inside the battery panel rather
 /// than a module of its own, so it has no `WidgetKind`, never appears in
-/// Guardrails and can never be pinned to the menu bar. What it does share is the
+/// telemetry settings and can never be pinned to the menu bar. What it shares is the
 /// rule the rest of the app is built on — the timer exists only while the view
 /// is on screen, and closing the fold destroys it rather than pausing it.
 @MainActor

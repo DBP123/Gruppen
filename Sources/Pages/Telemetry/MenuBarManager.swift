@@ -40,12 +40,6 @@ final class MenuBarManager: NSObject {
         WidgetManager.shared.start()
     }
 
-    /// How many standalone metric items are in the menu bar, and whether the
-    /// app's own item is there. Exists for the test harness, which cannot see
-    /// pixels but can check that pinning a module really does produce an item.
-    var itemCount: Int { items.count }
-    var hasMasterItem: Bool { master != nil }
-    var itemKinds: [WidgetKind] { items.keys.sorted { $0.rawValue < $1.rawValue } }
     /// The width one item is currently claiming. Also for the harness, which
     /// checks that a reading never changes it and that picking a different form
     /// does.
@@ -90,7 +84,7 @@ final class MenuBarManager: NSObject {
             items[kind] = makeItem(for: kind, readout: readout)
         }
         // The one thing that legitimately resizes an item: the user picking a
-        // different form for it in Guardrails.
+        // different form for it in telemetry settings.
         for (kind, readout) in readouts where readout.mode != widgets.mode(for: kind) {
             readout.setMode(widgets.mode(for: kind))
             items[kind]?.length = MenuBarMetrics.itemLength(kind, readout.mode)
@@ -127,6 +121,17 @@ final class MenuBarManager: NSObject {
         guard let button = item.button else { return item }
 
         let host = PassThroughHostingView(rootView: MenuBarWidgetView(readout: readout))
+        // Stop the hosting view measuring itself.
+        //
+        // By default `NSHostingView` feeds its SwiftUI intrinsic size back into
+        // Auto Layout, so every update runs `invalidateSizeConstraintsIfNecessary`
+        // and `updateWindowContentSizeExtremaIfNecessary` — a full layout pass
+        // to compute a size that is then thrown away, because the constraints
+        // below pin this to the button and `item.length` is a fixed number set
+        // once. A `sample` profile of the idle app was dominated by exactly that:
+        // `LayoutEngineBox.sizeThatFits`, `NSHostingView.minSize`, and
+        // `-[NSWindow _layoutViewTree]`, on an item whose size cannot change.
+        host.sizingOptions = []
         host.translatesAutoresizingMaskIntoConstraints = false
         button.addSubview(host)
         NSLayoutConstraint.activate([
@@ -497,7 +502,8 @@ struct MenuBarWidgetView: View {
                          state: readout.frame.powerState ?? .wall,
                          condition: readout.frame.condition ?? .discharging,
                          width: MenuBarMetrics.batteryWidth,
-                         height: MenuBarMetrics.batteryHeight)
+                         height: MenuBarMetrics.batteryHeight,
+                         still: true)
                 .frame(width: MenuBarMetrics.batteryWidth + 4, height: MenuBarMetrics.height)
         case .sparkline:
             MenuBarSparkline(plot: readout.frame.plot, tint: tint)
