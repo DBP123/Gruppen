@@ -116,6 +116,47 @@ enum Theme {
     static let machined = Color(hex: 0x0D0D0F)
     static let machinedBorder = Color(hex: 0x1A1A1C)
 
+    /// Milled-aluminium housing, and the lit edge along its top lip. Used by
+    /// the menu bar monitor, which is a piece of equipment rather than a page.
+    static let housing = Color(hex: 0x09090B)
+    static let housingEdge = Color(hex: 0x2C2C2E)
+    /// A data well: instrument glass, darker than anything around it.
+    static let well = Color.black
+    /// The trace colour every plot is drawn in. Emerald rather than the panel's
+    /// orange: orange is what this app uses for *controls the user has armed*,
+    /// and a line that is merely reporting should not read as a switch being on.
+    static let trace = Color(hex: 0x10B981)
+    /// Performance cores, and anything else that wants to read as the *fast*
+    /// half of a pair next to `trace`.
+    static let cyan = Color(hex: 0x00F0FF)
+    /// The two warning steps for threshold gating. Amber is "working", crimson
+    /// is "past where you want it".
+    static let purple = Color(hex: 0xA855F7)
+    static let blue = Color(hex: 0x3B82F6)
+    static let amber = Color(hex: 0xF5A524)
+    /// The battery's own palette, from the state matrix: a neutral shell, and
+    /// three fill steps that say how much is left without reading the number.
+    static let cellShell = Color(hex: 0x8E8E93)
+    static let cellLow = Color(hex: 0xEF4444)
+
+    // MARK: Battery scale
+    //
+    // Five discharge bands and one wall-power colour. Kept apart from the
+    // general palette because they are a *scale*: the whole point is that a
+    // glance at the colour tells you the level, so nothing else in the app may
+    // borrow them and no band may be reused for a different meaning.
+    //
+    // `cellWall` is not `Theme.cyan` (0x00F0FF) on purpose — that one is the
+    // processor's domain colour, and a battery that turned processor-cyan while
+    // charging would collide with it in the menu bar.
+    static let cellWall = Color(hex: 0x06B6D4)
+    static let cellFull = Color(hex: 0x22C55E)
+    static let cellHalf = Color(hex: 0xF4F4F5)
+    static let cellWarn = Color(hex: 0xF97316)
+    static let cellCritical = Color(hex: 0xEF4444)
+    static let cellEmpty = Color(hex: 0xDC2626)
+    static let crimson = Color(hex: 0xE0245E)
+
     // Borders
     static let borderSubtle = Color.white.opacity(0.07)
     static let borderStrong = Color.white.opacity(0.14)
@@ -138,6 +179,19 @@ enum Theme {
     static let red = Color(hex: 0xFF5F56)
     /// Near-black on orange measures 5.95:1; the spec's white was 3.30:1.
     static let onAccent = Color(hex: 0x0A0B0D)
+
+    /// A module's domain colour, from `WidgetKind.domainIndex`. Thermal (4)
+    /// has no fixed colour — it is gated on temperature — so it falls back to
+    /// the neutral trace and callers override it.
+    static func domain(_ index: Int) -> Color {
+        switch index {
+        case 0: return cyan
+        case 1: return purple
+        case 2: return trace
+        case 3: return blue
+        default: return trace
+        }
+    }
 
     static let radiusSm: CGFloat = 4
     static let radiusMd: CGFloat = 8

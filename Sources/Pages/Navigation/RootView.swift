@@ -9,6 +9,7 @@ import SwiftUI
 /// view asked for an unbounded width. This owns all three.
 struct RootView: View {
     @EnvironmentObject private var navigation: NavigationModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         HStack(spacing: 0) {
@@ -17,6 +18,11 @@ struct RootView: View {
         }
         .background(Theme.panel)
         .preferredColorScheme(.dark)
+        // `openWindow` only exists inside a scene, and the menu bar items are
+        // not in one. This is where it is handed over.
+        .onAppear {
+            MenuBarManager.shared.openMainWindow = { openWindow(id: WindowID.main) }
+        }
     }
 }
 
@@ -42,14 +48,23 @@ struct ToolHost: View {
     @ViewBuilder
     private var content: some View {
         switch navigation.page {
-        case .workspaces:
-            if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
+        case .telemetry:
+            // Telemetry settings is the dashboard's own pane rather than a rail
+            // entry of its own: it is the list of what the dashboard is allowed
+            // to show and what each one costs, which belongs behind the thing it
+            // configures.
+            if navigation.showingSettingsPane { TelemetrySettingsView() } else { TelemetryDashboardView() }
         case .stash:
             StashPage()
         case .scripts:
             ScriptBuilderView()
-        case .guardrails:
-            ResourceGuardrailsView()
+        case .workspaces:
+            if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
+        case .metrics:
+            // Unreachable in a release build — `Page.isInThisBuild` keeps it out
+            // of the rail — but still compiled, so the tool does not rot while
+            // it is switched off.
+            MetricsView()
         case .settings:
             GeneralSettingsPane()
         }
@@ -81,7 +96,7 @@ private struct ToolHeader: View {
                 .tracking(1.3)
                 .foregroundStyle(Theme.textSecondary)
 
-            Chip(text: inSettings ? "TOOL SETTINGS" : page.badge,
+            Chip(text: inSettings ? page.settingsPaneBadge : page.badge,
                  tint: page.isImplemented ? Theme.orange : Theme.textMuted,
                  size: 9)
 

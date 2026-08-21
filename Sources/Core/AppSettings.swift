@@ -73,8 +73,8 @@ final class AppSettings: ObservableObject {
         exportPath.isEmpty ? StashExporter.defaultDestination : URL(fileURLWithPath: exportPath)
     }
 
-    /// Shows CPU/RAM in the menu bar dropdown. Sampling runs only while that
-    /// menu is open, so this costs nothing when it is closed.
+    /// Master switch for the telemetry modules in the menu bar dropdown. Off
+    /// means no module can exist at all, whatever `WidgetManager` has stored.
     @Published var showPerformanceMonitor: Bool {
         didSet { persist(showPerformanceMonitor, oldValue, Keys.performanceMonitor) }
     }

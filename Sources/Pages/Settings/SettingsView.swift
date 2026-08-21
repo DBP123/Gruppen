@@ -8,6 +8,34 @@ import SwiftUI
 /// not app settings.
 struct GeneralSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var navigation: NavigationModel
+
+    /// The way into the developer menu. Deliberately unremarkable — a field
+    /// with no label promising anything, which does nothing at all unless what
+    /// is typed into it is the passphrase.
+    @State private var key = ""
+    @State private var showingDeveloper = false
+
+    private var developer: some View {
+        HStack(spacing: 8) {
+            SecureField("", text: $key, prompt: Text("").foregroundColor(Theme.textMuted))
+                .textFieldStyle(.plain)
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 150)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .recessed()
+                .onSubmit {
+                    guard DeveloperGate.accepts(key) else { key = ""; return }
+                    key = ""
+                    showingDeveloper = true
+                }
+            Spacer()
+        }
+        .padding(.top, 4)
+        .sheet(isPresented: $showingDeveloper) { DeveloperMenu() }
+    }
 
     var body: some View {
         SettingsScroll {
@@ -34,11 +62,16 @@ struct GeneralSettingsPane: View {
             }
 
             LabeledSection(label: "MONITORING") {
-                SettingToggle(title: "Show performance monitor",
-                              detail: "CPU and memory readout at the top of the menu bar dropdown",
+                SettingToggle(title: "Show system monitor",
+                              detail: "Live telemetry in the menu bar dropdown",
                               isOn: $settings.showPerformanceMonitor)
-                FootNote("Sampling runs only while that menu is open, so the readout costs nothing when it is closed.")
+                Button("Open Telemetry Settings") { navigation.openTelemetrySettings() }
+                    .industrialButton(.secondary)
+                FootNote("Which hardware modules run, where each one shows, and what it costs are on the "
+                         + "Telemetry settings pane — they belong with the hardware, not in application preferences.")
             }
+
+            developer
 
             LabeledSection(label: "BUILD") {
                 KeyValue("Version", Bundle.versionString)
@@ -69,6 +102,33 @@ struct GeneralSettingsPane: View {
 /// Shared scaffold for settings panes so every one scrolls and pads the same.
 struct SettingsScroll<Content: View>: View {
     @ViewBuilder let content: Content
+
+    /// The way into the developer menu. Deliberately unremarkable — a field
+    /// with no label promising anything, which does nothing at all unless what
+    /// is typed into it is the passphrase.
+    @State private var key = ""
+    @State private var showingDeveloper = false
+
+    private var developer: some View {
+        HStack(spacing: 8) {
+            SecureField("", text: $key, prompt: Text("").foregroundColor(Theme.textMuted))
+                .textFieldStyle(.plain)
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(width: 150)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .recessed()
+                .onSubmit {
+                    guard DeveloperGate.accepts(key) else { key = ""; return }
+                    key = ""
+                    showingDeveloper = true
+                }
+            Spacer()
+        }
+        .padding(.top, 4)
+        .sheet(isPresented: $showingDeveloper) { DeveloperMenu() }
+    }
 
     var body: some View {
         ScrollView {

@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         NSApp.activate(ignoringOtherApps: true)
         guard !flag else { return true }
-        if let window = NSApp.windows.first(where: { $0.title == GruppenApp.mainWindowTitle }) {
+        if let window = NSApp.windows.first(where: { $0.title == WindowID.mainWindowTitle }) {
             window.makeKeyAndOrderFront(nil)
         }
         return true
