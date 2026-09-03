@@ -1,10 +1,10 @@
 import AppKit
 
-// The two ways a stash is summoned without anything polling: invisible drop
-// targets parked at the screen edges, and a drag monitor that only exists
+// The two ways a stash is summoned without anything polling: invisible
+// tripwires parked at the screen edges, and a drag monitor that only exists
 // between mouse-down and mouse-up.
 
-/// Invisible drag targets parked at the screen edges.
+/// Invisible tripwires parked at the screen edges.
 ///
 /// This is the Passive Sentinel pattern: rather than asking where the cursor is
 /// many times a second, we hand the window server a few tiny transparent
@@ -12,15 +12,17 @@ import AppKit
 /// A sentinel costs nothing until a drag actually crosses it, at which point
 /// AppKit calls `draggingEntered` for us. There is no polling and no timer.
 
-/// A view that exists only to receive drags.
+/// A view that notices a drag passing over it, and never takes it.
+///
+/// **A sentinel is a tripwire, not a target.** It reports the crossing and
+/// declines the drag — `draggingEntered` returns no operation, so the pointer
+/// keeps the "this will not drop here" cursor and the sentinel never claims a
+/// drop meant for the window underneath it. The coordinator then retires the
+/// panel outright, which is the only way to be certain: an invisible window
+/// covering part of the screen is an obstacle to every drag that crosses it,
+/// whatever it answers, so the one that has done its job stops existing.
 final class SentinelView: NSView {
     var onDragEntered: (() -> Void)?
-    var onDragExited: (() -> Void)?
-    /// When set, the sentinel accepts the drop itself rather than only
-    /// revealing the tray. This is what gives the notch a target far larger
-    /// than the tray you can see.
-    var onItems: (([StashItem]) -> Void)?
-    var onDropAccepted: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -32,23 +34,16 @@ final class SentinelView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    /// Notices, then declines. Returning an empty operation is the difference
+    /// between "come close and the tray appears" and "come close and the tray
+    /// takes it": with `.copy` the cursor promises a drop this window has no
+    /// business accepting.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         onDragEntered?()
-        return .copy
+        return []
     }
 
-    override func draggingExited(_ sender: NSDraggingInfo?) {
-        onDragExited?()
-    }
-
-    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { onItems != nil }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        guard let onItems else { return false }
-        onDropAccepted?()
-        IngestionManager.ingest(sender) { items in onItems(items) }
-        return true
-    }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { false }
 }
 
 /// Shared configuration for every sentinel window.
@@ -91,13 +86,19 @@ final class NotchSentinelPanel: SentinelPanel {
     /// notch plus the menu bar either side of it, and reaches far enough down
     /// that a drag heading upward crosses it well before the bezel.
     ///
-    /// It is also the drop target, not just the trigger. The visible tray is
-    /// exactly notch-width because that is what sells the illusion, but 185pt is
-    /// a small thing to hit while dragging — aiming at it meant overshooting
-    /// into the bezel and having to come back down. This band is wider than the
-    /// tray on both sides and deeper than it below, and a drop anywhere in it
-    /// lands on the notch shelf. You aim at the notch; you do not have to hit
-    /// it.
+    /// **It reveals the tray and nothing else.** It used to be the drop target
+    /// as well, on the theory that a 185pt tray is a small thing to hit while
+    /// dragging — so a drop anywhere in this band landed on the notch shelf.
+    /// That trade is not available: the band is invisible and covers the top
+    /// centre of the screen, which is where toolbars, tab bars and the tops of
+    /// windows live. Dropping a file onto any of them meant releasing inside the
+    /// band, and the shelf swallowed it. A target you cannot see must never take
+    /// anything, however generous the intent.
+    ///
+    /// So the band is a tripwire. Crossing it slides the tray out — early, and
+    /// from a long way off, which is the part worth keeping — and the band then
+    /// retires for the rest of the drag. From that moment the only thing that
+    /// can accept the drop is the tray you can see, sitting on the notch.
     static let height: CGFloat = 190
     /// How far past the notch, on each side, still counts as the notch.
     static let sideReach: CGFloat = 190
@@ -156,73 +157,74 @@ final class EdgeSentinelPanel: SentinelPanel {
 /// when a drag could reach them and never otherwise.
 @MainActor
 final class SentinelCoordinator {
-    private var panels: [SentinelPanel] = []
+    private var notchPanel: SentinelPanel?
     private var edgePanels: [SentinelPanel] = []
     private let onNotch: () -> Void
-    private let onNotchExited: () -> Void
-    private let onNotchItems: ([StashItem]) -> Void
-    private let onNotchDropAccepted: () -> Void
     private let onEdge: (NSPoint) -> Void
 
     init(onNotch: @escaping () -> Void,
-         onNotchExited: @escaping () -> Void,
-         onNotchItems: @escaping ([StashItem]) -> Void,
-         onNotchDropAccepted: @escaping () -> Void,
          onEdge: @escaping (NSPoint) -> Void) {
         self.onNotch = onNotch
-        self.onNotchExited = onNotchExited
-        self.onNotchItems = onNotchItems
-        self.onNotchDropAccepted = onNotchDropAccepted
         self.onEdge = onEdge
     }
 
+    /// Puts up whatever is missing, rather than all or nothing.
+    ///
+    /// Every sentinel retires itself once it has fired, so by the time the notch
+    /// tray withdraws and asks for its tripwire back, the edges may still be up
+    /// or may have been spent. An all-or-nothing guard read the surviving edges
+    /// as "already installed" and quietly declined to replace the one panel that
+    /// was actually gone.
     func install() {
-        guard panels.isEmpty, let screen = NSScreen.main else { return }
+        guard let screen = NSScreen.main else { return }
 
-        let notch = NotchSentinelPanel(screen: screen) { [weak self] in
-            Task { @MainActor in self?.onNotch() }
+        if notchPanel == nil {
+            let panel = NotchSentinelPanel(screen: screen) { [weak self] in
+                Task { @MainActor in self?.triggerNotch() }
+            }
+            notchPanel = panel
+            panel.orderFrontRegardless()
         }
-        if let view = notch.contentView as? SentinelView {
-            view.onDragExited = { [weak self] in
-                Task { @MainActor in self?.onNotchExited() }
-            }
-            view.onDropAccepted = { [weak self] in
-                Task { @MainActor in self?.onNotchDropAccepted() }
-            }
-            view.onItems = { [weak self] items in
-                Task { @MainActor in self?.onNotchItems(items) }
-            }
-        }
-        panels.append(notch)
 
-        for side in [EdgeSentinelPanel.Side.left, .right] {
-            let panel = EdgeSentinelPanel(side: side, screen: screen) { [weak self] in
-                Task { @MainActor in self?.triggerEdge() }
+        if edgePanels.isEmpty {
+            for side in [EdgeSentinelPanel.Side.left, .right] {
+                let panel = EdgeSentinelPanel(side: side, screen: screen) { [weak self] in
+                    Task { @MainActor in self?.triggerEdge() }
+                }
+                edgePanels.append(panel)
+                panel.orderFrontRegardless()
             }
-            edgePanels.append(panel)
-            panels.append(panel)
         }
-        panels.forEach { $0.orderFrontRegardless() }
     }
 
     func remove() {
-        guard !panels.isEmpty else { return }
-        panels.forEach { $0.orderOut(nil) }
-        panels.removeAll()
+        notchPanel?.orderOut(nil)
+        notchPanel = nil
+        edgePanels.forEach { $0.orderOut(nil) }
         edgePanels.removeAll()
     }
 
-    /// The notch band stays up for the whole drag — it *is* the drop target now.
-    /// An edge only fires once, then steps aside, so sliding along the side of
-    /// the screen cannot breed a row of shelves.
+    /// Slides the tray out, and stands down.
+    ///
+    /// The band is taken off screen *before* the tray is asked for, so there is
+    /// no moment where an invisible window sits above the visible one. From here
+    /// to the end of the drag the only drop target near the notch is the tray
+    /// itself.
+    private func triggerNotch() {
+        guard let panel = notchPanel else { return }
+        notchPanel = nil
+        panel.orderOut(nil)
+        onNotch()
+    }
+
+    /// An edge fires once, then steps aside, so sliding along the side of the
+    /// screen cannot breed a row of shelves.
     private func triggerEdge() {
         guard !edgePanels.isEmpty else { return }
-        onEdge(NSEvent.mouseLocation)
-        edgePanels.forEach { panel in
-            panel.orderOut(nil)
-            panels.removeAll { $0 === panel }
-        }
+        let spent = edgePanels
         edgePanels.removeAll()
+        spent.forEach { $0.orderOut(nil) }
+        onEdge(NSEvent.mouseLocation)
     }
 }
 
@@ -260,6 +262,11 @@ final class DragMonitor {
     private var reversals = 0
     private var windowStart: TimeInterval = 0
     private var firedThisDrag = false
+    /// Whether `onDragBegan` has run for the gesture in progress.
+    ///
+    /// Separate from `isDragging`, which is true from the mouse going *down*.
+    /// The sentinels are only wanted once the pointer actually moves.
+    private var begun = false
 
     private let onShake: (NSPoint) -> Void
     private let onDragBegan: () -> Void
@@ -282,16 +289,25 @@ final class DragMonitor {
     func start() {
         guard downMonitor == nil else { return }
 
+        // Mouse-down only arms the drag watcher. It deliberately does **not**
+        // announce a drag: `onDragBegan` puts three sentinel panels on screen,
+        // and doing that on every click anywhere in the system — every button
+        // press, every text selection, in any application — was Gruppen's
+        // largest background cost by a wide margin. Measured on the telemetry
+        // page while fully occluded: 5.07% of a core with Stash on against
+        // 0.36% with it off. Clicks outnumber drags by orders of magnitude, and
+        // a click that never moves needs no drop targets.
         downMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
-            Task { @MainActor in
-                self?.arm()
-                self?.onDragBegan()
-            }
+            Task { @MainActor in self?.arm() }
         }
         upMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
             Task { @MainActor in
-                self?.disarm()
-                self?.onDragEnded()
+                guard let self else { return }
+                let announced = self.begun
+                self.disarm()
+                // Only balance a `began` that actually happened. A plain click
+                // installed nothing, so there is nothing to tear down.
+                if announced { self.onDragEnded() }
             }
         }
     }
@@ -310,7 +326,16 @@ final class DragMonitor {
         guard dragMonitor == nil else { return }
         resetShakeState()
         dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] event in
-            Task { @MainActor in self?.evaluate(event) }
+            Task { @MainActor in
+                guard let self else { return }
+                // First movement of this gesture: now it is a drag, so the drop
+                // targets go up. Once per gesture, not once per event.
+                if !self.begun {
+                    self.begun = true
+                    self.onDragBegan()
+                }
+                self.evaluate(event)
+            }
         }
     }
 
@@ -322,6 +347,7 @@ final class DragMonitor {
     }
 
     private func resetShakeState() {
+        begun = false
         lastTimestamp = 0
         lastDirection = 0
         reversals = 0

@@ -89,13 +89,19 @@ struct NotchHUDView: View {
 
     /// Invisible margin around the tray, inside the same window.
     ///
-    /// The tray is exactly notch-width because that is what makes it look like
-    /// hardware, but a 185pt target with a hard boundary is what caused the
-    /// flicker: slip a couple of points off it and the pointer had left the
-    /// window, which withdrew the tray, which put the pointer back over nothing.
-    /// The window now extends past the tray on both sides and below it, and all
-    /// the tracking happens against *that* edge. The buffer draws nothing.
-    static let buffer: CGFloat = 48
+    /// It exists for hysteresis: the tray is exactly notch-width because that is
+    /// what makes it look like hardware, and a 185pt target with a hard boundary
+    /// flickered — slip two points off it and the pointer had left the window,
+    /// which withdrew the tray, which put the pointer back over nothing. All the
+    /// tracking happens against the buffer's edge instead. It draws nothing.
+    ///
+    /// **Why it is 20 and not 48.** Whatever this window covers, it takes: the
+    /// margin is invisible but it still accepts drops, so at 48 there was a
+    /// hand's width of screen on either side of the tray, and below it, where a
+    /// file released onto the window underneath was silently shelved instead.
+    /// 20pt is enough slack to forgive a near miss on a target you can see, and
+    /// small enough that there is nowhere to aim inside it by mistake.
+    static let buffer: CGFloat = 20
 
     /// The exact window rect.
     ///

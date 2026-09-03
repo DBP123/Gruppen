@@ -10,6 +10,7 @@ struct GruppenApp: App {
     @StateObject private var widgets = WidgetManager.shared
     @StateObject private var scripts: ScriptLibrary
     @StateObject private var triggers: ScriptTriggerCoordinator
+    @StateObject private var workspaces = WorkspaceEngine()
     @StateObject private var metrics: MetricLibrary
     @StateObject private var collector: MetricsCollector
     @StateObject private var metricStore: MetricStoreBox
@@ -52,6 +53,7 @@ struct GruppenApp: App {
                 .environmentObject(widgets)
                 .environmentObject(scripts)
                 .environmentObject(triggers)
+                .environmentObject(workspaces)
                 .environmentObject(metrics)
                 .environmentObject(collector)
                 .environmentObject(metricStore)
@@ -63,6 +65,15 @@ struct GruppenApp: App {
                     // Arms whatever the library already had active. Nothing runs
                     // until one of those events actually fires.
                     triggers.rearm()
+                    // A profile's script stage runs through the script
+                    // coordinator rather than a runner of its own, so it gets
+                    // the same transcript, feedback and argv handling as a
+                    // script fired by any other trigger.
+                    workspaces.scriptRunner = { [weak scripts, weak triggers] id in
+                        guard let script = scripts?.scripts.first(where: { $0.id == id }) else { return false }
+                        triggers?.run(script, paths: [])
+                        return true
+                    }
                     // Data is not in a release build, so its page cannot be
                     // reached to disarm anything. Arming it anyway would leave a
                     // machine that had metrics recording before the pivot still

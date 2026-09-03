@@ -319,6 +319,58 @@ final class WidgetManager: ObservableObject {
 
     var runningCount: Int { modules.count }
 
+    // MARK: Layouts
+
+    /// The three preference sets and the display modes, as one value.
+    ///
+    /// This is what a workspace profile stores and restores. It is deliberately
+    /// the *preferences* and not the live modules: which modules actually exist
+    /// is derived from these plus what is on screen, and remains the manager's
+    /// business alone. A profile says what you want to see; it does not get to
+    /// say what is running.
+    func currentLayout() -> TelemetryLayout {
+        TelemetryLayout(armed: telemetryEnabled.map(\.rawValue),
+                        panel: panelVisible.map(\.rawValue),
+                        pinned: menuBarPinned.map(\.rawValue),
+                        modes: Dictionary(uniqueKeysWithValues:
+                            menuBarModes.map { ($0.key.rawValue, $0.value.rawValue) }))
+    }
+
+    /// Switches the monitor to a saved layout in one pass.
+    ///
+    /// One `reconcile()` at the end rather than one per switch: going through
+    /// `setArmed`/`setInPanel`/`setPinned` would tear modules down and build them
+    /// back up several times over on the way to the same answer, which on a
+    /// layout that swaps six modules means six rounds of opening and closing SMC
+    /// connections for nothing.
+    ///
+    /// Unknown raw values are dropped rather than rejected, so a layout saved by
+    /// a build that had a module this one does not still applies as far as it can.
+    func apply(_ layout: TelemetryLayout) {
+        func kinds(_ raw: [String]) -> Set<WidgetKind> {
+            Set(raw.compactMap(WidgetKind.init(rawValue:)).filter(\.isConfigurable))
+        }
+        telemetryEnabled = kinds(layout.armed)
+        panelVisible = kinds(layout.panel)
+        menuBarPinned = Set(kinds(layout.pinned).filter(\.isPinnable))
+        menuBarModes = Dictionary(uniqueKeysWithValues: layout.modes.compactMap {
+            (key, value) -> (WidgetKind, MenuBarDisplayMode)? in
+            guard let kind = WidgetKind(rawValue: key), kind.isPinnable,
+                  let mode = MenuBarDisplayMode(rawValue: value) else { return nil }
+            return (kind, mode)
+        })
+
+        defaults.set(telemetryEnabled.map(\.rawValue).sorted(), forKey: Keys.telemetry)
+        defaults.set(panelVisible.map(\.rawValue).sorted(), forKey: Keys.panel)
+        defaults.set(menuBarPinned.map(\.rawValue).sorted(), forKey: Keys.pinned)
+        defaults.set(Dictionary(uniqueKeysWithValues:
+                        menuBarModes.map { ($0.key.rawValue, $0.value.rawValue) }),
+                     forKey: Keys.modes)
+
+        reconcile()
+        onModulesChanged?()
+    }
+
     // MARK: Lifecycle
 
     private func reconcile() {

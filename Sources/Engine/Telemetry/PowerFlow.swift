@@ -4,37 +4,45 @@ import IOKit.ps
 
 /// Where the machine's power is going, in watts.
 ///
-/// Three figures, and they reconcile: what comes in from the adapter is what the
-/// system is consuming plus what is going into the battery. On this Mac, with a
-/// 15 W adapter attached, `SystemPowerIn 10817 = SystemLoad 6314 + BatteryPower
-/// 4503` — exactly, to the milliwatt. That is worth knowing because it means
-/// these are measurements rather than an estimate assembled from percentages.
+/// ## Three instruments, and which one to believe
 ///
-/// ## Which instrument answers which question
+/// This file reads three sources and they do **not** agree. Knowing which is
+/// authoritative for what is the whole content of this type:
 ///
-/// There are two sources here and they are **not** interchangeable, which is the
-/// single most important thing about this file:
+/// | source | what it is | cadence | trust |
+/// |---|---|---|---|
+/// | SMC `PSTR` | the live system rail | every read | system draw |
+/// | `Amperage` × `Voltage` | the gas gauge's own current | ~60 s | pack flow |
+/// | `PowerTelemetryData` | `SystemLoad`, `BatteryPower`, `SystemPowerIn` | ~60 s | adapter only |
 ///
-/// - **`PSTR`, from the SMC** — the live system rail. Re-reads on demand and
-///   changes on every read.
-/// - **`AppleSmartBattery`'s `PowerTelemetryData`** — the pack controller's own
-///   accounting. It reconciles beautifully (`SystemPowerIn 10817 = SystemLoad
-///   6314 + BatteryPower 4503`, to the milliwatt) but it is republished **once
-///   every 60 seconds**, measured.
+/// Both mistakes this file has made were about picking the wrong one.
 ///
-/// That cadence was the cause of a real bug. `SystemLoad` was driving the
-/// "system draw" readout, so after any burst of work the panel latched the high
-/// figure and held it — 19.2 W, or 74 W after something heavier — while the
-/// machine sat idle underneath. Watched side by side for 30 s, `PSTR` fell
-/// 19.3 W → 5.8 W and changed on all 31 reads; `SystemLoad` did not move once.
-/// The number was never wrong, it was just up to a minute old and presented as
-/// if it were live.
+/// **`SystemLoad` is not the live draw.** It republishes once a minute, so after
+/// a burst of work the panel latched the high figure and held it — 19.2 W, or
+/// 74 W after something heavier — while the machine sat idle underneath. Watched
+/// beside `PSTR` for 30 s, `PSTR` fell 19.3 → 5.8 W and changed on all 31 reads;
+/// `SystemLoad` did not move once.
 ///
-/// So: anything instantaneous comes from `PSTR`. The pack's own state — charge,
-/// percentage, cycle count, health, and the charge rate into the cell — comes
-/// from the controller, where a minute's lag is invisible because those things
-/// genuinely move slowly. And because that node only changes once a minute,
-/// reading it at the panel's 2 Hz was 120 reads per change; it is cached instead.
+/// **`BatteryPower` is not the pack flow.** The trio reconciles exactly on every
+/// read — `SystemPowerIn == SystemLoad + BatteryPower`, to the milliwatt — which
+/// looks like three measurements agreeing and is not: `BatteryPower` is
+/// *derived* from `SystemLoad`, so it inherits that lag and can cross zero on
+/// nothing. Measured against ground truth, with the pack's own capacity watched
+/// for 150 s while it charged:
+///
+/// ```
+///   capacity gained      +206 mAh in 150 s  ->  4,944 mA  ~=  62 W in
+///   Amperage             4,995 -> 4,502 mA          matches, within 1%
+///   BatteryPower         +0.90 -> -8.74 W           negative, while charging
+/// ```
+///
+/// A negative pack flow on a plugged-in machine is what `ASSIST` is, so this is
+/// exactly how a 94 W charger on an idle Mac reported `• ASSIST` at 0.9 W. The
+/// coulomb counter is the measurement; the derived figure is arithmetic.
+///
+/// `SystemPowerIn` is kept for one job only — the adapter row — because it is
+/// the only *independent* reading of what the wall is supplying, and the assist
+/// guard needs a figure that is not itself built out of draw and pack.
 struct PowerFlow: Equatable {
     /// What the machine itself is consuming.
     var systemLoad: Double
@@ -101,32 +109,74 @@ struct PowerFlow: Equatable {
     }
 
     /// Below this, current into or out of the pack is noise rather than flow.
-    private static let flowThreshold = 0.5
+    ///
+    /// A pack resting on a charger sits at a few tens of milliwatts either way
+    /// as the controller trims the cell. Without a deadband the sign of that
+    /// noise decides the state, and the panel flips between HOLD and ASSIST on
+    /// nothing.
+    static let deadband = 0.1
 
+    /// An adapter supplying less than this is not being out-run by anything.
+    ///
+    /// The guard exists for the case where the adapter figure itself is
+    /// untrustworthy — a charger still negotiating, or a reading taken in the
+    /// second after the cable went in. "The system is drawing more than the wall
+    /// can give" is not a claim worth making about a 0.9 W adapter reading.
+    static let assistFloor = 5.0
+
+    /// Snaps near-zero pack flow to exactly zero, so a resting pack reads as
+    /// resting rather than as a very small charge or discharge.
+    static func deadbanded(_ watts: Double) -> Double {
+        abs(watts) < deadband ? 0 : watts
+    }
+
+    /// The state machine.
+    ///
+    /// Ordered most-urgent first, and gated on `ExternalConnected` before
+    /// anything else, because that flag is the one thing here that is both
+    /// instantaneous and unambiguous. `IsCharging` is deliberately *not* used to
+    /// decide: it stays true through an 80% hold and it lags the cable, so a
+    /// machine visibly filling has been reported as "Optimized Hold" on the
+    /// strength of it.
+    ///
+    /// ```
+    ///   !plugged                     -> discharging  (or lowPowerMode)
+    ///   plugged, pack > +deadband    -> charging
+    ///   plugged, pack < -deadband    -> assist, but only if the adapter is
+    ///                                   really being out-run (see below)
+    ///   plugged, |pack| <= deadband  -> passthrough when full, else hold
+    /// ```
     var condition: Condition {
         if hasFault || !isPresent { return .fault }
-
-        // Current going *into* the pack is charging, full stop — whether or not
-        // macOS has an 80% limit armed. The previous version also required the
-        // `IsCharging` flag and a limit-capped charge could satisfy one without
-        // the other, so a battery visibly filling was reported as "Optimized
-        // Hold".
-        if batteryPower > Self.flowThreshold { return .charging }
 
         guard isPluggedIn else {
             return isLowPower ? .lowPowerMode : .discharging
         }
 
-        // Plugged in and the pack is *draining*: the machine wants more than the
-        // charger can supply, so the battery is making up the difference. This
-        // is a real and fairly common state under load, and it used to fall
-        // through every branch — which is how a plugged-in Mac ended up
-        // reporting "On Battery" and "Optimized Hold" while charging.
-        if batteryPower < -Self.flowThreshold { return .adapterAssist }
+        // Into the pack is charging, whether or not an 80% limit is armed.
+        if batteryPower > Self.deadband { return .charging }
 
+        // Out of the pack *while plugged in* is only assist if the wall really
+        // cannot keep up. Three conditions, all required:
+        //
+        //   1. the pack is genuinely discharging, past the deadband;
+        //   2. the adapter is supplying enough for "out-run" to mean anything —
+        //      a 0.9 W reading is a charger negotiating, not one at its limit;
+        //   3. the system is actually drawing more than the adapter gives.
+        //
+        // Without (2) and (3), plugging a 94 W charger into an idle machine
+        // reported ASSIST at 0.9 W. The deeper cause was the register this used
+        // to read — see `read()` — but the guard is worth keeping regardless:
+        // assist is a claim about a deficit, so a deficit is what should be
+        // required to make it.
+        if batteryPower < -Self.deadband,
+           adapterInput >= Self.assistFloor,
+           systemLoad > adapterInput {
+            return .adapterAssist
+        }
+
+        // Plugged in, and either resting or trickling below the deadband.
         if isFull || percent >= 100 { return .acPassthrough }
-        // Plugged in, resting, below full: macOS is holding the cell short of
-        // full on purpose.
         return .optimizedHold
     }
 
@@ -154,7 +204,7 @@ struct PowerFlow: Equatable {
 
     var state: State {
         guard isPluggedIn else { return .discharging }
-        return isCharging && batteryPower > 0.5 ? .charging : .wall
+        return batteryPower > Self.deadband ? .charging : .wall
     }
 
     /// Minutes until the pack is empty at the current system load.
@@ -165,7 +215,7 @@ struct PowerFlow: Equatable {
 
     /// Minutes until full at the rate power is actually going in.
     var minutesToFull: Int? {
-        guard state == .charging, batteryPower > 0.5 else { return nil }
+        guard state == .charging, batteryPower > Self.deadband else { return nil }
         return minutes((fullEnergy - remainingEnergy) / batteryPower)
     }
 
@@ -284,11 +334,28 @@ struct PowerFlow: Equatable {
         guard millivolts > 0 else { return nil }
         let volts = millivolts / 1000
 
-        // `BatteryPower` is signed and already in milliwatts. Where it is
-        // missing — and it is missing on some Macs — amperage times voltage is
-        // the same quantity computed the long way; the two agree to within a
-        // few milliwatts here.
-        let batteryWatts = (number("BatteryPower", in: telemetry) ?? (milliamps * millivolts / 1000)) / 1000
+        // Pack power from the **coulomb counter**, not from `BatteryPower`.
+        //
+        // This is a correction, and the evidence is worth keeping. Watching the
+        // pack's own capacity for 150 s while it charged, it gained 206 mAh —
+        // a true current of 4,944 mA, about 62 W. Over the same window:
+        //
+        //   Amperage                     4,995 → 4,502 mA   (matches, ~1%)
+        //   PowerTelemetryData.BatteryPower   +0.90 → −8.74 W   (does not)
+        //
+        // `BatteryPower` went *negative while the battery was charging at 62 W*,
+        // and that is the whole false-`ASSIST` bug: the state machine read a
+        // negative pack flow on a plugged-in machine and called it assist. The
+        // reason is that the trio `SystemPowerIn == SystemLoad + BatteryPower`
+        // reconciles exactly on every read — `BatteryPower` is *derived* from
+        // `SystemLoad`, which lags, so as the load figure drifts the derived
+        // pack flow swings and can cross zero. It is arithmetic, not a
+        // measurement.
+        //
+        // `Amperage` is the gas gauge's own integrated current, and it agreed
+        // with the capacity actually gained. It is the measurement.
+        let measured = milliamps * millivolts / 1_000_000
+        let batteryWatts = Self.deadbanded(measured)
         let systemWatts = (number("SystemLoad", in: telemetry)).map { $0 / 1000 }
         let inputWatts = (number("SystemPowerIn", in: telemetry)).map { $0 / 1000 }
 

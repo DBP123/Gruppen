@@ -59,6 +59,16 @@ struct WorkspacesView: View {
                         }
                     }
                 }
+
+                // Profiles sit under the Gruppen rather than on a page of their
+                // own: a profile is the environment a Gruppe runs in, and
+                // splitting them would mean configuring one context in two
+                // places. Hidden while searching, which is a query about
+                // Gruppen and not about profiles.
+                if query.trimmingCharacters(in: .whitespaces).isEmpty {
+                    DashedRule()
+                    WorkspaceProfileDeck()
+                }
             }
             .padding(24)
         }

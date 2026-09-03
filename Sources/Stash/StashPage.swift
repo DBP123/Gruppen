@@ -207,7 +207,7 @@ struct StashSettingsPane: View {
             }
 
             LabeledSection(label: "IDLE COST") {
-                FootNote("The triggers are invisible drop targets that the window server hit-tests for free, and the shake monitor only exists between mouse-down and mouse-up. Nothing polls, and the pasteboard is read once per confirmed shake.")
+                FootNote("The triggers are invisible tripwires that the window server hit-tests for free. They reveal a shelf and decline the drag itself, so nothing can be dropped onto one by accident, and each retires as soon as it has fired. The shake monitor only exists between mouse-down and mouse-up. Nothing polls, and the pasteboard is read once per confirmed shake.")
             }
         }
     }
