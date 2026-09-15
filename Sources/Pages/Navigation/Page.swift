@@ -55,7 +55,7 @@ enum Page: String, CaseIterable, Identifiable {
     var badge: String {
         switch self {
         case .telemetry: return "HARDWARE"
-        case .stash: return "SHELF"
+        case .stash: return "STASH"
         case .scripts: return "AUTOMATION"
         case .workspaces: return "SYSTEM OVERVIEW"
         case .metrics: return "DATA"
