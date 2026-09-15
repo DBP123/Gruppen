@@ -1,161 +1,56 @@
 import AppKit
-import IOKit
 import SwiftUI
-
-/// What machine this is.
-///
-/// Everything here is fixed for the life of the boot, so it is gathered once
-/// into a `static let` and never sampled. None of it belongs in a telemetry
-/// module: a serial number does not have a history and cannot be plotted.
-struct MacIdentity {
-    /// What the owner calls this machine — the name set in System Settings and
-    /// shown on the network, e.g. "Dhilan's MacBook Pro".
-    var computerName: String
-    var modelIdentifier: String
-    var serialNumber: String
-    var chip: String
-    var graphics: String
-    var memory: String
-    var storage: String
-    var systemVersion: String
-    var buildNumber: String
-    /// SF Symbol standing in for the machine's silhouette.
-    var glyph: String
-
-    static let shared: MacIdentity = {
-        let platform = IOServiceGetMatchingService(kIOMainPortDefault,
-                                                   IOServiceMatching("IOPlatformExpertDevice"))
-        defer { if platform != 0 { IOObjectRelease(platform) } }
-
-        func property(_ key: String) -> Any? {
-            guard platform != 0 else { return nil }
-            return IORegistryEntryCreateCFProperty(platform, key as CFString,
-                                                   kCFAllocatorDefault, 0)?.takeRetainedValue()
-        }
-        /// Device-tree strings arrive as `CFData` with a trailing NUL.
-        func text(_ key: String) -> String? {
-            if let value = property(key) as? String { return value }
-            guard let data = property(key) as? Data else { return nil }
-            return String(decoding: data.prefix(while: { $0 != 0 }), as: UTF8.self)
-        }
-
-        // Apple Silicon does not publish a marketing name anywhere readable:
-        // there is no `product-name` in the device tree, only the model
-        // identifier "Mac17,9", which says nothing to a reader. The name the
-        // owner gave the machine is both present on every Mac and the one they
-        // actually recognise, so that is the headline; the identifier stays
-        // below as a spec.
-        let identifier = sysctlString("hw.model") ?? "Mac"
-        let name = Host.current().localizedName ?? identifier
-
-        let info = ProcessInfo.processInfo.operatingSystemVersion
-        let build = sysctlString("kern.osversion") ?? "—"
-
-        return MacIdentity(
-            computerName: name,
-            modelIdentifier: identifier,
-            serialNumber: text("IOPlatformSerialNumber") ?? "—",
-            chip: CPUSampler.brand,
-            graphics: graphicsDescription(),
-            memory: "\(Format.bytes(MemorySampler.installed)) unified",
-            storage: storageDescription(),
-            systemVersion: "macOS \(info.majorVersion).\(info.minorVersion)"
-                + (info.patchVersion > 0 ? ".\(info.patchVersion)" : ""),
-            buildNumber: build,
-            glyph: silhouette())
-    }()
-
-    /// Which machine to draw.
-    ///
-    /// Not from the model string: Apple Silicon reports `Mac17,9`, which says
-    /// nothing about the form factor, and matching on "MacBook" quietly fails on
-    /// every recent portable. A battery is the reliable tell — a Mac with one is
-    /// a laptop, and no desktop has an `AppleSmartBattery` node. The remaining
-    /// desktops are separated by their model identifiers, which *do* still carry
-    /// a family name.
-    private static func silhouette() -> String {
-        let battery = IOServiceGetMatchingService(kIOMainPortDefault,
-                                                  IOServiceMatching("AppleSmartBattery"))
-        if battery != 0 { IOObjectRelease(battery); return "laptopcomputer" }
-        let identifier = sysctlString("hw.model") ?? ""
-        if identifier.hasPrefix("Macmini") { return "macmini" }
-        if identifier.hasPrefix("MacPro") { return "macpro.gen3" }
-        if identifier.hasPrefix("Mac13") || identifier.contains("Studio") { return "macstudio" }
-        return "desktopcomputer"
-    }
-
-    private static func sysctlString(_ name: String) -> String? {
-        var size = 0
-        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        var buffer = [CChar](repeating: 0, count: size)
-        guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
-        return String(cString: buffer)
-    }
-
-    private static func graphicsDescription() -> String {
-        let cores = SiliconSampler.cores
-        // On Apple Silicon the GPU is part of the chip, so naming it separately
-        // would just repeat the chip name; the core count is the real content.
-        return cores > 0 ? "\(cores)-core GPU" : "Integrated"
-    }
-
-    private static func storageDescription() -> String {
-        let drive = StorageIdentity.shared?.model
-        guard let values = try? URL(fileURLWithPath: "/")
-            .resourceValues(forKeys: [.volumeTotalCapacityKey]),
-            let total = values.volumeTotalCapacity else { return drive ?? "—" }
-        let size = Format.bytes(UInt64(max(total, 0)))
-        return drive.map { "\(size) · \($0)" } ?? size
-    }
-}
 
 /// The banner at the top of the telemetry dashboard.
 ///
-/// Deliberately not a telemetry card: nothing in it moves, so it carries no
-/// gauges and no colour beyond the accent on the machine's name. It is there to
-/// say what this Mac *is*, which is the context every number below it is read
-/// against.
+/// Not a telemetry card: nothing in it moves, so it carries no gauges and no
+/// colour beyond the machine's own drawing. It says what this Mac *is*, which is
+/// the context every number below it is read against.
+///
+/// ## The layout, and why it changed
+///
+/// It used to be two columns — two rows on the left, four on the right — which
+/// left a hand's width of dead space under `SERIAL` and made the right-hand
+/// column read as the only real content. The specs now sit in **three columns of
+/// two**, grouped by what they answer: what the chip is, what it holds, and what
+/// the machine is on paper. Even columns, no orphan rows, and the eye gets three
+/// short lists instead of one long one beside one short one.
 struct SystemHeroBanner: View {
-    private let mac = MacIdentity.shared
+    @EnvironmentObject private var hardware: HardwareProfileStore
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            Image(systemName: mac.glyph)
-                .font(.system(size: 42, weight: .thin))
-                .foregroundStyle(Theme.textSecondary)
-                .frame(width: 62, height: 52)
+        SystemHeroCard(profile: hardware.profile)
+    }
+}
 
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(mac.computerName)
-                        .font(Theme.sans(15, .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text("\(mac.systemVersion)  ·  Build \(mac.buildNumber)")
-                        .font(Theme.mono(10))
-                        .foregroundStyle(Theme.textMuted)
-                }
+/// The banner itself, over a plain value.
+///
+/// Split from the environment wrapper above so it can be rendered without an
+/// app around it — by `ImageRenderer` for a design review, or by a test. A view
+/// that can only be seen by launching the whole app is a view nobody checks.
+struct SystemHeroCard: View {
+    let profile: MacHardwareProfile
 
-                // Two columns: what the machine is on the left, what it is made
-                // of on the right.
-                HStack(alignment: .top, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        SpecLine("MODEL", mac.modelIdentifier)
-                        SpecLine("SERIAL", mac.serialNumber)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    /// The name the owner gave the machine, from System Settings. Not part of
+    /// the hardware profile — it is neither hardware nor immutable, and a person
+    /// can rename their Mac at any time.
+    var computerName: String = Host.current().localizedName ?? "Mac"
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        SpecLine("CHIP", mac.chip)
-                        SpecLine("GRAPHICS", mac.graphics)
-                        SpecLine("MEMORY", mac.memory)
-                        SpecLine("STORAGE", mac.storage)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+    private var build: SystemBuildInfo { profile.buildInfo }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 18) {
+            MacGlyph(family: profile.family, size: 52)
+                .frame(width: 62, alignment: .center)
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 14) {
+                identity
+                specs
             }
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
@@ -166,28 +61,82 @@ struct SystemHeroBanner: View {
                 .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
         )
     }
-}
 
-/// A fixed-width key and its value, so both columns align down the banner.
-private struct SpecLine: View {
-    let key: String
-    let value: String
+    /// Name, then what the machine actually is, then what it is running.
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(computerName)
+                .font(Theme.sans(15, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
 
-    init(_ key: String, _ value: String) { self.key = key; self.value = value }
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(key)
-                .font(Theme.mono(8.5, .semibold))
-                .tracking(0.7)
-                .foregroundStyle(Theme.textMuted)
-                .frame(width: 58, alignment: .leading)
-            Text(value)
-                .font(Theme.mono(10))
+            // The marketing name, never the `Mac17,9` identifier. That is a spec
+            // row below, where a reader who wants it can find it.
+            Text(profile.marketingModelName)
+                .font(Theme.mono(10.5))
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 0)
+
+            Text("macOS \(build.osVersion)  ·  Build \(build.osBuildNumber)")
+                .font(Theme.mono(9.5))
+                .foregroundStyle(Theme.textMuted)
+                .lineLimit(1)
         }
+    }
+
+    /// Three columns of two. Each column is one question.
+    private var specs: some View {
+        HStack(alignment: .top, spacing: 18) {
+            SpecColumn(rows: [("CHIP", build.chipArchitecture),
+                              ("GRAPHICS", graphics)])
+            SpecColumn(rows: [("MEMORY", capacity(build.totalMemoryGB, suffix: "unified")),
+                              ("STORAGE", capacity(build.totalStorageGB, suffix: nil))])
+            SpecColumn(rows: [("MODEL", profile.rawModelIdentifier),
+                              ("SERIAL", build.hardwareSerialNumber)])
+        }
+    }
+
+    private var graphics: String {
+        build.gpuCoreCount > 0 ? "\(build.gpuCoreCount)-core GPU" : "Integrated"
+    }
+
+    /// An em dash rather than "0 GB" while the first probe is still in flight —
+    /// a zero is a measurement, and this is the absence of one.
+    private func capacity(_ gigabytes: Int, suffix: String?) -> String {
+        guard gigabytes > 0 else { return "—" }
+        let value = gigabytes >= 1000
+            ? String(format: "%.1f TB", Double(gigabytes) / 1000).replacingOccurrences(of: ".0 TB", with: " TB")
+            : "\(gigabytes) GB"
+        return suffix.map { "\(value) \($0)" } ?? value
+    }
+}
+
+/// One column of key/value rows, keys aligned within the column.
+///
+/// The key column is sized to the widest label this app actually uses
+/// (`GRAPHICS`) rather than to its own contents, so all three columns line up
+/// with each other instead of each finding its own width.
+private struct SpecColumn: View {
+    let rows: [(String, String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(rows, id: \.0) { key, value in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(key)
+                        .font(Theme.mono(8.5, .semibold))
+                        .tracking(0.7)
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 58, alignment: .leading)
+                    Text(value)
+                        .font(Theme.mono(10))
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

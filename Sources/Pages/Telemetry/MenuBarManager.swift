@@ -218,6 +218,7 @@ final class MenuBarManager: NSObject {
 
         let popover = popovers[kind] ?? makePopover(for: kind)
         popovers[kind] = popover
+        setContent(of: popover, kind: kind, live: true)
         // Raise the module to the interactive rate *before* showing, so the
         // first frame is a live reading rather than the last one from 2 s ago.
         WidgetManager.shared.detailDidOpen(kind)
@@ -263,9 +264,33 @@ final class MenuBarManager: NSObject {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.animates = false
-        popover.contentViewController = NSHostingController(rootView: ModuleDetail(kind: kind))
+        popover.contentViewController = NSHostingController(rootView: AnyView(ModuleDetail(kind: kind)))
         popover.delegate = self
         return popover
+    }
+
+    /// The popover object is kept between openings — rebuilding one is visible
+    /// — but its **content** is not.
+    ///
+    /// Closing an `NSPopover` orders its window out and leaves the hosting
+    /// controller, and the whole SwiftUI tree under it, alive. SwiftUI does not
+    /// run `onDisappear` for a tree whose window merely went away, so anything a
+    /// view started in `onAppear` keeps running behind a popover nobody can see.
+    /// Measured: the battery detail's Energy Impact fold — a `proc_pid_rusage`
+    /// walk over every process, at 1 Hz — carried on for the life of the app
+    /// after the popover was dismissed once, and was the single largest cost in
+    /// an "idle" Gruppen at ~1.3% of a core. The module itself was torn down
+    /// correctly by `detailDidClose`; the *view* was the leak.
+    ///
+    /// So the root is swapped for an inert placeholder of the same width on
+    /// close, which destroys the subtree (and fires every `onDisappear`), and
+    /// the real detail is put back the moment it is about to be shown. Same
+    /// rule as the modules: destroyed, not paused.
+    private func setContent(of popover: NSPopover, kind: WidgetKind, live: Bool) {
+        guard let host = popover.contentViewController as? NSHostingController<AnyView> else { return }
+        host.rootView = live
+            ? AnyView(ModuleDetail(kind: kind))
+            : AnyView(Color.clear.frame(width: 292, height: 1))
     }
 
     private func closeAllDetails() {
@@ -303,6 +328,7 @@ extension MenuBarManager: NSPopoverDelegate {
               let kind = popovers.first(where: { $0.value === popover })?.key else { return }
         dismissedAt[kind] = Date()
         WidgetManager.shared.detailDidClose(kind)
+        setContent(of: popover, kind: kind, live: false)
         if !popovers.values.contains(where: \.isShown) { removeOutsideClickMonitor() }
     }
 }
@@ -648,8 +674,12 @@ private final class MonitorPanelController {
         window.orderOut(nil)
         // Ordering a window out does not run SwiftUI's `onDisappear`, so the
         // close signal is given by hand — otherwise every module would keep
-        // sampling behind a window nobody can see.
+        // sampling behind a window nobody can see. The content view goes too:
+        // `open` builds a fresh host every time anyway, and a retained tree is
+        // exactly the kind of thing that keeps `onAppear` work alive unseen
+        // (see `MenuBarManager.setContent`).
         WidgetManager.shared.panelDidClose()
+        window.contentView = nil
     }
 
     /// Dismissal, in two halves.

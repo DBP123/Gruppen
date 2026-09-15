@@ -13,14 +13,35 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.08"
+VERSION="1.14"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 
 BUILD_DIR="build"
 APP_DIR="$BUILD_DIR/$APP_NAME.app"
-SDK="$(xcrun --show-sdk-path)"
 ARCH="$(uname -m)"
+
+# Which SDK to compile against.
+#
+# Command Line Tools 27.0 repoints `MacOSX.sdk` at the macOS 27 SDK, where
+# SwiftUI's `@State` (and friends) are compiler macros — and the CLT ships no
+# `libSwiftUIMacros.dylib` to expand them, so every `@State` in the app fails
+# with "plugin for module 'SwiftUIMacros' not found". That plugin only exists
+# inside Xcode.app's macOS platform. Until the build runs under Xcode's
+# toolchain (`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, which
+# needs its licence accepted first), pin to the newest macOS 26 SDK the CLT
+# still carries. The app deploys to 13.0 either way; the SDK only decides what
+# the compiler is allowed to see.
+# `dirname` of the default SDK works for both the CLT (…/SDKs) and Xcode
+# (…/Platforms/MacOSX.platform/Developer/SDKs); `--show-sdk-platform-path`
+# does not exist on the CLT and under `set -e` a failing substitution in an
+# assignment aborts the whole script without printing a word.
+SDK_ROOT="$(dirname "$(xcrun --show-sdk-path)")"
+if [ -d "$SDK_ROOT/MacOSX26.sdk" ]; then
+    SDK="$SDK_ROOT/MacOSX26.sdk"
+else
+    SDK="$(xcrun --show-sdk-path)"
+fi
 
 INSTALL=0
 RUN=0

@@ -43,10 +43,7 @@ struct TelemetryDashboardView: View {
         GeometryReader { geometry in
             let order = manager.dashboardOrder
             let available = max(Slot.defaultSize.width, geometry.size.width - 36)
-            VStack(spacing: 0) {
-                toolbar(order: order, available: available)
-                board(order: order, available: available)
-            }
+            board(order: order, available: available)
         }
         .background(Theme.panel.grain(0.26))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -63,32 +60,12 @@ struct TelemetryDashboardView: View {
             WidgetManager.shared.thawAll()
         }
         .onChange(of: window.isVisible) { _ in refreshDemand() }
-    }
-
-    private func toolbar(order: [WidgetKind], available: CGFloat) -> some View {
-        let arranged = layout.isCustomised(order: order, width: available)
-        return HStack(spacing: 10) {
-            Text("BOARD")
-                .font(Theme.mono(9, .semibold))
-                .tracking(1.1)
-                .foregroundStyle(Theme.textMuted)
-            Text(arranged ? "ARRANGED" : "DEFAULT LAYOUT")
-                .font(Theme.mono(9))
-                .foregroundStyle(Theme.textMuted.opacity(0.8))
-            Spacer()
-            if !manager.frozen.isEmpty {
-                Button("Thaw \(manager.frozen.count)") { manager.thawAll() }
-                    .industrialButton(.secondary)
-                    .help("Resume every frozen widget")
-            }
-            Button("Reset Layout") { layout.reset() }
-                .industrialButton(.secondary)
-                .disabled(!arranged)
-                .help("Put every widget back to the same size, in order")
+        // The reset control is in the tool header now, which cannot see this
+        // view's layout object; it asks through the navigation model instead.
+        .onChange(of: navigation.layoutResetRequests) { _ in
+            layout.reset()
+            manager.thawAll()
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 9)
-        .overlay(alignment: .bottom) { Rectangle().fill(.black.opacity(0.45)).frame(height: 1) }
     }
 
     /// The window's width decides how many columns the *default* board has:

@@ -18,14 +18,14 @@ import SwiftUI
 struct TelemetrySettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @ObservedObject private var widgets = WidgetManager.shared
+    @EnvironmentObject private var hardware: HardwareProfileStore
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                SystemHeroBanner()
                 master
+                hardwareDetection
                 modules
-                legend
             }
             .padding(20)
             .frame(maxWidth: 720, alignment: .leading)
@@ -39,10 +39,52 @@ struct TelemetrySettingsView: View {
 
     private var master: some View {
         LabeledSection(label: "TELEMETRY") {
-            SettingToggle(title: "System monitor",
-                          detail: "The master switch — off stops every module below",
+            SettingToggle(title: "System Performance Monitor",
                           isOn: $settings.showPerformanceMonitor)
         }
+    }
+
+    /// The detection switch, and what the last pass actually found.
+    private var hardwareDetection: some View {
+        LabeledSection(label: "HARDWARE PROFILE") {
+            SettingToggle(title: "Dynamic hardware detection",
+                          detail: "Probe for updated feature state upon app launch",
+                          isOn: $settings.hardwareAutoDetection)
+
+            if !settings.hardwareAutoDetection {
+                Text("Warning: disabling this prevents Gruppen from capturing updates to your Mac's hardware profile, attached display arrays, thermal sensor nodes, or firmware capabilities on launch.")
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .panelRow()
+            }
+
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hardware.profile.marketingModelName)
+                        .font(Theme.mono(11, .medium))
+                        .foregroundStyle(Theme.textPrimary)
+                    Text(detectionDetail)
+                        .font(Theme.mono(9.5))
+                        .foregroundStyle(Theme.textMuted)
+                }
+                Spacer(minLength: 8)
+                Button { hardware.resetAndRecapture() } label: {
+                    Text(hardware.isProbing ? "Probing…" : "Re-probe")
+                }
+                .industrialButton(.secondary)
+                .disabled(hardware.isProbing)
+                .help("Throw away the cached profile and read every value again, including the fixed ones")
+            }
+            .panelRow()
+        }
+    }
+
+    private var detectionDetail: String {
+        let build = hardware.profile.buildInfo
+        let screens = build.displayCount == 1 ? "1 display" : "\(build.displayCount) displays"
+        return "\(hardware.profile.chassis.label) · \(screens) · build \(build.osBuildNumber)"
     }
 
     private var modules: some View {
@@ -65,24 +107,6 @@ struct TelemetrySettingsView: View {
                     .opacity(settings.showPerformanceMonitor ? 1 : 0.4)
                     .disabled(!settings.showPerformanceMonitor)
             }
-        }
-    }
-
-    private var legend: some View {
-        LabeledSection(label: "WHAT THIS COSTS") {
-            VStack(alignment: .leading, spacing: 7) {
-                CostLine(mark: "2 Hz", detail: "Modules in the dropdown, only while the dropdown is open.")
-                CostLine(mark: "0.5 Hz", detail: "Modules with their own menu bar item, whether or not it is open.")
-                CostLine(mark: "0 Hz", detail: "Everything else. Not paused — the module and its kernel handles "
-                         + "are destroyed, and rebuilt when you ask for them again.")
-                CostLine(mark: "DRAW", detail: "A menu bar item redraws only when its figure changes or its "
-                         + "line moves by a pixel, and it never changes width. A reading that looks "
-                         + "the same costs nothing to show.")
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .machined(cornerRadius: Theme.radiusMd, fill: Theme.well)
-
         }
     }
 }
@@ -211,23 +235,5 @@ private struct Switch: View {
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.35)
             .frame(width: 78)
-    }
-}
-
-private struct CostLine: View {
-    let mark: String
-    let detail: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(mark)
-                .font(Theme.mono(10, .semibold))
-                .foregroundStyle(Theme.orange)
-                .frame(width: 44, alignment: .leading)
-            Text(detail)
-                .font(Theme.mono(10))
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 }

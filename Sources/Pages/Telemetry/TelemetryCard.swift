@@ -37,14 +37,6 @@ struct TelemetryCard: View {
     private static let headerHeight: CGFloat = 26
     /// How far in from an edge still counts as the edge.
     private static let edge: CGFloat = 7
-    /// Space the three hover controls occupy, including their buffer.
-    ///
-    /// Three 26pt hit areas (a 20pt chip with 3pt of slack each side) butted
-    /// together, 4pt of cluster padding and 7pt of outer buffer on each side.
-    /// Computed from those parts rather than guessed — the first version was two
-    /// points narrower than the controls actually were, so the freeze button
-    /// overhung the drag strip and its presses went to the drag gesture.
-    private static let controlsWidth: CGFloat = (20 + 3 * 2) * 3 + 4 * 2 + 7 * 2
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -78,11 +70,15 @@ struct TelemetryCard: View {
         // with the controls added first, the strip covered them and the press
         // landed on the drag gesture instead of the button. The controls go
         // last, so nothing is ever in front of them.
-        .overlay(alignment: .top) { dragStrip }
-        .overlay(alignment: .trailing) { resizeEdge(.horizontal) }
+        // The resize edges stay overlays — they belong on the card's border and
+        // nothing else wants those pixels. The trailing one is held clear of the
+        // header, because that 7pt strip runs the full height and would
+        // otherwise sit on top of the rightmost button.
+        .overlay(alignment: .trailing) {
+            resizeEdge(.horizontal).padding(.top, Self.headerHeight)
+        }
         .overlay(alignment: .bottom) { resizeEdge(.vertical) }
         .overlay(alignment: .bottomTrailing) { resizeCorner }
-        .overlay(alignment: .topTrailing) { controls }
     }
 
     private var borderTint: Color {
@@ -93,6 +89,21 @@ struct TelemetryCard: View {
 
     // MARK: Contents
 
+    /// Title on the left, controls on the right, and the move handle *behind*
+    /// both.
+    ///
+    /// This is the third attempt at making these buttons clickable, and the
+    /// first two failed for the same reason: the controls were an `overlay`,
+    /// competing for hit testing with two other overlays that carry gestures —
+    /// the move strip and the trailing resize edge — while being gated on a
+    /// hover flag that had to propagate before they would accept a press.
+    /// Tuning z-order and padding only moved which of those won.
+    ///
+    /// So none of that is load-bearing any more. The buttons are ordinary views
+    /// in an `HStack`, exactly like every other button in the app, and the drag
+    /// gesture lives in the row's `background` — behind them by construction, so
+    /// a press on a button reaches the button and a press anywhere else in the
+    /// row starts a move. There is no ordering to get wrong.
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: kind.glyph)
@@ -102,32 +113,51 @@ struct TelemetryCard: View {
                 .font(Theme.mono(9, .semibold))
                 .tracking(1.1)
                 .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
             if frozen {
                 Text("FROZEN")
                     .font(Theme.mono(8, .semibold))
                     .tracking(0.8)
                     .foregroundStyle(Theme.cyan)
+                    .fixedSize()
             }
             if locked {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 8))
                     .foregroundStyle(Theme.textMuted)
             }
-            Spacer(minLength: 6)
-            // Faded rather than removed while hovering. Taking it out of the
-            // layout reflowed the header under the cursor at the exact moment
-            // you were reaching for the controls.
-            Text(kind.badge)
-                .font(Theme.mono(8, .semibold))
-                .tracking(0.8)
-                .foregroundStyle(Theme.textMuted)
-                .opacity(hovering ? 0 : 1)
+            Spacer(minLength: 8)
+            controls
         }
-        // The controls sit over the trailing end of this row, so the row always
-        // keeps that space clear whether they are showing or not — no geometry
-        // moves when they fade in.
-        .padding(.trailing, Self.controlsWidth)
-        .frame(height: Self.headerHeight - 12, alignment: .center)
+        .frame(height: Self.headerHeight)
+        .background(moveHandle)
+    }
+
+    /// The move handle: the whole header row, *behind* its contents.
+    private var moveHandle: some View {
+        Rectangle()
+            .fill(.clear)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                guard !locked else { return }
+                if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        guard !locked else { return }
+                        dragOffset = value.translation
+                    }
+                    .onEnded { value in
+                        guard !locked else { return }
+                        dragOffset = .zero
+                        layout.move(kind,
+                                    to: CGPoint(x: slot.x + value.translation.width,
+                                                y: slot.y + value.translation.height),
+                                    in: order, width: canvasWidth)
+                    }
+            )
+            .disabled(locked)
     }
 
     @ViewBuilder
@@ -210,59 +240,17 @@ struct TelemetryCard: View {
             manager.setFrozen(kind, false)
             return
         }
-        // Capture first: only freeze if there is actually a picture to show,
-        // otherwise the card would go blank and stop sampling at the same time.
-        guard let image = CardSnapshot.capture(kind: kind, width: slot.width - 24) else { return }
-        frozenImage = image
+        // The freeze applies whether or not the snapshot succeeds.
+        //
+        // It used to be `guard let image = … else { return }`, which made the
+        // button a silent no-op any time `ImageRenderer` came back nil — you
+        // press it, nothing happens, and there is no way to tell that from the
+        // button not working at all. A control must never do nothing quietly.
+        frozenImage = CardSnapshot.capture(kind: kind, width: slot.width - 24)
         manager.setFrozen(kind, true)
     }
 
     // MARK: Gestures
-
-    /// The top strip moves the card.
-    /// The move handle: the header strip, stopping short of the controls.
-    ///
-    /// Laid out as two boxes rather than one padded box, and that is the whole
-    /// fix. `.padding(.trailing, …)` followed by `.contentShape(Rectangle())`
-    /// looks like it insets the hit area and does the opposite — `contentShape`
-    /// applies to the view *including* its padding, so the strip's tappable
-    /// region stretched right back over the buttons and swallowed the press.
-    /// An `HStack` with an inert spacer cannot make that mistake: the draggable
-    /// rectangle is only as wide as it looks.
-    private var dragStrip: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .onHover { inside in
-                    guard !locked else { return }
-                    if inside { NSCursor.openHand.push() } else { NSCursor.pop() }
-                }
-                .gesture(
-                    DragGesture(minimumDistance: 2)
-                        .onChanged { value in
-                            guard !locked else { return }
-                            dragOffset = value.translation
-                        }
-                        .onEnded { value in
-                            guard !locked else { return }
-                            dragOffset = .zero
-                            layout.move(kind,
-                                        to: CGPoint(x: slot.x + value.translation.width,
-                                                    y: slot.y + value.translation.height),
-                                        in: order, width: canvasWidth)
-                        }
-                )
-                .disabled(locked)
-            // The controls' corner. Reserved and inert, so a press here reaches
-            // the buttons above rather than starting a drag.
-            Color.clear
-                .frame(width: Self.controlsWidth)
-                .allowsHitTesting(false)
-        }
-        .frame(height: Self.headerHeight)
-    }
-
     private enum Axis { case horizontal, vertical }
 
     private func resizeEdge(_ axis: Axis) -> some View {
@@ -317,7 +305,12 @@ struct TelemetryCard: View {
     }
 }
 
-/// One of the small round buttons that appear on a card when you hover it.
+/// One of the small buttons on a card's header.
+///
+/// A 24pt chip inside a 32pt hit area, and the shape is taken *after* the slack
+/// so the whole 32pt is pressable. The visual can stay small — it sits in a
+/// dense header — but the target should not: 20pt chips with the hit region
+/// stopping at the ink is what made these so hard to hit.
 private struct CardButton: View {
     let glyph: String
     var tint: Color = Theme.textSecondary
@@ -326,26 +319,24 @@ private struct CardButton: View {
 
     @State private var hovering = false
 
+    private static let chip: CGFloat = 24
+    private static let slack: CGFloat = 4
+
     var body: some View {
         Button(action: action) {
             Image(systemName: glyph)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(tint)
-                .frame(width: 20, height: 20)
+                .frame(width: Self.chip, height: Self.chip)
                 .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(hovering ? Color.white.opacity(0.16) : Color.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(hovering ? Color.white.opacity(0.18) : Color.white.opacity(0.07))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .strokeBorder(Color.white.opacity(hovering ? 0.20 : 0.10), lineWidth: 1)
                 )
-                // 3pt of slack around the chip, and the shape is taken *after*
-                // it so the hit and hover region is the full 26pt. With the
-                // shape on the bare 20pt chip and 4pt of spacing between
-                // buttons, there was a dead gap on either side of every button:
-                // one pixel of travel and the highlight dropped.
-                .padding(3)
+                .padding(Self.slack)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

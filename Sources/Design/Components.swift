@@ -60,14 +60,18 @@ extension View {
 /// `AppSettings` property and a per-Gruppe value routed through the store.
 struct SettingToggle: View {
     let title: String
-    let detail: String
+    /// Optional on purpose: a switch whose title says everything gets no
+    /// second line, rather than an empty one holding the row's height open.
+    var detail: String? = nil
     @Binding var isOn: Bool
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
+                if let detail {
+                    Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
+                }
             }
             Spacer()
             Toggle("", isOn: $isOn)

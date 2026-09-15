@@ -46,6 +46,11 @@ final class AppleSiliconTelemetry {
     private var smc: io_connect_t = 0
     private var sensors = SensorSet()
 
+    /// Fan targets, and when they were last read. See `thermal()`.
+    private var fanTargets: [Double] = []
+    private var fanTargetsAt: Date?
+    private static let fanTargetTTL: TimeInterval = 5
+
     /// Claims the hardware. The first caller pays for discovery.
     func acquire() {
         users += 1
@@ -252,6 +257,16 @@ final class AppleSiliconTelemetry {
         }
     }
 
+    private func cachedFanTargets() -> [Double] {
+        if let at = fanTargetsAt, Date().timeIntervalSince(at) < Self.fanTargetTTL,
+           fanTargets.count == sensors.fansTarget.count {
+            return fanTargets
+        }
+        fanTargets = sensors.fansTarget.map { read($0).map { max($0, 0) } ?? 0 }
+        fanTargetsAt = Date()
+        return fanTargets
+    }
+
     /// Just the system rail, in watts.
     ///
     /// One SMC round-trip instead of the dozen `thermal()` makes. The power
@@ -273,10 +288,21 @@ final class AppleSiliconTelemetry {
             }
             .max { $0.celsius < $1.celsius }
         }
-        let fans = zip(sensors.fansActual, sensors.fansTarget).compactMap { actual, target -> Fan? in
+        // The fan's *target* is cached; its actual speed is not.
+        //
+        // A target is what the controller has decided to aim for, and it
+        // re-plans on a multi-second cadence — nothing about it needs reading
+        // twice a second. Each SMC key costs an IOKit round trip at about
+        // 0.17 ms, and this module reads eleven of them, so it is 70% of the
+        // whole sampling budget; dropping two of those reads is the only lever
+        // here that costs no accuracy. (The other candidate, halving the
+        // temperature sensors per cluster, would save more and lose the
+        // hotspot — not worth it.)
+        let targets = cachedFanTargets()
+        let fans = sensors.fansActual.enumerated().compactMap { index, actual -> Fan? in
             guard let speed = read(actual) else { return nil }
             return Fan(actual: max(speed, 0),
-                       target: read(target).map { max($0, 0) } ?? 0,
+                       target: index < targets.count ? targets[index] : 0,
                        minimum: sensors.fanMinimum,
                        maximum: sensors.fanMaximum)
         }

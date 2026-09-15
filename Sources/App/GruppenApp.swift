@@ -10,6 +10,8 @@ struct GruppenApp: App {
     @StateObject private var widgets = WidgetManager.shared
     @StateObject private var scripts: ScriptLibrary
     @StateObject private var triggers: ScriptTriggerCoordinator
+    @StateObject private var workspaces = WorkspaceEngine()
+    @StateObject private var hardware = HardwareProfileStore.shared
     @StateObject private var metrics: MetricLibrary
     @StateObject private var collector: MetricsCollector
     @StateObject private var metricStore: MetricStoreBox
@@ -52,6 +54,8 @@ struct GruppenApp: App {
                 .environmentObject(widgets)
                 .environmentObject(scripts)
                 .environmentObject(triggers)
+                .environmentObject(workspaces)
+                .environmentObject(hardware)
                 .environmentObject(metrics)
                 .environmentObject(collector)
                 .environmentObject(metricStore)
@@ -59,10 +63,31 @@ struct GruppenApp: App {
                 .onAppear {
                     settings.applyActivationPolicy()
                     applyStashSetting()
+                    // Profiles the Mac on a background queue. Returns straight
+                    // away: the cached profile was already loaded synchronously
+                    // in the store's `init`, so the first frame has real numbers
+                    // and this only replaces them.
+                    hardware.refreshOnLaunch()
                     MemoryRelief.install()
                     // Arms whatever the library already had active. Nothing runs
                     // until one of those events actually fires.
                     triggers.rearm()
+                    // A profile's script stage runs through the script
+                    // coordinator rather than a runner of its own, so it gets
+                    // the same transcript, feedback and argv handling as a
+                    // script fired by any other trigger.
+                    // Captured by name first: `scripts` and `triggers` are
+                    // wrapper properties of this struct, and a `[weak]` list
+                    // on a struct property captures the struct strongly and
+                    // the object weakly — which the compiler rightly flags as
+                    // two different answers about the same value.
+                    let library = scripts
+                    let coordinator = triggers
+                    workspaces.scriptRunner = { [weak library, weak coordinator] id in
+                        guard let script = library?.scripts.first(where: { $0.id == id }) else { return false }
+                        coordinator?.run(script, paths: [])
+                        return true
+                    }
                     // Data is not in a release build, so its page cannot be
                     // reached to disarm anything. Arming it anyway would leave a
                     // machine that had metrics recording before the pivot still

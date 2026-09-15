@@ -50,19 +50,15 @@ final class StashCoordinator: ObservableObject {
         isEnabled = true
 
         let sentinels = SentinelCoordinator(
-            onNotch: { [weak self] in
-                self?.openNotch()
-                // Anywhere in the approach band counts as being on the tray, so
-                // it does not withdraw while you are lining the drop up.
-                self?.notchShelf.isTargeted = true
-            },
-            onNotchExited: { [weak self] in
-                self?.notchShelf.isTargeted = false
-                self?.scheduleNotchWithdrawal()
-            },
-            onNotchItems: { [weak self] items in self?.notchShelf.add(items) },
-            onNotchDropAccepted: { [weak self] in self?.isNotchPinned = true },
-            onEdge: { [weak self] point in self?.manager.spawnShelf(at: point) }
+            // Approaching the notch slides the tray out and does nothing else.
+            // It deliberately does *not* mark the shelf as targeted: that is the
+            // "release here" state, and being somewhere in a 190pt band is not
+            // being on the tray. Lighting it up from across the screen was how
+            // the approach came to feel like a claim on the drag.
+            onNotch: { [weak self] in self?.openNotch() },
+            onEdge: { [weak self] point in self?.manager.spawnShelf(at: point) },
+            notchWanted: { AppSettings.shared.stashNotchEnabled },
+            edgesWanted: { AppSettings.shared.stashEdgeEnabled }
         )
         self.sentinels = sentinels
 
@@ -73,7 +69,8 @@ final class StashCoordinator: ObservableObject {
             onDragEnded: { [weak self] in
                 self?.sentinels?.remove()
                 self?.handleDragEnded()
-            }
+            },
+            shakeWanted: { AppSettings.shared.stashShakeEnabled }
         )
         monitor.start()
         dragMonitor = monitor
@@ -121,9 +118,8 @@ final class StashCoordinator: ObservableObject {
         guard isEnabled, !isNotchOpen else { return }
         isNotchOpen = true
         isNotchPinned = false
-        // The sentinels deliberately stay up: the notch band is now the drop
-        // target, and it is much larger than the tray. It comes down when the
-        // drag ends, as always.
+        // The band that summoned this has already retired itself, so the tray
+        // below is now the only thing near the notch that can take a drop.
 
         guard let screen = NSScreen.main else { return }
 
