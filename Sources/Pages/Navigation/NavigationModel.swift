@@ -29,6 +29,14 @@ final class NavigationModel: ObservableObject {
 
     @Published var showingSettingsPane = false
 
+    /// Bumped by the header's reset control. The dashboard's layout object lives
+    /// inside the dashboard view, and the header is a sibling that cannot reach
+    /// it, so the request travels through the one object both can see. A
+    /// counter rather than a Bool: two presses in a row must both land.
+    @Published var layoutResetRequests = 0
+
+    func requestLayoutReset() { layoutResetRequests += 1 }
+
     /// Moves off a page that is no longer available — either because the
     /// developer menu just hid it, or because it was hidden when the app last
     /// quit and the stored selection points at it.

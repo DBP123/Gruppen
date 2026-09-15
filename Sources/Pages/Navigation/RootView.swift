@@ -102,6 +102,18 @@ private struct ToolHeader: View {
 
             Spacer()
 
+            // Icon only, the label lives in the tooltip: the board's own bar
+            // used to carry a labelled button and a "DEFAULT LAYOUT" caption
+            // above every card, which was a row of chrome for one action.
+            if page == .telemetry, !inSettings {
+                Button { navigation.requestLayoutReset() } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .industrialButton(.secondary)
+                .help("Reset Layout")
+            }
+
             if page.hasSettingsPane, !inSettings {
                 Button { navigation.showingSettingsPane = true } label: {
                     Image(systemName: "slider.horizontal.3")

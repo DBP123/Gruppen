@@ -56,9 +56,31 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// Master switch for the stash shelf and its triggers.
+    /// Master switch for stashes and their triggers.
     @Published var stashEnabled: Bool {
         didSet { persist(stashEnabled, oldValue, Keys.stashEnabled) }
+    }
+
+    /// The three ways a stash can be summoned, each switchable on its own.
+    /// Read at the moment a drag begins, so flipping one takes effect on the
+    /// next drag with nothing to re-arm.
+    @Published var stashNotchEnabled: Bool {
+        didSet { persist(stashNotchEnabled, oldValue, Keys.stashNotch) }
+    }
+    @Published var stashEdgeEnabled: Bool {
+        didSet { persist(stashEdgeEnabled, oldValue, Keys.stashEdge) }
+    }
+    @Published var stashShakeEnabled: Bool {
+        didSet { persist(stashShakeEnabled, oldValue, Keys.stashShake) }
+    }
+
+    /// Whether Gruppen re-reads the machine's mutable hardware state at launch.
+    ///
+    /// On by default. Off means the cached profile is used exactly as written
+    /// and no IOKit or `sysctl` probe runs on the app's behalf — which also
+    /// means an OS update or a newly attached display will not be noticed.
+    @Published var hardwareAutoDetection: Bool {
+        didSet { persist(hardwareAutoDetection, oldValue, Keys.hardwareAutoDetection) }
     }
 
     /// Where "Export as Zip" writes to.
@@ -109,9 +131,13 @@ final class AppSettings: ObservableObject {
         static let activateOnLaunch = "activateOnLaunch"
         static let showSuggestions = "showSuggestions"
         static let stashEnabled = "stashEnabled"
+        static let stashNotch = "stashNotchEnabled"
+        static let stashEdge = "stashEdgeEnabled"
+        static let stashShake = "stashShakeEnabled"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
+        static let hardwareAutoDetection = "enableHardwareAutoDetection"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -125,13 +151,21 @@ final class AppSettings: ObservableObject {
             Keys.activateOnLaunch: false,
             Keys.showSuggestions: true,
             Keys.stashEnabled: true,
+            Keys.stashNotch: true,
+            Keys.stashEdge: true,
+            Keys.stashShake: true,
             Keys.performanceMonitor: true,
+            Keys.hardwareAutoDetection: true,
         ])
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
         showDockIcon = defaults.bool(forKey: Keys.showDockIcon)
         activateOnLaunch = defaults.bool(forKey: Keys.activateOnLaunch)
         showSuggestions = defaults.bool(forKey: Keys.showSuggestions)
         stashEnabled = defaults.bool(forKey: Keys.stashEnabled)
+        stashNotchEnabled = defaults.bool(forKey: Keys.stashNotch)
+        stashEdgeEnabled = defaults.bool(forKey: Keys.stashEdge)
+        stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
+        hardwareAutoDetection = defaults.bool(forKey: Keys.hardwareAutoDetection)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
         stashShortcut = defaults.data(forKey: Keys.stashShortcut)

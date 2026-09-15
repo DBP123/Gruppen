@@ -161,11 +161,19 @@ final class SentinelCoordinator {
     private var edgePanels: [SentinelPanel] = []
     private let onNotch: () -> Void
     private let onEdge: (NSPoint) -> Void
+    /// Asked at install time, once per drag. A trigger the user has switched
+    /// off never gets a window, so it costs nothing and cannot fire.
+    private let notchWanted: () -> Bool
+    private let edgesWanted: () -> Bool
 
     init(onNotch: @escaping () -> Void,
-         onEdge: @escaping (NSPoint) -> Void) {
+         onEdge: @escaping (NSPoint) -> Void,
+         notchWanted: @escaping () -> Bool = { true },
+         edgesWanted: @escaping () -> Bool = { true }) {
         self.onNotch = onNotch
         self.onEdge = onEdge
+        self.notchWanted = notchWanted
+        self.edgesWanted = edgesWanted
     }
 
     /// Puts up whatever is missing, rather than all or nothing.
@@ -178,7 +186,7 @@ final class SentinelCoordinator {
     func install() {
         guard let screen = NSScreen.main else { return }
 
-        if notchPanel == nil {
+        if notchPanel == nil, notchWanted() {
             let panel = NotchSentinelPanel(screen: screen) { [weak self] in
                 Task { @MainActor in self?.triggerNotch() }
             }
@@ -186,7 +194,7 @@ final class SentinelCoordinator {
             panel.orderFrontRegardless()
         }
 
-        if edgePanels.isEmpty {
+        if edgePanels.isEmpty, edgesWanted() {
             for side in [EdgeSentinelPanel.Side.left, .right] {
                 let panel = EdgeSentinelPanel(side: side, screen: screen) { [weak self] in
                     Task { @MainActor in self?.triggerEdge() }
@@ -271,13 +279,17 @@ final class DragMonitor {
     private let onShake: (NSPoint) -> Void
     private let onDragBegan: () -> Void
     private let onDragEnded: () -> Void
+    /// Checked once per confirmed shake, after the maths — never per event.
+    private let shakeWanted: () -> Bool
 
     init(onShake: @escaping @MainActor (NSPoint) -> Void,
          onDragBegan: @escaping @MainActor () -> Void,
-         onDragEnded: @escaping @MainActor () -> Void) {
+         onDragEnded: @escaping @MainActor () -> Void,
+         shakeWanted: @escaping () -> Bool = { true }) {
         self.onShake = onShake
         self.onDragBegan = onDragBegan
         self.onDragEnded = onDragEnded
+        self.shakeWanted = shakeWanted
     }
 
     var isRunning: Bool { downMonitor != nil }
@@ -383,7 +395,7 @@ final class DragMonitor {
 
         // Only now is it worth paying for cross-process pasteboard access.
         firedThisDrag = true
-        guard Self.dragPasteboardHasContent() else { return }
+        guard shakeWanted(), Self.dragPasteboardHasContent() else { return }
         onShake(NSEvent.mouseLocation)
     }
 

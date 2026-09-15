@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Stash page: what the notch shelf is holding, how many shelves are open,
+/// The Stash page: what the notch stash is holding, how many stashes are open,
 /// and the ways to summon one.
 struct StashPage: View {
     @EnvironmentObject private var stash: StashCoordinator
@@ -12,29 +12,29 @@ struct StashPage: View {
             StashSettingsPane()
         } else {
             SettingsScroll {
-                LabeledSection(label: "NOTCH SHELF") {
-                    NotchShelfSummary()
+                LabeledSection(label: "NOTCH STASH") {
+                    NotchStashSummary()
                         .environmentObject(stash.notchShelf)
                 }
 
-                LabeledSection(label: "HOW TO OPEN A SHELF") {
+                LabeledSection(label: "HOW TO OPEN A STASH") {
                     TriggerRow(systemImage: "macbook",
                                title: "Drag to the notch",
-                               detail: "Opens the notch shelf at the top of the screen")
+                               detail: "Opens the notch stash at the top of the screen")
                     TriggerRow(systemImage: "arrow.left.and.right",
                                title: "Shake while dragging",
-                               detail: "Spawns a new shelf beside the pointer — shake again for another")
+                               detail: "Spawns a new stash beside the pointer — shake again for another")
                     TriggerRow(systemImage: "rectangle.lefthalf.inset.filled",
                                title: "Drag to a screen edge",
-                               detail: "Either side edge spawns a shelf too")
+                               detail: "Either side edge spawns a stash too")
                 }
             }
         }
     }
 }
 
-/// Contents of the notch shelf, plus a live count of floating shelves.
-private struct NotchShelfSummary: View {
+/// Contents of the notch stash, plus a live count of floating stashes.
+private struct NotchStashSummary: View {
     @EnvironmentObject private var stash: StashCoordinator
     @EnvironmentObject private var store: GroupStore
     @EnvironmentObject private var shelf: ShelfState
@@ -44,10 +44,10 @@ private struct NotchShelfSummary: View {
             HStack(spacing: 10) {
                 LED(color: Theme.orange, lit: !shelf.isEmpty, size: 9)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(shelf.isEmpty ? "Nothing on the notch shelf" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
+                    Text(shelf.isEmpty ? "Nothing on the notch stash" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
                         .font(Theme.sans(13))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("\(stash.openShelfCount) shelf/shelves open")
+                    Text("\(stash.openShelfCount) stash\(stash.openShelfCount == 1 ? "" : "es") open")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.textMuted)
                 }
@@ -85,8 +85,8 @@ private struct NotchShelfSummary: View {
     }
 }
 
-/// Records the global shortcut that summons a shelf.
-private struct SummonShortcutRow: View {
+/// Records the global shortcut that summons a stash.
+private struct StashShortcutRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var stash: StashCoordinator
     @StateObject private var recorder = KeyRecorder()
@@ -94,7 +94,7 @@ private struct SummonShortcutRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Summon a shelf")
+                Text("Stash shortcut")
                     .font(Theme.sans(13))
                     .foregroundStyle(Theme.textPrimary)
                 Text(recorder.isRecording ? "Press keys to set shortcut" : "Requires ⌘, ⌥ or ⌃")
@@ -185,29 +185,34 @@ private struct ExportPathRow: View {
 }
 
 /// Isolated settings for the Stash tool.
+///
+/// One list, no section headings: every row here is about the same thing, and
+/// a caption over each one was a label for a group of one. The three trigger
+/// switches sit under the master switch and only while it is on — a switch for
+/// a trigger that cannot fire is a control that does nothing.
 struct StashSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var stash: StashCoordinator
 
     var body: some View {
         SettingsScroll {
-            LabeledSection(label: "SHELF") {
-                SettingToggle(title: "Enable the stash shelf",
-                              detail: "Notch, screen-edge and shake triggers",
-                              isOn: $settings.stashEnabled)
-            }
+            VStack(alignment: .leading, spacing: 8) {
+                SettingToggle(title: "Enable stashes", isOn: $settings.stashEnabled)
 
-            LabeledSection(label: "SUMMON SHORTCUT") {
-                SummonShortcutRow()
-                FootNote("Opens a shelf under the pointer, on top of whatever is on screen — no drag required. Press it again to bring the shelf back to where the pointer is.")
-            }
-            LabeledSection(label: "EXPORT") {
+                if settings.stashEnabled {
+                    SettingToggle(title: "Notch stash",
+                                  detail: "Drag toward the notch",
+                                  isOn: $settings.stashNotchEnabled)
+                    SettingToggle(title: "Screen-edge stash",
+                                  detail: "Drag to either side of the screen",
+                                  isOn: $settings.stashEdgeEnabled)
+                    SettingToggle(title: "Shake stash",
+                                  detail: "Shake while dragging",
+                                  isOn: $settings.stashShakeEnabled)
+                }
+
+                StashShortcutRow()
                 ExportPathRow()
-                FootNote("The zip button on a shelf writes every file it holds, plus any text as .txt, into this folder.")
-            }
-
-            LabeledSection(label: "IDLE COST") {
-                FootNote("The triggers are invisible tripwires that the window server hit-tests for free. They reveal a shelf and decline the drag itself, so nothing can be dropped onto one by accident, and each retires as soon as it has fired. The shake monitor only exists between mouse-down and mouse-up. Nothing polls, and the pasteboard is read once per confirmed shake.")
             }
         }
     }

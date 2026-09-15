@@ -56,7 +56,9 @@ final class StashCoordinator: ObservableObject {
             // being on the tray. Lighting it up from across the screen was how
             // the approach came to feel like a claim on the drag.
             onNotch: { [weak self] in self?.openNotch() },
-            onEdge: { [weak self] point in self?.manager.spawnShelf(at: point) }
+            onEdge: { [weak self] point in self?.manager.spawnShelf(at: point) },
+            notchWanted: { AppSettings.shared.stashNotchEnabled },
+            edgesWanted: { AppSettings.shared.stashEdgeEnabled }
         )
         self.sentinels = sentinels
 
@@ -67,7 +69,8 @@ final class StashCoordinator: ObservableObject {
             onDragEnded: { [weak self] in
                 self?.sentinels?.remove()
                 self?.handleDragEnded()
-            }
+            },
+            shakeWanted: { AppSettings.shared.stashShakeEnabled }
         )
         monitor.start()
         dragMonitor = monitor

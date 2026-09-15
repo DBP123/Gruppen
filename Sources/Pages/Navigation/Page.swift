@@ -82,9 +82,9 @@ enum Page: String, CaseIterable, Identifiable {
 
     /// Label for the settings-pane chip, since "TOOL SETTINGS" undersells a page
     /// that is really the telemetry cost model.
-    var settingsPaneBadge: String {
-        self == .telemetry ? "TELEMETRY SETTINGS" : "TOOL SETTINGS"
-    }
+    /// "TELEMETRY SETTINGS", "STASH SETTINGS" — the tool's own name, not a
+    /// generic "TOOL SETTINGS" that told you nothing about where you were.
+    var settingsPaneBadge: String { "\(shortTitle.uppercased()) SETTINGS" }
 
     /// Whether this build offers the tool at all.
     ///
