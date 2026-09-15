@@ -70,6 +70,15 @@ final class MemorySampler: TelemetrySampler {
 
     private var previous: (counters: Counters, at: Date)?
 
+    /// The top-five table, and when it was last built.
+    ///
+    /// Building it is a `proc_pid_rusage` walk over every process — the one
+    /// genuinely expensive thing in this sampler, and a list of the five
+    /// heaviest processes does not change five times in five seconds. The
+    /// pressure figures above it still move every tick; only the table waits.
+    private var consumersCache: (rows: [MemoryConsumer], at: Date)?
+    private static let consumersInterval: TimeInterval = 5
+
     /// One process's memory footprint.
     struct MemoryConsumer: Equatable, Identifiable {
         var pid: pid_t
@@ -156,6 +165,11 @@ final class MemorySampler: TelemetrySampler {
             }
         }
 
+        if consumersCache == nil
+            || now.timeIntervalSince(consumersCache!.at) >= Self.consumersInterval {
+            consumersCache = (Self.consumers(), now)
+        }
+
         return Reading(total: Self.installed,
                        wired: UInt64(stats.wire_count) &* page,
                        app: anonymous &* page,
@@ -168,7 +182,7 @@ final class MemorySampler: TelemetrySampler {
                        compressRate: rates.compress,
                        decompressRate: rates.decompress,
                        faultRate: rates.fault,
-                       consumers: Self.consumers())
+                       consumers: consumersCache?.rows ?? [])
     }
 }
 

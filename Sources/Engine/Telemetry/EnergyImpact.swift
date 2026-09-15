@@ -178,30 +178,24 @@ final class EnergyImpactMonitor: ObservableObject {
     static let interval: TimeInterval = 1
 
     private let sampler = EnergyImpactSampler()
-    private var timer: DispatchSourceTimer?
+    private var running = false
 
-    deinit { timer?.cancel() }
+    deinit { TelemetryClock.shared.unregister(ObjectIdentifier(self)) }
 
     func start() {
-        guard timer == nil else { return }
+        guard !running else { return }
+        running = true
         let sampler = self.sampler
-        let timer = DispatchSource.makeTimerSource(queue: Telemetry.queue)
-        timer.schedule(deadline: .now(), repeating: Self.interval,
-                       leeway: .milliseconds(250))
-        timer.setEventHandler { [weak self] in
-            autoreleasepool {
-                guard let reading = sampler.sample() else { return }
-                DispatchQueue.main.async { self?.accept(reading) }
-            }
+        TelemetryClock.shared.register(ObjectIdentifier(self), period: Self.interval) { [weak self] in
+            guard let reading = sampler.sample() else { return nil }
+            return { self?.accept(reading) }
         }
-        timer.resume()
-        self.timer = timer
     }
 
     func stop() {
-        guard timer != nil else { return }
-        timer?.cancel()
-        timer = nil
+        guard running else { return }
+        running = false
+        TelemetryClock.shared.unregister(ObjectIdentifier(self))
         rows = []
         // On the sampling queue: a cancelled timer can still have a tick in
         // flight behind us, and the sampler's contract is one thread only.
