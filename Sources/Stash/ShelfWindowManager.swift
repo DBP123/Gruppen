@@ -11,9 +11,9 @@ final class ShelfState: ObservableObject, Identifiable {
     /// that would otherwise fade for being empty.
     @Published var isTargeted = false
 
-    /// Which items are picked out. Click selects one, shift-click adds to the
-    /// set; zip and convert act on the selection when there is one and on the
-    /// whole shelf when there is not.
+    /// Which items are picked out. See `SelectionGesture` for what each click
+    /// means; zip, convert and extract act on the selection when there is one
+    /// and on the whole stash when there is not.
     @Published var selection: Set<UUID> = []
 
     /// Called when the shelf goes from holding something to holding nothing —
@@ -64,6 +64,16 @@ final class ShelfState: ObservableObject, Identifiable {
         case toggle
         /// ⇧-click: everything from the anchor to here.
         case extendRange
+
+        /// What the modifiers held at the moment of the click mean.
+        ///
+        /// Shift wins over command when both are down, which is what Finder
+        /// does: a range is the more specific request.
+        init(modifiers: NSEvent.ModifierFlags) {
+            if modifiers.contains(.shift) { self = .extendRange }
+            else if modifiers.contains(.command) { self = .toggle }
+            else { self = .replace }
+        }
     }
 
     /// Where a range measures from.
@@ -110,8 +120,6 @@ final class ShelfState: ObservableObject, Identifiable {
     /// reports "3 items" should list them the way they are laid out.
     var selectedItems: [StashItem] { items.filter { selection.contains($0.id) } }
 
-    var hasMultipleSelection: Bool { selection.count > 1 }
-
     /// How many distinct directories the actionable items came from.
     ///
     /// Counts only items that *have* an origin. Text, links and virtual files
@@ -132,8 +140,8 @@ final class ShelfState: ObservableObject, Identifiable {
 ///
 /// A shake spawns a *new* shelf with its own window, its own state and its own
 /// identity, so you can carry several piles at once. A shelf destroys itself
-/// when it is emptied, minimised, or when it was opened speculatively and the
-/// drag ended without anything being dropped on it.
+/// when it is emptied, when it is closed, or when it was opened speculatively
+/// and the drag ended without anything being dropped on it.
 @MainActor
 final class ShelfWindowManager: ObservableObject {
     static let shared = ShelfWindowManager()
@@ -223,7 +231,7 @@ final class FloatingShelfController {
         let host = StashHostingView(
             rootView: AnyView(
                 StashTrayView(
-                    onMinimize: { [weak self] in
+                    onClose: { [weak self] in
                         guard let self else { return }
                         self.onDestroy(self.state.id)
                     }

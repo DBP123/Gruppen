@@ -31,12 +31,13 @@ import CoreGraphics
 ///
 /// `NSScreen.frame`, `NSWindow.frame` and `NSWindow.setFrame(_:display:)` are
 /// all in **one** space: global AppKit coordinates, origin bottom-left of the
-/// primary display, Y increasing upward. Nothing in `rectForNotchPanel` needs
+/// primary display, Y increasing upward. Nothing that places the tray needs
 /// flipping, and adding a flip "to be safe" is itself the classic cause of a
 /// panel that lands correctly on a single screen and hundreds of points off once
-/// a second display sits above or below the first. The flip helpers at the
-/// bottom of this file exist only for Core Graphics interop — `CGDisplayBounds`
-/// and `CGEvent` are top-left-origin — and are deliberately not used here.
+/// a second display sits above or below the first. Flipping is only for Core
+/// Graphics interop — `CGDisplayBounds` and `CGEvent` are top-left-origin — and
+/// nothing in Stash talks to either, so there are no flip helpers here to reach
+/// for by mistake.
 ///
 /// ## Measured on this machine
 ///
@@ -80,14 +81,6 @@ final class NotchGeometryManager: ObservableObject {
         let isBuiltIn: Bool
 
         var hasPhysicalNotch: Bool { notch != nil }
-
-        /// The X the tray centres on. The notch's own midpoint rather than the
-        /// screen's: on this Mac the housing spans 663…848, whose centre is
-        /// 755.5, while the screen's centre is 756.0. Half a point is half a
-        /// physical pixel at 2x, and it is the difference between the tray's
-        /// sides continuing the bezel and a sliver of desktop showing down one
-        /// edge.
-        var centreX: CGFloat { notch?.midX ?? frame.midX }
     }
 
     /// The current anchor. Recomputed on every display change, never stale.
@@ -205,8 +198,8 @@ final class NotchGeometryManager: ObservableObject {
     private static func resolveAnchor() -> Anchor {
         guard let screen = resolveScreen(), let id = displayID(of: screen) else {
             // No screens at all — the display is asleep or being reconfigured
-            // mid-flight. A zero anchor is honest: `rectForNotchPanel` returns
-            // zero too, and callers skip rather than placing a panel nowhere.
+            // mid-flight. A zero anchor is honest: `screen` then answers nil
+            // and callers skip rather than placing a panel nowhere.
             return Anchor(displayID: 0, frame: .zero, notch: nil,
                           bandHeight: NSStatusBar.system.thickness, isBuiltIn: false)
         }
@@ -267,45 +260,6 @@ final class NotchGeometryManager: ObservableObject {
         return NSStatusBar.system.thickness
     }
 
-    // MARK: The helper callers actually use
-
-    /// The exact global frame for `panel.setFrame(_, display: true)`.
-    ///
-    /// Centred on the notch, flush against the top edge of the anchor display.
-    /// No flipping: this is already the space `NSWindow` wants.
-    ///
-    /// The horizontal clamp keeps the panel on the anchor screen when the panel
-    /// is wider than the space either side of the notch allows — without it a
-    /// wide tray on a narrow display would hang off the edge and, on an extended
-    /// desktop, spill onto whatever screen happens to be adjacent.
-    func rectForNotchPanel(panelSize: CGSize) -> NSRect {
-        Self.rectForNotchPanel(panelSize: panelSize, on: anchor)
-    }
-
-    /// The same calculation over an explicit anchor.
-    ///
-    /// Split out so the geometry can be exercised against topologies that are
-    /// not plugged in — an iPad above the Mac, an iPad made primary so the
-    /// built-in panel no longer starts at the origin — which is exactly the
-    /// arithmetic that a single-display test can never cover.
-    static func rectForNotchPanel(panelSize: CGSize, on anchor: Anchor) -> NSRect {
-        let frame = anchor.frame
-        guard frame.width > 0, frame.height > 0 else { return .zero }
-
-        var x = anchor.centreX - panelSize.width / 2  // notch centre, not screen centre
-        // Deliberately not rounded. The housing's centre can legitimately land
-        // on a half point, and on a 2x display that half point is a real pixel;
-        // rounding it is what puts a sliver of bezel down one side of the tray.
-        if panelSize.width <= frame.width {
-            x = min(max(x, frame.minX), frame.maxX - panelSize.width)
-        }
-
-        return NSRect(x: x,
-                      y: frame.maxY - panelSize.height,
-                      width: panelSize.width,
-                      height: panelSize.height)
-    }
-
     /// One line describing the current topology, for the log.
     var topologyDescription: String {
         let screens = NSScreen.screens.map { screen -> String in
@@ -318,39 +272,5 @@ final class NotchGeometryManager: ObservableObject {
         return "anchor=\(anchor.displayID) "
             + (anchor.hasPhysicalNotch ? "notched" : "no-notch")
             + " of \(screens.joined(separator: " "))"
-    }
-}
-
-// MARK: - Core Graphics interop
-
-extension NotchGeometryManager {
-    /// The global flip reference: the top of the primary display.
-    ///
-    /// Core Graphics measures Y downward from here; AppKit measures it upward
-    /// from the primary display's *bottom*. Both are anchored to the primary
-    /// display — `screens[0]` — and not to the main or the largest one, which is
-    /// the detail that makes multi-display flipping go wrong.
-    static var globalFlipReference: CGFloat {
-        NSScreen.screens.first?.frame.maxY ?? 0
-    }
-
-    /// AppKit (bottom-left origin) → Core Graphics (top-left origin).
-    ///
-    /// Needed for `CGDisplayBounds`, `CGWindowListCopyWindowInfo` and synthetic
-    /// `CGEvent` positions. **Not** needed for `NSWindow.setFrame`, which is why
-    /// `rectForNotchPanel` does not call it.
-    static func flippedToCG(_ rect: NSRect) -> CGRect {
-        CGRect(x: rect.minX,
-               y: globalFlipReference - rect.maxY,
-               width: rect.width,
-               height: rect.height)
-    }
-
-    /// Core Graphics → AppKit. The transform is its own inverse.
-    static func flippedToAppKit(_ rect: CGRect) -> NSRect {
-        NSRect(x: rect.minX,
-               y: globalFlipReference - rect.maxY,
-               width: rect.width,
-               height: rect.height)
     }
 }

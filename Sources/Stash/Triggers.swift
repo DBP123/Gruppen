@@ -301,8 +301,6 @@ final class DragMonitor {
         self.shakeWanted = shakeWanted
     }
 
-    var isRunning: Bool { downMonitor != nil }
-
     /// True between mouse-down and mouse-up. The armed drag monitor *is* the
     /// flag — there is no separate bookkeeping to fall out of step with it.
     var isDragging: Bool { dragMonitor != nil }

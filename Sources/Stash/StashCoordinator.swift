@@ -9,8 +9,8 @@ import SwiftUI
 /// is called from a system event.
 @MainActor
 final class StashCoordinator: ObservableObject {
-    /// The notch's own shelf. Kept across open/close so minimising kee2ps
-    /// whatever was on it.
+    /// The notch's own stash. Kept across open and close, so closing the tray
+    /// does not throw away what is on it.
     let notchShelf = ShelfState()
     /// Needed by the routing chips inside the HUD.
     private let store: GroupStore
@@ -147,14 +147,11 @@ final class StashCoordinator: ObservableObject {
 
         let host = StashHostingView(
             rootView: AnyView(
-                NotchHUDView(
-                    onClose: { [weak self] in self?.closeNotch() },
-                    // Taking a file *out* no longer dismisses the tray. It used
-                    // to, on the theory that the tray should get out of the way
-                    // — but it also meant you got one file per opening, and had
-                    // to re-summon it for the next. It closes when you close it.
-                    onItemDraggedOut: {}
-                )
+                // Taking a file *out* deliberately does not dismiss the tray. It
+                // used to, on the theory that the tray should get out of the way
+                // — but it also meant you got one file per opening, and had to
+                // re-summon it for the next. It closes when you close it.
+                NotchHUDView(onClose: { [weak self] in self?.closeNotch() })
                 .environmentObject(notchShelf)
                 .environmentObject(presentation)
                 .environmentObject(store)

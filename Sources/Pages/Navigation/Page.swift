@@ -106,7 +106,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .telemetry:
             return "Every hardware sensor this Mac exposes, live."
         case .stash:
-            return "A shelf for files in transit. Drag to the notch or shake to open it."
+            return "A stash for files in transit. Drag to the notch or shake to open it."
         case .scripts:
             return "Attach a script to a Gruppe. Dropping files on it runs the script with their paths."
         case .workspaces:

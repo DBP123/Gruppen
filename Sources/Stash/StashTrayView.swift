@@ -7,7 +7,7 @@ struct StashTrayView: View {
     @EnvironmentObject private var state: ShelfState
     @EnvironmentObject private var settings: AppSettings
 
-    var onMinimize: () -> Void
+    var onClose: () -> Void
 
     @State private var exportNote: String?
     @State private var hovering = false
@@ -60,19 +60,19 @@ struct StashTrayView: View {
                 }
                 .hardwareKey()
                 .help(state.selection.isEmpty
-                      ? "Compress the shelf into \(settings.exportDirectory.lastPathComponent)"
+                      ? "Compress the stash into \(settings.exportDirectory.lastPathComponent)"
                       : "Compress the \(state.selection.count) selected into \(settings.exportDirectory.lastPathComponent)")
-                Button { state.clear() } label: {
-                    Image(systemName: "trash").font(.system(size: 10, weight: .bold))
-                }
-                .hardwareKey()
-                .help("Clear the shelf")
             }
-            Button(action: onMinimize) {
-                Image(systemName: "minus").font(.system(size: 10, weight: .bold))
+            // One key, not two. There used to be a trash beside a minus, and
+            // they did the same thing: clearing a stash empties it, an emptied
+            // stash closes itself, and "minimise" destroyed the window outright
+            // — nothing was ever minimised anywhere to come back from. A stash
+            // holds files by reference, so closing one puts nothing at risk.
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
             }
-            .hardwareKey()
-            .help("Minimise the shelf")
+            .hardwareKey(size: 18, glow: true)
+            .help("Close the stash")
         }
         // The whole strip drags the window, handled by AppKit so it tracks the
         // cursor exactly. Sits behind the buttons so they still receive clicks.
@@ -253,15 +253,21 @@ private struct StashRow: View {
         .onHover { hovering = $0 }
         // Click picks one out, ⇧-click takes the run from the last one you
         // touched, ⌘-click adds or removes a single file. Zip, convert and
-        // extract then act on that set instead of the whole shelf.
+        // extract then act on that set instead of the whole stash.
+        //
+        // **One gesture, not three.** This used to be three
+        // `simultaneousGesture`s — `.modifiers(.shift)`, `.modifiers(.command)`
+        // and a plain one — and that is why shift-click only ever selected the
+        // item under the pointer. `.modifiers(.shift)` requires shift, but a
+        // plain `TapGesture` matches *regardless* of what is held, so a
+        // shift-click satisfied both: the range was drawn and then immediately
+        // replaced by the single item, in whichever order SwiftUI happened to
+        // deliver them. Reading the flags once, here, means exactly one gesture
+        // can fire and there is nothing left to race.
         .simultaneousGesture(
-            TapGesture().modifiers(.shift).onEnded { state.select(item, gesture: .extendRange) }
-        )
-        .simultaneousGesture(
-            TapGesture().modifiers(.command).onEnded { state.select(item, gesture: .toggle) }
-        )
-        .simultaneousGesture(
-            TapGesture().onEnded { state.select(item, gesture: .replace) }
+            TapGesture().onEnded {
+                state.select(item, gesture: .init(modifiers: NSEvent.modifierFlags))
+            }
         )
         .onDrag {
             // Dragging out consumes the item; emptying the shelf closes it.
@@ -291,7 +297,7 @@ private struct StashRow: View {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
             }
             .hardwareKey(size: 20)
-            .help("Take it off the shelf")
+            .help("Take it off the stash")
         }
     }
 

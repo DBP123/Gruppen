@@ -310,9 +310,15 @@ extension View {
         buttonStyle(IndustrialButtonStyle(kind: kind))
     }
 
-    /// The keys on a stash: zip, clear, minimise, close.
-    func hardwareKey(size: CGFloat = 22, tint: Color = Theme.textSecondary) -> some View {
-        buttonStyle(HardwareKeyStyle(size: size, tint: tint))
+    /// The keys on a stash: zip, close.
+    ///
+    /// `glow` is for the one key that dismisses the thing it sits on. It lights
+    /// orange under the pointer and dips when it is pressed, so a control small
+    /// enough to be unobtrusive still announces itself before you commit to it.
+    func hardwareKey(size: CGFloat = 22,
+                     tint: Color = Theme.textSecondary,
+                     glow: Bool = false) -> some View {
+        buttonStyle(HardwareKeyStyle(size: size, tint: tint, glow: glow))
     }
 }
 
@@ -450,20 +456,31 @@ struct IndustrialSlider: View {
 /// actually does and what makes a click feel like it landed.
 ///
 /// The cap never changes size, so a row of keys cannot shift under the pointer.
+///
+/// `glow` adds the one thing a dismiss key needs that the others do not: an
+/// unmistakable hover state. The cap warms, the glyph and the rim take the
+/// ambient orange, and light spills off it. Pressing it dips the cap by a few
+/// percent — a `scaleEffect`, which is drawn smaller without being *laid out*
+/// smaller, so nothing beside it moves.
 struct HardwareKeyStyle: ButtonStyle {
     var size: CGFloat = 22
     var tint: Color = Theme.textSecondary
+    var glow: Bool = false
 
     func makeBody(configuration: Configuration) -> some View {
-        KeyBody(configuration: configuration, size: size, tint: tint)
+        KeyBody(configuration: configuration, size: size, tint: tint, glow: glow)
     }
 
     private struct KeyBody: View {
         let configuration: ButtonStyleConfiguration
         let size: CGFloat
         let tint: Color
+        let glow: Bool
         @State private var hovering = false
         @Environment(\.isEnabled) private var isEnabled
+
+        /// Lit only while the pointer is on an enabled key.
+        private var alight: Bool { glow && hovering && isEnabled }
 
         private var pressed: Bool { configuration.isPressed }
         private var shape: RoundedRectangle {
@@ -472,7 +489,7 @@ struct HardwareKeyStyle: ButtonStyle {
 
         var body: some View {
             configuration.label
-                .foregroundStyle(pressed ? Theme.ambient : (hovering ? Theme.textPrimary : tint))
+                .foregroundStyle(glyph)
                 .frame(width: size, height: size)
                 .background(shape.fill(cap))
                 .overlay(
@@ -493,16 +510,37 @@ struct HardwareKeyStyle: ButtonStyle {
                         .offset(y: 1.5)
                         .mask(shape)
                 )
+                .overlay(
+                    // The lit rim. Separate from the edge gradient above so it
+                    // can sit at full strength on all four sides.
+                    shape.strokeBorder(Theme.ambient.opacity(alight ? 0.7 : 0), lineWidth: 1)
+                        .allowsHitTesting(false)
+                )
                 .shadow(color: .black.opacity(pressed ? 0 : 0.5), radius: pressed ? 0 : 2, y: pressed ? 0 : 1)
+                // Light off the cap, not a ring drawn around it.
+                .shadow(color: Theme.ambient.opacity(alight ? 0.55 : 0), radius: alight ? 7 : 0)
+                .scaleEffect(glow && pressed ? 0.88 : 1)
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1 : 0.35)
-                .animation(.easeOut(duration: 0.11), value: hovering)
-                .animation(.easeOut(duration: 0.06), value: pressed)
+                // The glowing key gets a springier press because it has a dip to
+                // spring back from; every other key keeps the original timing,
+                // so nothing already on screen changes feel.
+                .animation(.easeOut(duration: glow ? 0.14 : 0.11), value: hovering)
+                .animation(glow ? .spring(response: 0.18, dampingFraction: 0.55)
+                                : .easeOut(duration: 0.06),
+                           value: pressed)
                 .onHover { hovering = isEnabled && $0 }
         }
 
+        private var glyph: Color {
+            if pressed { return Theme.ambient }
+            if alight { return Theme.orange }
+            return hovering ? Theme.textPrimary : tint
+        }
+
         private var cap: Color {
-            if pressed { return Color(hex: 0x0B0B0D) }
+            if pressed { return glow ? Color(hex: 0x2A1206) : Color(hex: 0x0B0B0D) }
+            if alight { return Color(hex: 0x241009) }
             return hovering ? Color(hex: 0x232329) : Color(hex: 0x181A1E)
         }
     }

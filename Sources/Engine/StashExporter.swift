@@ -14,7 +14,7 @@ enum StashExporter {
 
         var errorDescription: String? {
             switch self {
-            case .nothingToExport: return "There is nothing on this shelf to export."
+            case .nothingToExport: return "There is nothing on this stash to export."
             case .zipFailed(let message):
                 return message.isEmpty ? "The archive could not be created." : message
             }
