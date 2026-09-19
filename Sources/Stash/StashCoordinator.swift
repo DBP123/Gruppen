@@ -75,6 +75,10 @@ final class StashCoordinator: ObservableObject {
         monitor.start()
         dragMonitor = monitor
 
+        // An iPad arriving or leaving moves where the notch is. The manager
+        // coalesces the burst of parameter changes and reports once.
+        NotchGeometryManager.shared.onChange = { [weak self] _ in self?.reanchorNotch() }
+
         applySummonShortcut()
     }
 
@@ -107,6 +111,7 @@ final class StashCoordinator: ObservableObject {
         sentinels = nil
         dragMonitor?.stop()
         dragMonitor = nil
+        NotchGeometryManager.shared.onChange = nil
         HotkeyCenter.shared.unregisterAll(owner: "stash")
         closeNotch()
         manager.destroyAll()
@@ -121,7 +126,7 @@ final class StashCoordinator: ObservableObject {
         // The band that summoned this has already retired itself, so the tray
         // below is now the only thing near the notch that can take a drop.
 
-        guard let screen = NSScreen.main else { return }
+        guard let screen = NotchGeometryManager.shared.screen else { return }
 
         let registry = DropZoneRegistry()
         registry.onTargetChanged = { [weak self] targeted in
@@ -203,6 +208,31 @@ final class StashCoordinator: ObservableObject {
             try? await Task.sleep(nanoseconds: 520_000_000)
             panel.orderOut(nil)
         }
+    }
+
+    /// The display topology changed while the tray was out.
+    ///
+    /// The window is moved rather than rebuilt: the tray may be holding files,
+    /// and closing it to re-open it somewhere else would read as the shelf
+    /// having thrown them away. The contents redraw on their own — the tray's
+    /// width comes from the manager's `@Published` anchor — so this only has to
+    /// put the window where the notch now is.
+    ///
+    /// If the anchor display is gone outright (lid closed, built-in asleep with
+    /// only the iPad left), the tray closes. A panel pinned to coordinates that
+    /// no longer map to a screen is not recoverable by moving it.
+    private func reanchorNotch() {
+        guard isNotchOpen, let panel = notchPanel else { return }
+        guard let screen = NotchGeometryManager.shared.screen else {
+            GroupStore.log("NOTCH anchor display gone — closing tray")
+            closeNotch()
+            return
+        }
+        let rect = NotchHUDView.frame(on: screen)
+        guard panel.frame != rect else { return }
+        panel.setFrame(rect, display: true)
+        GroupStore.log("NOTCH re-anchored -> \(rect) — "
+                       + NotchGeometryManager.shared.topologyDescription)
     }
 
     /// The pointer or the drag left the notch.

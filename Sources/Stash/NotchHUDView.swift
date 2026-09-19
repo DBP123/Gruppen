@@ -64,12 +64,11 @@ struct NotchHUDView: View {
     /// Exactly the notch. Anything wider would show its square top corners
     /// sticking out either side of the housing, which is the whole illusion
     /// gone.
+    /// The anchor display's notch, never `NSScreen.main`'s. Clicking onto a
+    /// Sidecar iPad used to make this fall through to the 200pt guess.
     static var width: CGFloat {
-        guard let screen = NSScreen.main,
-              let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea
-        else { return 200 }
-        return max(right.minX - left.maxX, 180)
+        guard let notch = NotchGeometryManager.shared.anchor.notch else { return 200 }
+        return max(notch.width, 180)
     }
 
     /// The part of the panel hidden behind the camera housing.
@@ -118,9 +117,9 @@ struct NotchHUDView: View {
         let height = panelHeight(on: screen) + buffer
         let trayWidth: CGFloat
         let trayX: CGFloat
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            trayX = left.maxX
-            trayWidth = right.minX - left.maxX
+        if let notch = NotchGeometryManager.notchBounds(of: screen) {
+            trayX = notch.minX
+            trayWidth = notch.width
         } else {
             trayWidth = width
             trayX = (screen.frame.midX - trayWidth / 2).rounded()
@@ -131,8 +130,16 @@ struct NotchHUDView: View {
                       height: height)
     }
 
-    private var band: CGFloat {
-        NSScreen.main.map { Self.bandHeight(on: $0) } ?? 32
+    /// Observed, not read once: a Sidecar connect changes the anchor, and the
+    /// tray has to redraw at the new notch's width rather than keep the old
+    /// display's geometry inside a correctly-moved window.
+    @ObservedObject private var geometry = NotchGeometryManager.shared
+
+    private var band: CGFloat { geometry.anchor.bandHeight }
+
+    /// Instance-level twin of `Self.width`, so the body tracks the anchor.
+    private var trayWidth: CGFloat {
+        max(geometry.anchor.notch?.width ?? 200, 180)
     }
 
     private var totalHeight: CGFloat { band + Self.trayHeight }
@@ -159,7 +166,7 @@ struct NotchHUDView: View {
             Color.clear.frame(height: band)
             tray
         }
-        .frame(width: Self.width, height: totalHeight, alignment: .top)
+        .frame(width: trayWidth, height: totalHeight, alignment: .top)
         .background(surface)
         .overlay(lightbar, alignment: .bottom)
         .clipShape(shape)
@@ -204,7 +211,7 @@ struct NotchHUDView: View {
     private var lightbar: some View {
         Capsule()
             .fill(accent)
-            .frame(width: isTargeted ? Self.width * 0.6 : 0, height: 3)
+            .frame(width: isTargeted ? trayWidth * 0.6 : 0, height: 3)
             .shadow(color: accent.opacity(isTargeted ? 0.85 : 0), radius: 8)
             .padding(.bottom, 5)
             .animation(.spring(response: 0.34, dampingFraction: 0.72), value: isTargeted)

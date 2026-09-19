@@ -184,9 +184,18 @@ final class SentinelCoordinator {
     /// as "already installed" and quietly declined to replace the one panel that
     /// was actually gone.
     func install() {
-        guard let screen = NSScreen.main else { return }
+        // Two different screens, deliberately.
+        //
+        // The notch band belongs to the display that physically has the camera
+        // housing — `NSScreen.main` follows keyboard focus, so one click on a
+        // Sidecar iPad used to put the band over a screen with no notch on it.
+        // The edge sentinels are the opposite case: "drag to a screen edge"
+        // means *the screen you are working on*, which is exactly what
+        // `NSScreen.main` reports.
+        let notchScreen = NotchGeometryManager.shared.screen
+        guard let edgeScreen = NSScreen.main ?? notchScreen else { return }
 
-        if notchPanel == nil, notchWanted() {
+        if notchPanel == nil, notchWanted(), let screen = notchScreen {
             let panel = NotchSentinelPanel(screen: screen) { [weak self] in
                 Task { @MainActor in self?.triggerNotch() }
             }
@@ -196,7 +205,7 @@ final class SentinelCoordinator {
 
         if edgePanels.isEmpty, edgesWanted() {
             for side in [EdgeSentinelPanel.Side.left, .right] {
-                let panel = EdgeSentinelPanel(side: side, screen: screen) { [weak self] in
+                let panel = EdgeSentinelPanel(side: side, screen: edgeScreen) { [weak self] in
                     Task { @MainActor in self?.triggerEdge() }
                 }
                 edgePanels.append(panel)
