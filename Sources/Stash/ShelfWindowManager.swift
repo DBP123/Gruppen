@@ -38,6 +38,7 @@ final class ShelfState: ObservableObject, Identifiable {
         let wasFilled = !items.isEmpty
         items.removeAll { $0.id == item.id }
         selection.remove(item.id)
+        if anchorID == item.id { anchorID = nil }
         if wasFilled, items.isEmpty { onEmptied?() }
     }
 
@@ -45,20 +46,79 @@ final class ShelfState: ObservableObject, Identifiable {
         let wasFilled = !items.isEmpty
         items.removeAll()
         selection.removeAll()
+        anchorID = nil
         if wasFilled { onEmptied?() }
     }
 
-    /// Plain click replaces the selection; shift-click extends it. Clicking the
-    /// only selected item clears it, so there is always a way back to "no
-    /// selection" without hunting for empty space.
-    func select(_ item: StashItem, extending: Bool) {
-        if extending {
+    /// What a click means.
+    ///
+    /// ⇧ and ⌘ used to do the same thing — both toggled one item — which left no
+    /// way to pick out a run of files except clicking each of them. They are the
+    /// two different gestures macOS users already have in their hands.
+    enum SelectionGesture {
+        /// Plain click: this item alone. Clicking the only selected item clears
+        /// the selection, so there is always a way back to "nothing picked out"
+        /// without hunting for empty space.
+        case replace
+        /// ⌘-click: add or remove this one and leave the rest alone.
+        case toggle
+        /// ⇧-click: everything from the anchor to here.
+        case extendRange
+    }
+
+    /// Where a range measures from.
+    ///
+    /// Moved by a plain click and by a ⌘-click, *read* by ⇧-click and
+    /// deliberately not moved by it — successive shift-clicks all measure from
+    /// the same origin, which is what makes a range adjustable rather than
+    /// ratcheting outward one item at a time. Same rule as Finder.
+    private var anchorID: UUID?
+
+    func select(_ item: StashItem, gesture: SelectionGesture) {
+        switch gesture {
+        case .replace:
+            if selection == [item.id] {
+                selection.removeAll()
+                anchorID = nil
+            } else {
+                selection = [item.id]
+                anchorID = item.id
+            }
+
+        case .toggle:
             if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
-        } else if selection == [item.id] {
-            selection.removeAll()
-        } else {
-            selection = [item.id]
+            anchorID = item.id
+
+        case .extendRange:
+            // No anchor — or an anchor for an item that has since been dragged
+            // off the shelf — means there is no range to draw. Behave like a
+            // plain click rather than doing nothing, which reads as broken.
+            guard let anchorID,
+                  let from = items.firstIndex(where: { $0.id == anchorID }),
+                  let to = items.firstIndex(where: { $0.id == item.id })
+            else {
+                selection = [item.id]
+                self.anchorID = item.id
+                return
+            }
+            let bounds = from <= to ? from...to : to...from
+            selection = Set(items[bounds].map(\.id))
         }
+    }
+
+    /// The selected items, in shelf order rather than set order — a batch that
+    /// reports "3 items" should list them the way they are laid out.
+    var selectedItems: [StashItem] { items.filter { selection.contains($0.id) } }
+
+    var hasMultipleSelection: Bool { selection.count > 1 }
+
+    /// How many distinct directories the actionable items came from.
+    ///
+    /// Counts only items that *have* an origin. Text, links and virtual files
+    /// have nowhere on disk they came from, so they are not locations and must
+    /// not inflate the number the toolbar shows.
+    var selectedOriginsCount: Int {
+        Set(actionable.compactMap(\.originDirectoryURL)).count
     }
 
     /// What an action should act on: the selection if there is one, otherwise

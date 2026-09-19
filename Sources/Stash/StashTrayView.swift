@@ -126,6 +126,7 @@ struct StashTrayView: View {
                 }
             }
             .animation(.spring(response: 0.24, dampingFraction: 0.8), value: state.items.count)
+            StashSelectionToolbar()
             ConvertBar()
         }
     }
@@ -250,13 +251,17 @@ private struct StashRow: View {
                   border: selected ? Theme.ambient : Theme.machinedBorder)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        // Click picks a file out; shift-click builds a set. Zip and convert
-        // then act on that set instead of the whole shelf.
+        // Click picks one out, ⇧-click takes the run from the last one you
+        // touched, ⌘-click adds or removes a single file. Zip, convert and
+        // extract then act on that set instead of the whole shelf.
         .simultaneousGesture(
-            TapGesture().modifiers(.shift).onEnded { state.select(item, extending: true) }
+            TapGesture().modifiers(.shift).onEnded { state.select(item, gesture: .extendRange) }
         )
         .simultaneousGesture(
-            TapGesture().onEnded { state.select(item, extending: false) }
+            TapGesture().modifiers(.command).onEnded { state.select(item, gesture: .toggle) }
+        )
+        .simultaneousGesture(
+            TapGesture().onEnded { state.select(item, gesture: .replace) }
         )
         .onDrag {
             // Dragging out consumes the item; emptying the shelf closes it.
