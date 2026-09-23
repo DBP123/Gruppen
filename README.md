@@ -189,6 +189,3 @@ Issues and pull requests are welcome. Two house rules:
    know when something changed, find the notification.
 
 ## Licence
-
-Not chosen yet — until a `LICENSE` file lands here, no permissions are granted
-beyond reading the source and building it for yourself.

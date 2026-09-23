@@ -624,9 +624,8 @@ final class ProcessSampler: TelemetrySampler {
         let elapsed = previousAt.map { now.timeIntervalSince($0) } ?? 0
         var current: [pid_t: Double] = [:]
         current.reserveCapacity(count)
-        var rows: [Row] = []
-        rows.reserveCapacity(count)
-        var nameBuffer = [CChar](repeating: 0, count: 256)
+        var candidates: [(pid: pid_t, cpu: Double, footprint: UInt64)] = []
+        candidates.reserveCapacity(count)
         var live = 0
 
         for index in 0..<count {
@@ -639,19 +638,31 @@ final class ProcessSampler: TelemetrySampler {
             // will have one next tick; showing it at 0 for one frame beats
             // inventing a figure from its lifetime total.
             guard elapsed > 0.05, let before = previous[pid], cpuTime >= before else { continue }
-            guard proc_name(pid, &nameBuffer, 256) > 0 else { continue }
-            rows.append(Row(pid: pid,
-                            name: String(cString: nameBuffer),
-                            cpu: (cpuTime - before) / elapsed,
-                            footprint: usage.ri_phys_footprint))
+            candidates.append((pid, (cpuTime - before) / elapsed, usage.ri_phys_footprint))
         }
 
         previous = current
         previousAt = now
-        guard !rows.isEmpty else { return nil }
+        guard !candidates.isEmpty else { return nil }
 
-        rows.sort { $0.cpu > $1.cpu }
-        return Reading(top: Array(rows.prefix(Self.rowCount)), total: live)
+        candidates.sort { $0.cpu > $1.cpu }
+
+        // Naming happens *after* the sort, for five pids instead of all ~190 —
+        // the same trick `EnergyImpactSampler` and `MemorySampler.consumers()`
+        // use. `proc_name` is the single most expensive call in this sweep, and
+        // nine tenths of those names would be sorted straight off the end of
+        // the list.
+        var nameBuffer = [CChar](repeating: 0, count: 256)
+        var rows: [Row] = []
+        rows.reserveCapacity(Self.rowCount)
+        for entry in candidates.prefix(Self.rowCount) {
+            guard proc_name(entry.pid, &nameBuffer, 256) > 0 else { continue }
+            rows.append(Row(pid: entry.pid,
+                            name: String(cString: nameBuffer),
+                            cpu: entry.cpu,
+                            footprint: entry.footprint))
+        }
+        return rows.isEmpty ? nil : Reading(top: rows, total: live)
     }
 }
 
