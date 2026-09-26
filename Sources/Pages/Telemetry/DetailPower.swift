@@ -21,7 +21,13 @@ struct PowerDetail: View {
     /// closes, and a section that forgets it was open is worse than one that
     /// never folded.
     @AppStorage("powerHistoryExpanded") private var showingHistory = false
-    @AppStorage("powerEnergyExpanded") private var showingEnergy = false
+    // Session-only on purpose, unlike the history fold below. Persisting
+    // "open" meant the most expensive sampler in the app — a `proc_pid_rusage`
+    // walk over every process, once a second — started on every launch, on
+    // every surface that drew this card, whether or not anyone was reading it.
+    // A fold you opened this session is a fold you asked for; one that opened
+    // itself is not.
+    @State private var showingEnergy = false
 
     var body: some View {
         if let reading = widget.reading {

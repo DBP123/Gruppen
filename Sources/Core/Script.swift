@@ -35,6 +35,25 @@ struct Script: Identifiable, Codable, Hashable {
     var isArmable: Bool {
         isActive && trigger.isConfigured && !action.effectiveSource.isEmpty
     }
+
+    /// Decoded by hand for the reason `ScriptAction` already is, and which was
+    /// only half applied: synthesised decoding treats a missing key as an error
+    /// even when the property has a default, so every field added here would
+    /// otherwise invalidate every library in the field. A script that fails to
+    /// decode is a script that silently disappears.
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try box.decodeIfPresent(String.self, forKey: .name) ?? "Untitled script"
+        isActive = try box.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
+        trigger = try box.decodeIfPresent(ScriptTrigger.self, forKey: .trigger) ?? ScriptTrigger()
+        action = try box.decodeIfPresent(ScriptAction.self, forKey: .action) ?? ScriptAction()
+        feedback = try box.decodeIfPresent(ScriptFeedback.self, forKey: .feedback) ?? .silent
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isActive, trigger, action, feedback
+    }
 }
 
 // MARK: - Trigger
@@ -170,6 +189,35 @@ struct ScriptTrigger: Codable, Hashable {
         case .customNotification: return !notificationName.isEmpty
         case .systemState, .manual: return true
         }
+    }
+
+    init() {}
+
+    /// Lenient, like `ScriptAction` beside it. This type was the gap: it had
+    /// synthesised decoding, so a library written before any one of these
+    /// twelve fields existed failed on a missing key — and because the library
+    /// is decoded as `[Script]` in one go, that took every *other* script in
+    /// the file with it. An unrecognised enum case falls back to its default
+    /// rather than throwing, for the same reason.
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        kind = ((try? box.decodeIfPresent(Kind.self, forKey: .kind)) ?? nil) ?? .manual
+        watchedFolder = try box.decodeIfPresent(String.self, forKey: .watchedFolder) ?? ""
+        shortcut = try box.decodeIfPresent(Shortcut.self, forKey: .shortcut)
+        appMatch = ((try? box.decodeIfPresent(AppMatch.self, forKey: .appMatch)) ?? nil) ?? .bundleIdentifier
+        bundleIdentifier = try box.decodeIfPresent(String.self, forKey: .bundleIdentifier) ?? ""
+        appName = try box.decodeIfPresent(String.self, forKey: .appName) ?? ""
+        processName = try box.decodeIfPresent(String.self, forKey: .processName) ?? ""
+        appEvent = ((try? box.decodeIfPresent(AppEvent.self, forKey: .appEvent)) ?? nil) ?? .launched
+        systemEvent = ((try? box.decodeIfPresent(SystemEvent.self, forKey: .systemEvent)) ?? nil) ?? .batteryBelow
+        threshold = try box.decodeIfPresent(Int.self, forKey: .threshold) ?? 20
+        notificationScope = ((try? box.decodeIfPresent(NotificationScope.self, forKey: .notificationScope)) ?? nil) ?? .darwin
+        notificationName = try box.decodeIfPresent(String.self, forKey: .notificationName) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, watchedFolder, shortcut, appMatch, bundleIdentifier, appName
+        case processName, appEvent, systemEvent, threshold, notificationScope, notificationName
     }
 
     var summary: String {

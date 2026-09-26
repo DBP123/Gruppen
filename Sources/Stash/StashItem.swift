@@ -38,6 +38,33 @@ struct StashItem: Identifiable, Equatable {
         return url
     }
 
+    /// The directory this item's file already lives in.
+    ///
+    /// Not a stored property, because there is nothing to store: the shelf holds
+    /// files *by reference*, so `url` is already the file where it has always
+    /// been and its parent is the origin by definition.
+    ///
+    /// Nil in two cases, and the second is the one that matters. Text and links
+    /// have nothing on disk. **Virtual** items do have a file, but we wrote it
+    /// into `IngestionManager.scratch` on the way in, and that directory is
+    /// emptied on every launch — it is somewhere a file is passing through, not
+    /// somewhere anything should be written back to. Treating it as an origin
+    /// would extract an archive into a folder macOS deletes at next start.
+    var originDirectoryURL: URL? {
+        guard !isVirtual, let fileURL else { return nil }
+        return fileURL.deletingLastPathComponent()
+    }
+
+    /// Whether this is something `ditto -x -k` can open.
+    ///
+    /// The PKZip family only. `.tar.gz`, `.7z` and `.rar` are deliberately absent:
+    /// ditto does not read them, and offering an Extract button that fails on the
+    /// file you pressed it for is worse than not offering it.
+    var isArchive: Bool {
+        guard let fileURL else { return false }
+        return ["zip", "cbz", "jar", "ipa", "war"].contains(fileURL.pathExtension.lowercased())
+    }
+
     /// Resolved on demand and cached, so a shelf of twenty files doesn't hit
     /// IconServices twenty times per redraw.
     var icon: NSImage {

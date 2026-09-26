@@ -39,37 +39,25 @@ struct GeneralSettingsPane: View {
 
     var body: some View {
         SettingsScroll {
-            LabeledSection(label: "STARTUP") {
-                SettingToggle(title: "Launch at startup",
-                              detail: "Open Gruppen automatically when you log in",
-                              isOn: $settings.launchAtLogin)
-                if let error = settings.loginItemError {
-                    Text("COULD NOT SET LOGIN ITEM — \(error)")
-                        .font(Theme.mono(10))
-                        .foregroundStyle(Theme.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            SettingToggle(title: "Launch at startup",
+                          isOn: $settings.launchAtLogin)
+            if let error = settings.loginItemError {
+                Text("COULD NOT SET LOGIN ITEM — \(error)")
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            SettingToggle(title: "Show in menu bar",
+                          isOn: $settings.showMenuBar)
+            SettingToggle(title: "Show Dock icon",
+                          detail: "Turn off for a menu-bar-only workspace manager",
+                          isOn: $settings.showDockIcon)
+            FootNote("Only one can be disabled at a time.")
 
-            LabeledSection(label: "PRESENCE") {
-                SettingToggle(title: "Show in menu bar",
-                              detail: "Toggle any Gruppe without opening the window",
-                              isOn: $settings.showMenuBar)
-                SettingToggle(title: "Show Dock icon",
-                              detail: "Turn off for a menu-bar-only workspace manager",
-                              isOn: $settings.showDockIcon)
-                FootNote("One of these stays on so the app is always reachable.")
-            }
-
-            LabeledSection(label: "MONITORING") {
-                SettingToggle(title: "Show system monitor",
-                              detail: "Live telemetry in the menu bar dropdown",
-                              isOn: $settings.showPerformanceMonitor)
-                Button("Open Telemetry Settings") { navigation.openTelemetrySettings() }
-                    .industrialButton(.secondary)
-                FootNote("Which hardware modules run, where each one shows, and what it costs are on the "
-                         + "Telemetry settings pane — they belong with the hardware, not in application preferences.")
-            }
+            SettingToggle(title: "Show system monitor",
+                          isOn: $settings.showPerformanceMonitor)
+            Button("Open Telemetry Settings") { navigation.openTelemetrySettings() }
+                .industrialButton(.secondary)
 
             developer
 
@@ -81,8 +69,10 @@ struct GeneralSettingsPane: View {
                 KeyValue("Log", Self.logURL.path)
 
                 HStack(spacing: 8) {
-                    Button("Reveal Data Folder") {
+                    Button("Open Data Folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([GroupStore.defaultFileURL])
+                        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder")
+                            .first?.activate(options: [.activateIgnoringOtherApps])
                     }
                     .industrialButton(.secondary)
                     Button("Open Log") { NSWorkspace.shared.open(Self.logURL) }
@@ -102,33 +92,6 @@ struct GeneralSettingsPane: View {
 /// Shared scaffold for settings panes so every one scrolls and pads the same.
 struct SettingsScroll<Content: View>: View {
     @ViewBuilder let content: Content
-
-    /// The way into the developer menu. Deliberately unremarkable — a field
-    /// with no label promising anything, which does nothing at all unless what
-    /// is typed into it is the passphrase.
-    @State private var key = ""
-    @State private var showingDeveloper = false
-
-    private var developer: some View {
-        HStack(spacing: 8) {
-            SecureField("", text: $key, prompt: Text("").foregroundColor(Theme.textMuted))
-                .textFieldStyle(.plain)
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 150)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .recessed()
-                .onSubmit {
-                    guard DeveloperGate.accepts(key) else { key = ""; return }
-                    key = ""
-                    showingDeveloper = true
-                }
-            Spacer()
-        }
-        .padding(.top, 4)
-        .sheet(isPresented: $showingDeveloper) { DeveloperMenu() }
-    }
 
     var body: some View {
         ScrollView {

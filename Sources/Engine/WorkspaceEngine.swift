@@ -92,9 +92,7 @@ final class WorkspaceEngine: ObservableObject {
     private func load() {
         isLoading = true
         defer { isLoading = false }
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([WorkspaceProfile].self, from: data) else { return }
-        profiles = decoded
+        profiles = LenientLibrary.load(WorkspaceProfile.self, from: fileURL, label: "WORKSPACES")
     }
 
     private func save() {

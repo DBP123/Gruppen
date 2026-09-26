@@ -259,7 +259,6 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
     var isMenuBarPinned = false
 
     private let sampler: S
-    private var timer: DispatchSourceTimer?
     private(set) var rate: TimeInterval?
 
     init(kind: WidgetKind, sampler: S) {
@@ -267,42 +266,29 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
         self.sampler = sampler
     }
 
-    deinit { timer?.cancel() }
+    deinit { TelemetryClock.shared.unregister(ObjectIdentifier(self)) }
 
+    /// Joins the shared clock at `rate`. No timer of its own any more: eight
+    /// modules with eight timers meant eight separate main-thread deliveries a
+    /// second, each a full SwiftUI transaction. See `TelemetryClock`.
     final func startFetching(rate: TimeInterval) {
         guard self.rate != rate else { return }
-        stopFetching()
         self.rate = rate
 
         let sampler = self.sampler
-        let timer = DispatchSource.makeTimerSource(queue: Telemetry.queue)
-        // A quarter-interval of leeway lets the kernel coalesce these ticks with
-        // whatever else is waking the machine, which is most of the difference
-        // between a monitor that costs nothing and one that keeps a core awake.
-        timer.schedule(deadline: .now(), repeating: rate, leeway: .milliseconds(Int(rate * 250)))
-        timer.setEventHandler { [weak self] in
-            // Every sampler allocates — arrays of ticks, process names, CFTypes
-            // out of IOKit. Without a pool around each tick those accumulate
-            // until the queue drains, which on a background queue can be a long
-            // time.
-            autoreleasepool {
-                guard let reading = sampler.sample() else { return }
-                DispatchQueue.main.async { self?.accept(reading) }
-            }
+        TelemetryClock.shared.register(ObjectIdentifier(self), period: rate) { [weak self] in
+            guard let reading = sampler.sample() else { return nil }
+            return { self?.accept(reading) }
         }
-        timer.resume()
-        self.timer = timer
     }
 
     final func stopFetching() {
-        guard timer != nil else { return }
-        timer?.cancel()
-        timer = nil
+        guard rate != nil else { return }
         rate = nil
         if !history.isEmpty { history = [] }
-        // On the sampling queue, not here: the sampler's whole contract is that
-        // it is touched from one place, and a cancelled timer may still have a
-        // tick in flight behind us.
+        TelemetryClock.shared.unregister(ObjectIdentifier(self))
+        // Queued *after* the unregister, on the same serial queue, so the
+        // sampler can never be torn down under a tick still in flight.
         let sampler = self.sampler
         Telemetry.queue.async { sampler.teardown() }
     }

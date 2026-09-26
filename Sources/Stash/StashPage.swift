@@ -16,18 +16,6 @@ struct StashPage: View {
                     NotchStashSummary()
                         .environmentObject(stash.notchShelf)
                 }
-
-                LabeledSection(label: "HOW TO OPEN A STASH") {
-                    TriggerRow(systemImage: "macbook",
-                               title: "Drag to the notch",
-                               detail: "Opens the notch stash at the top of the screen")
-                    TriggerRow(systemImage: "arrow.left.and.right",
-                               title: "Shake while dragging",
-                               detail: "Spawns a new stash beside the pointer — shake again for another")
-                    TriggerRow(systemImage: "rectangle.lefthalf.inset.filled",
-                               title: "Drag to a screen edge",
-                               detail: "Either side edge spawns a stash too")
-                }
             }
         }
     }
@@ -124,27 +112,6 @@ private struct StashShortcutRow: View {
         }
         .panelRow()
         .onDisappear { recorder.stop() }
-    }
-}
-
-private struct TriggerRow: View {
-    let systemImage: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.orange)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
-            }
-            Spacer()
-        }
-        .panelRow()
     }
 }
 

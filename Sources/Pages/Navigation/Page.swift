@@ -55,7 +55,7 @@ enum Page: String, CaseIterable, Identifiable {
     var badge: String {
         switch self {
         case .telemetry: return "HARDWARE"
-        case .stash: return "SHELF"
+        case .stash: return "STASH"
         case .scripts: return "AUTOMATION"
         case .workspaces: return "SYSTEM OVERVIEW"
         case .metrics: return "DATA"
@@ -106,7 +106,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .telemetry:
             return "Every hardware sensor this Mac exposes, live."
         case .stash:
-            return "A shelf for files in transit. Drag to the notch or shake to open it."
+            return "A stash for files in transit. Drag to the notch or shake to open it."
         case .scripts:
             return "Attach a script to a Gruppe. Dropping files on it runs the script with their paths."
         case .workspaces:

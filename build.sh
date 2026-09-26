@@ -1,11 +1,11 @@
 #!/bin/bash
-# Builds "Gruppen.app" from Sources/ using the Swift compiler that ships with
-# the Xcode Command Line Tools. No Xcode project required.
-#
-#   ./build.sh              build into ./build
-#   ./build.sh --install    build, then replace /Applications/Gruppen.app
-#   ./build.sh --run        build and launch
-#   ./build.sh --dmg        build, then package a shareable Gruppen-<ver>.dmg
+
+# ./build.sh              build and install into /Applications (default)
+# ./build.sh --run        build, install, then launch
+# ./build.sh --dmg        build, install, then package a shareable Gruppen-<ver>.dmg
+# ./build.sh --no-install build into ./build only, skip installing
+# ./build.sh --fast       build this Mac's architecture only (local iteration)
+
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -13,117 +13,191 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.14"
+VERSION="1.20"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 
 BUILD_DIR="build"
-APP_DIR="$BUILD_DIR/$APP_NAME.app"
+APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
 ARCH="$(uname -m)"
 
-# Which SDK to compile against.
-#
-# Command Line Tools 27.0 repoints `MacOSX.sdk` at the macOS 27 SDK, where
-# SwiftUI's `@State` (and friends) are compiler macros — and the CLT ships no
-# `libSwiftUIMacros.dylib` to expand them, so every `@State` in the app fails
-# with "plugin for module 'SwiftUIMacros' not found". That plugin only exists
-# inside Xcode.app's macOS platform. Until the build runs under Xcode's
-# toolchain (`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, which
-# needs its licence accepted first), pin to the newest macOS 26 SDK the CLT
-# still carries. The app deploys to 13.0 either way; the SDK only decides what
-# the compiler is allowed to see.
-# `dirname` of the default SDK works for both the CLT (…/SDKs) and Xcode
-# (…/Platforms/MacOSX.platform/Developer/SDKs); `--show-sdk-platform-path`
-# does not exist on the CLT and under `set -e` a failing substitution in an
-# assignment aborts the whole script without printing a word.
 SDK_ROOT="$(dirname "$(xcrun --show-sdk-path)")"
-if [ -d "$SDK_ROOT/MacOSX26.sdk" ]; then
-    SDK="$SDK_ROOT/MacOSX26.sdk"
+if [ -d "${SDK_ROOT}/MacOSX26.sdk" ]; then
+    SDK="${SDK_ROOT}/MacOSX26.sdk"
 else
     SDK="$(xcrun --show-sdk-path)"
 fi
 
-INSTALL=0
+INSTALL=1
 RUN=0
 DMG=0
+FAST=0
+
 for arg in "$@"; do
     case "$arg" in
-        --install) INSTALL=1 ;;
-        --run) RUN=1 ;;
-        --dmg) DMG=1 ;;
-        *) echo "unknown option: $arg" >&2; exit 2 ;;
+        --no-install)
+            INSTALL=0
+            ;;
+        --fast)
+            FAST=1
+            ;;
+        --run)
+            RUN=1
+            ;;
+        --dmg)
+            DMG=1
+            ;;
+        *)
+            echo "unknown option: $arg" >&2
+            exit 2
+            ;;
     esac
 done
 
 rm -rf "$APP_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+mkdir -p \
+    "$APP_DIR/Contents/MacOS" \
+    "$APP_DIR/Contents/Resources"
 
-echo "Compiling $APP_NAME $VERSION ($BUILD_NUMBER) for $ARCH…"
-xcrun swiftc \
-    -O \
-    -whole-module-optimization \
-    -parse-as-library \
-    -sdk "$SDK" \
-    -target "$ARCH-apple-macos$MIN_MACOS" \
-    -o "$APP_DIR/Contents/MacOS/$EXECUTABLE" \
-    $(find Sources -name '*.swift' | sort)
+# Universal by default.
+#
+# This used to compile for `uname -m` alone, which on this machine meant every
+# DMG shipped an arm64-only binary while Info.plist advertised macOS 13 — a
+# version that runs on plenty of Intel Macs. Those users got "you can't open
+# this application" and no explanation. The sources compile clean for x86_64,
+# verified, so there was never a reason for it.
+#
+# `--fast` skips the second slice for a local iteration; the DMG never does.
+SOURCES=$(find Sources -name '*.swift' | sort)
+
+compile_slice() {
+    xcrun swiftc \
+        -O \
+        -whole-module-optimization \
+        -parse-as-library \
+        -sdk "$SDK" \
+        -target "${1}-apple-macos${MIN_MACOS}" \
+        -o "$2" \
+        $SOURCES
+}
+
+if [ "$FAST" = "1" ]; then
+    echo "Compiling ${APP_NAME} ${VERSION} (${BUILD_NUMBER}) for ${ARCH} only..."
+    compile_slice "$ARCH" "$APP_DIR/Contents/MacOS/$EXECUTABLE"
+else
+    echo "Compiling ${APP_NAME} ${VERSION} (${BUILD_NUMBER}) for arm64 and x86_64..."
+    SLICE_DIR="${BUILD_DIR}/slices"
+    rm -rf "$SLICE_DIR"
+    mkdir -p "$SLICE_DIR"
+    compile_slice arm64 "$SLICE_DIR/$EXECUTABLE-arm64"
+    compile_slice x86_64 "$SLICE_DIR/$EXECUTABLE-x86_64"
+    lipo -create \
+        "$SLICE_DIR/$EXECUTABLE-arm64" \
+        "$SLICE_DIR/$EXECUTABLE-x86_64" \
+        -output "$APP_DIR/Contents/MacOS/$EXECUTABLE"
+    rm -rf "$SLICE_DIR"
+    echo "Linked universal binary ($(lipo -archs "$APP_DIR/Contents/MacOS/$EXECUTABLE"))"
+fi
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>$APP_NAME</string>
-    <key>CFBundleDisplayName</key><string>$APP_NAME</string>
-    <key>CFBundleExecutable</key><string>$EXECUTABLE</string>
-    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
-    <key>CFBundleIconFile</key><string>AppIcon</string>
-    <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$VERSION</string>
-    <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
-    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
-    <key>LSMinimumSystemVersion</key><string>$MIN_MACOS</string>
-    <key>NSHighResolutionCapable</key><true/>
-    <key>NSHumanReadableCopyright</key><string>Copyright © $(date +%Y) Dhilan Patel. All rights reserved.</string>
-    <key>NSSupportsAutomaticTermination</key><false/>
-    <key>NSSupportsSuddenTermination</key><false/>
+    <key>CFBundleName</key>
+    <string>${APP_NAME}</string>
+
+    <key>CFBundleDisplayName</key>
+    <string>${APP_NAME}</string>
+
+    <key>CFBundleExecutable</key>
+    <string>${EXECUTABLE}</string>
+
+    <key>CFBundleIdentifier</key>
+    <string>${BUNDLE_ID}</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+
+    <key>CFBundleVersion</key>
+    <string>${BUILD_NUMBER}</string>
+
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+
+    <key>LSMinimumSystemVersion</key>
+    <string>${MIN_MACOS}</string>
+
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © $(date +%Y) Dhilan Patel. All rights reserved.</string>
+
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
 </dict>
 </plist>
 PLIST
 
 if [ -f "Resources/AppIcon.icns" ]; then
-    cp "Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+    cp \
+        "Resources/AppIcon.icns" \
+        "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature. Enough for local use and for a stable TCC identity; ship to
-# other machines only after signing with a Developer ID and notarising, or
-# Gatekeeper will block it.
-echo "Signing (ad-hoc)…"
-codesign --force --sign - --timestamp=none "$APP_DIR" >/dev/null 2>&1
+# Ad-hoc signature. Enough for local use and for a stable TCC identity.
+# Ship to other machines only after signing with a Developer ID and notarizing,
+# or Gatekeeper may block it.
+echo "Signing (ad-hoc)..."
+
+codesign \
+    --force \
+    --sign - \
+    --timestamp=none \
+    "$APP_DIR" >/dev/null 2>&1
 
 echo "Built $APP_DIR"
 
 if [ "$DMG" = "1" ]; then
-    DMG_NAME="$APP_NAME-$VERSION.dmg"
-    STAGING="$BUILD_DIR/dmg-staging"
-    rm -rf "$STAGING" "$BUILD_DIR/$DMG_NAME"
+    DMG_NAME="${APP_NAME}-${VERSION}.dmg"
+    STAGING="${BUILD_DIR}/dmg-staging"
+
+    rm -rf \
+        "$STAGING" \
+        "${BUILD_DIR}/${DMG_NAME}"
+
     mkdir -p "$STAGING"
 
-    cp -R "$APP_DIR" "$STAGING/$APP_NAME.app"
-    ln -s /Applications "$STAGING/Applications"
+    cp -R \
+        "$APP_DIR" \
+        "$STAGING/${APP_NAME}.app"
 
-    # The build is ad-hoc signed, so Gatekeeper will refuse a plain double
-    # click on someone else's Mac. Ship the one-time workaround alongside it
-    # rather than letting people hit a dead end.
+    ln -s \
+        /Applications \
+        "$STAGING/Applications"
+
     cat > "$STAGING/READ ME FIRST.txt" <<'NOTE'
-Gruppen — first launch
+Gruppen - first launch
 ======================
 
 1. Drag Gruppen onto the Applications folder in this window.
 
-2. The first time you open it, macOS will say Gruppen "cannot be opened
+2. The first time you open it, macOS may say Gruppen "cannot be opened
    because it is from an unidentified developer", or that it is damaged.
+
    This is expected: the app is signed ad-hoc rather than with a paid
    Apple Developer ID. It is not a sign that anything is wrong with it.
 
@@ -135,43 +209,64 @@ Gruppen — first launch
    or, if macOS refuses outright:
 
    b) Open Terminal and run:
-        xattr -dr com.apple.quarantine /Applications/Gruppen.app
+
+      xattr -dr com.apple.quarantine /Applications/Gruppen.app
 
 3. Gruppen needs no special permissions. It launches and force quits the
    apps you group together, nothing else.
 
 What it does
 ------------
+
 Group your applications, launch a whole group with one click or one global
 hotkey, and force close the group when you are done with that context.
 
-  • Snapshot   turns whatever you have open right now into a Gruppe
-  • Sequence   launches 1 -> N in order and terminates N -> 1 in reverse
-  • Presets    suggests Gruppen based on what is installed
+  * Snapshot
+    Turns whatever you have open right now into a Gruppe.
+
+  * Sequence
+    Launches 1 -> N in order and terminates N -> 1 in reverse.
+
+  * Presets
+    Suggests Gruppen based on what is installed.
 NOTE
 
-    echo "Packaging $DMG_NAME…"
+    echo "Packaging ${DMG_NAME}..."
+
     hdiutil create \
-        -volname "$APP_NAME $VERSION" \
+        -volname "${APP_NAME} ${VERSION}" \
         -srcfolder "$STAGING" \
-        -ov -format UDZO \
-        "$BUILD_DIR/$DMG_NAME" >/dev/null
+        -ov \
+        -format UDZO \
+        "${BUILD_DIR}/${DMG_NAME}" >/dev/null
 
     rm -rf "$STAGING"
-    echo "Packaged $BUILD_DIR/$DMG_NAME ($(du -h "$BUILD_DIR/$DMG_NAME" | cut -f1))"
+
+    echo "Packaged ${BUILD_DIR}/${DMG_NAME} ($(du -h "${BUILD_DIR}/${DMG_NAME}" | cut -f1))"
 fi
 
 if [ "$INSTALL" = "1" ]; then
-    DEST="/Applications/$APP_NAME.app"
+    DEST="/Applications/${APP_NAME}.app"
+
     if pgrep -x "$EXECUTABLE" >/dev/null; then
-        echo "Quitting running $APP_NAME…"
-        osascript -e "quit app \"$APP_NAME\"" 2>/dev/null || pkill -x "$EXECUTABLE" || true
+        echo "Quitting running ${APP_NAME}..."
+
+        osascript -e "quit app \"${APP_NAME}\"" 2>/dev/null \
+            || pkill -x "$EXECUTABLE" \
+            || true
+
         sleep 1
     fi
+
     rm -rf "$DEST"
     cp -R "$APP_DIR" "$DEST"
+
     echo "Installed $DEST"
-    if [ "$RUN" = "1" ]; then open "$DEST"; fi
+
+    if [ "$RUN" = "1" ]; then
+        open "$DEST"
+    fi
+
 elif [ "$RUN" = "1" ]; then
     open "$APP_DIR"
 fi

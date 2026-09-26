@@ -57,8 +57,12 @@ final class StorageSampler: TelemetrySampler {
     ///
     /// Purgeable space is caches and snapshots — it moves over minutes, not
     /// over half-seconds, so re-deriving it twice a second bought nothing and
-    /// cost everything.
-    private static let purgeableInterval: TimeInterval = 15
+    /// cost everything. Sixty seconds rather than fifteen: it is not just the
+    /// 6 ms on this side. The key is an XPC round trip to the cache-delete
+    /// daemon, and in a profile of the dashboard its reply-handling queues were
+    /// the only periodic work left that lined up with the remaining CPU
+    /// outliers. A figure that moves over minutes can be a minute old.
+    private static let purgeableInterval: TimeInterval = 60
 
     func sample() -> Reading? {
         let now = Date()
