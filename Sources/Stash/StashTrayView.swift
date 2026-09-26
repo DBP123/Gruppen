@@ -33,6 +33,11 @@ struct StashTrayView: View {
         .ambientGlow(isTargeted || hovering)
         .animation(.easeOut(duration: 0.12), value: isTargeted)
         .animation(.easeOut(duration: 0.2), value: hovering)
+        // What plays the selection toolbar's and the convert bar's transitions.
+        // Both appear and disappear with the selection, and a `.transition` is
+        // run by whatever animates the insertion — which has to be out here,
+        // around the `if`, rather than inside the view being inserted.
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: state.selection.count)
         .onHover { hovering = $0 }
     }
 
@@ -90,7 +95,10 @@ struct StashTrayView: View {
                 let archive = try await Task.detached(priority: .userInitiated) {
                     try StashExporter.export(items: payload, to: destination)
                 }.value
-                await MainActor.run { exportNote = "Saved \(archive.lastPathComponent)" }
+                await MainActor.run {
+                    exportNote = "Saved \(archive.lastPathComponent)"
+                    FinderUtility.revealAndFocus(url: archive)
+                }
             } catch {
                 await MainActor.run { exportNote = "! \(error.localizedDescription)" }
             }

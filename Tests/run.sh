@@ -6,6 +6,12 @@
 #
 #   ./Tests/run.sh            run as this Mac's architecture
 #   ./Tests/run.sh x86_64     run as Intel, under Rosetta on Apple silicon
+#
+# Run this in a normal shell. Inside a sandbox that denies writes to
+# /var/folders/…/T — which is what `NSTemporaryDirectory()` returns regardless of
+# $TMPDIR — around forty checks fail on fixture directories that could not be
+# created, and the SMC declines to open, so the power basis falls back from the
+# live rail to the battery meter. Those failures are the sandbox, not the code.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

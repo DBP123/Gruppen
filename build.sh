@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.20"
+VERSION="1.21"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 

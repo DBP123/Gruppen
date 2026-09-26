@@ -459,9 +459,9 @@ struct IndustrialSlider: View {
 ///
 /// `glow` adds the one thing a dismiss key needs that the others do not: an
 /// unmistakable hover state. The cap warms, the glyph and the rim take the
-/// ambient orange, and light spills off it. Pressing it dips the cap by a few
-/// percent — a `scaleEffect`, which is drawn smaller without being *laid out*
-/// smaller, so nothing beside it moves.
+/// ambient orange, light spills off it, and it swells by 8%; pressing it dips the
+/// cap instead. Both are `scaleEffect`, which draws at a different size without
+/// being *laid out* at one, so nothing beside it moves either way.
 struct HardwareKeyStyle: ButtonStyle {
     var size: CGFloat = 22
     var tint: Color = Theme.textSecondary
@@ -519,13 +519,21 @@ struct HardwareKeyStyle: ButtonStyle {
                 .shadow(color: .black.opacity(pressed ? 0 : 0.5), radius: pressed ? 0 : 2, y: pressed ? 0 : 1)
                 // Light off the cap, not a ring drawn around it.
                 .shadow(color: Theme.ambient.opacity(alight ? 0.55 : 0), radius: alight ? 7 : 0)
-                .scaleEffect(glow && pressed ? 0.88 : 1)
+                // Grows very slightly under the pointer and dips when pressed.
+                //
+                // A `scaleEffect` rather than a change of `size`, on both: it
+                // draws bigger or smaller without being *laid out* bigger or
+                // smaller, so a key that swells under the cursor cannot nudge
+                // the key beside it or re-truncate a filename three rows up.
+                // 8% is enough to read as a response and small enough that the
+                // 18pt cap stays inside the padding it was given.
+                .scaleEffect(glow ? (pressed ? 0.88 : (alight ? 1.08 : 1)) : 1)
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1 : 0.35)
                 // The glowing key gets a springier press because it has a dip to
                 // spring back from; every other key keeps the original timing,
                 // so nothing already on screen changes feel.
-                .animation(.easeOut(duration: glow ? 0.14 : 0.11), value: hovering)
+                .animation(.easeOut(duration: glow ? 0.15 : 0.11), value: hovering)
                 .animation(glow ? .spring(response: 0.18, dampingFraction: 0.55)
                                 : .easeOut(duration: 0.06),
                            value: pressed)

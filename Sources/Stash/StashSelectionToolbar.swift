@@ -21,6 +21,16 @@ struct StashSelectionToolbar: View {
     private var archives: [StashItem] { selected.filter(\.isArchive) }
     private var origins: Int { state.selectedOriginsCount }
 
+    /// The merge this selection supports, if it supports one.
+    ///
+    /// Nil for a single file — combining one thing produces a copy, not a merge —
+    /// and nil for a selection holding something that cannot be read, rather than
+    /// quietly dropping that file and handing back a document with a page
+    /// missing. See `StashFileMerger.plan(for:)`.
+    private var merge: StashFileMerger.Plan? {
+        StashFileMerger.plan(for: selected.compactMap(\.fileURL))
+    }
+
     var body: some View {
         if !selected.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
@@ -66,6 +76,13 @@ struct StashSelectionToolbar: View {
                         }
                     }
 
+                    if let merge {
+                        Button(working ? "Combining…" : merge.label) { combine(merge) }
+                            .industrialButton(.secondary)
+                            .disabled(working)
+                            .help(mergeHelp(merge))
+                    }
+
                     Button("Deselect") { state.selection.removeAll() }
                         .industrialButton(.ghost)
                         .disabled(working)
@@ -83,8 +100,12 @@ struct StashSelectionToolbar: View {
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .machined(cornerRadius: Theme.radiusSm)
-            .transition(.opacity)
-            .animation(.easeOut(duration: 0.12), value: selected.count)
+            // Rises from the bottom edge, which is where it sits and where the
+            // rows above it make room. The animation that drives this lives on
+            // the enclosing stack in `StashTrayView`: a `.transition` is played
+            // by whatever animates the *insertion*, so an `.animation` attached
+            // here would only ever cover changes within a bar already on screen.
+            .transition(.move(edge: .bottom).combined(with: .opacity))
         }
     }
 
@@ -117,7 +138,51 @@ struct StashSelectionToolbar: View {
         }
     }
 
+    /// Says which merge is about to happen, since "Combine into PDF" does not
+    /// distinguish appending six PDFs from rendering six screenshots.
+    private func mergeHelp(_ plan: StashFileMerger.Plan) -> String {
+        switch plan {
+        case .text: return "Join \(selected.count) text files into one, each section labelled"
+        case .pdf: return "Append \(selected.count) PDFs into one, in the order shown"
+        case .images: return "One page per image, each at its own size"
+        case .mixed: return "Render \(selected.count) mixed files onto Letter pages in one PDF"
+        }
+    }
+
     // MARK: Actions
+
+    /// Merges the selection, puts the result on the shelf, and leaves the
+    /// originals alone.
+    ///
+    /// The same contract as a conversion: the merged file lands in scratch and
+    /// becomes a real file somewhere real at the moment it is dragged out.
+    /// Unlike a conversion, the inputs stay on the shelf — a merge you dislike
+    /// should be one deletion to undo, not six files to find again.
+    private func combine(_ plan: StashFileMerger.Plan) {
+        guard !working else { return }
+        working = true
+        note = nil
+        let batch = selected
+
+        Task { @MainActor in
+            do {
+                let merged = try await StashFileMerger.combineStashItems(batch)
+                state.add([StashItem.virtual(file: merged, kind: .file,
+                                             title: merged.lastPathComponent)])
+                // The inputs are no longer the thing you are carrying, so the
+                // selection moves off them; the merged file is what is left to
+                // act on. Deselecting rather than removing keeps them on the
+                // shelf, which is the point.
+                state.selection.removeAll()
+                note = "Combined \(batch.count) → \(merged.lastPathComponent)"
+                GroupStore.log("STASH combine ×\(batch.count) [\(plan.ext)] — \(merged.lastPathComponent)")
+            } catch {
+                note = "! \(error.localizedDescription)"
+                GroupStore.log("STASH combine ×\(batch.count) failed — \(error.localizedDescription)")
+            }
+            working = false
+        }
+    }
 
     private func extract(_ mode: UnzipDestinationMode) {
         guard !working else { return }
@@ -132,11 +197,11 @@ struct StashSelectionToolbar: View {
                                                                      fallback: fallback)
             note = report.summary
             working = false
-            // Reveal what landed, the way the zip button does — a batch that
+            // Reveal what landed, the way the zip key does — a batch that
             // finished somewhere you were not looking is a batch you have to go
             // and find.
             if !report.extracted.isEmpty {
-                NSWorkspace.shared.activateFileViewerSelecting(report.extracted)
+                FinderUtility.revealAndFocus(urls: report.extracted)
             }
             GroupStore.log("STASH extract ×\(batch.count) [\(mode == .origin ? "origin" : "fallback")] — "
                            + report.summary)

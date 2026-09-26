@@ -70,9 +70,7 @@ struct GeneralSettingsPane: View {
 
                 HStack(spacing: 8) {
                     Button("Open Data Folder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([GroupStore.defaultFileURL])
-                        NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder")
-                            .first?.activate(options: [.activateIgnoringOtherApps])
+                        FinderUtility.revealAndFocus(url: GroupStore.defaultFileURL)
                     }
                     .industrialButton(.secondary)
                     Button("Open Log") { NSWorkspace.shared.open(Self.logURL) }

@@ -28,6 +28,10 @@ struct PowerDetail: View {
     // A fold you opened this session is a fold you asked for; one that opened
     // itself is not.
     @State private var showingEnergy = false
+    // Session-only for the same reason as the fold above, and more so: this one
+    // sweeps every process for CPU *and* parentage, and holds the SMC open to
+    // read the package rail it divides.
+    @State private var showingAppPower = false
 
     var body: some View {
         if let reading = widget.reading {
@@ -101,6 +105,15 @@ struct PowerDetail: View {
             // Folded away by default. It is history rather than telemetry —
             // useful when you are asking why the machine woke at 3am, and noise
             // the rest of the time.
+            // Two folds, and they answer different questions. This one asks
+            // "what is my battery being spent on", in watts, per application.
+            // The one below ranks processes by a unitless impact score. They are
+            // not two attempts at the same number: one is a share of a measured
+            // quantity, the other is a heuristic for ordering.
+            Fold(title: "POWER BY APPLICATION", expanded: $showingAppPower) {
+                AppPowerBreakdownView()
+            }
+
             Fold(title: "ENERGY IMPACT", expanded: $showingEnergy) {
                 EnergyImpactRows()
             }

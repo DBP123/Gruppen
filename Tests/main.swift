@@ -10,6 +10,8 @@ struct Suite {
         await MainActor.run { sectionStash() }
         await sectionWorkspaces()
         await MainActor.run { sectionPortability() }
+        sectionMerge()
+        await sectionAppPower()
         exit(T.summary())
     }
 }
