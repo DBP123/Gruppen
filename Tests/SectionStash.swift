@@ -139,4 +139,60 @@ func sectionStash() {
     T.check("a target never offers to convert a file to itself",
             FileConverter.targets(for: [URL(fileURLWithPath: "/tmp/a.png")])
                 .allSatisfy { $0.label.lowercased() != "png" })
+
+    T.begin("D. Stash — dragging out: move or copy")
+
+    // What a receiver outside the app is allowed to do. One operation, never
+    // both — with both on offer Finder picks, and between disks it picks copy.
+    let outside = NSDraggingContext.outsideApplication
+    let inside = NSDraggingContext.withinApplication
+    T.equal("copy mode offers Finder a copy and nothing else",
+            StashDragOut.operations(for: outside, moving: false), .copy)
+    T.equal("move mode offers Finder a move and nothing else",
+            StashDragOut.operations(for: outside, moving: true), .move)
+    T.check("move mode never also offers copy, which would hand the choice back",
+            !StashDragOut.operations(for: outside, moving: true).contains(.copy))
+    // Another stash takes a reference and its drop zone answers copy; offering
+    // only move there would make it refuse the drop.
+    T.equal("a drop on another stash is a copy even in move mode",
+            StashDragOut.operations(for: inside, moving: true), .copy)
+    T.equal("and in copy mode", StashDragOut.operations(for: inside, moving: false), .copy)
+
+    T.equal("a move the receiver performed is logged as moved",
+            StashDragOut.describe(.move), "moved")
+    T.equal("a copy is logged as copied", StashDragOut.describe(.copy), "copied")
+    T.equal("a drop nobody took is cancelled — and keeps the item",
+            StashDragOut.describe([]), "cancelled")
+
+    // What goes on the pasteboard: a path a receiver can relocate, and only
+    // when there is still a file at it.
+    withTempDir { dir in
+        let file = dir.appendingPathComponent("report.pdf")
+        try? Data("x".utf8).write(to: file)
+        let onDisk = StashItem.file(file).pasteboardWriter as? NSURL
+        T.equal("a stashed file is dragged as its own path",
+                (onDisk as URL?)?.standardizedFileURL, file.standardizedFileURL)
+
+        let vanished = dir.appendingPathComponent("gone.pdf")
+        let stale = StashItem.file(vanished).pasteboardWriter
+        T.check("a file that has since gone is still a URL, not a path to move",
+                (stale as? NSURL) != nil)
+    }
+    let link = StashItem.link(URL(string: "https://example.com/a")!).pasteboardWriter as? NSURL
+    T.equal("a link is dragged as its URL", link?.absoluteString, "https://example.com/a")
+    let snippet = StashItem.text("hello there").pasteboardWriter as? NSString
+    T.equal("text is dragged as text", snippet as String?, "hello there")
+
+    // The setting itself: off by default, because a stash has always copied
+    // and nobody should find their files moved by an update.
+    let defaults = UserDefaults.standard
+    let saved = defaults.object(forKey: "stashMovesOnDragOut")
+    defaults.removeObject(forKey: "stashMovesOnDragOut")
+    T.check("a fresh install copies", AppSettings().stashMovesOnDragOut == false)
+    let settings = AppSettings()
+    settings.stashMovesOnDragOut = true
+    T.check("the choice is persisted", defaults.bool(forKey: "stashMovesOnDragOut"))
+    T.check("and survives a relaunch", AppSettings().stashMovesOnDragOut)
+    if let saved { defaults.set(saved, forKey: "stashMovesOnDragOut") }
+    else { defaults.removeObject(forKey: "stashMovesOnDragOut") }
 }

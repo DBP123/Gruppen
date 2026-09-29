@@ -92,15 +92,21 @@ struct StashItem: Identifiable, Equatable {
     /// is to stop shipping anything that a name can be *derived from*. A bare
     /// file URL is what Finder itself puts on the pasteboard for a file drag
     /// (measured: `public.file-url`, `NSFilenamesPboardType`, and friends), and
-    /// a receiver given a path copies the file at that path. There is no
+    /// a receiver given a path acts on the file at that path. There is no
     /// content representation left to re-name, so the file that comes out is the
     /// file that went in, by construction rather than by correction.
-    var itemProvider: NSItemProvider {
+    ///
+    /// It is also what makes *moving* possible at all: a path is something a
+    /// receiver can relocate, where a blob of file data can only ever be copied.
+    /// Written straight to the pasteboard now rather than through
+    /// `NSItemProvider`, because the drag is an AppKit session — see
+    /// `StashDragOut` for why.
+    var pasteboardWriter: NSPasteboardWriting {
         if let fileURL, FileManager.default.fileExists(atPath: fileURL.path) {
-            return NSItemProvider(object: fileURL as NSURL)
+            return fileURL as NSURL
         }
-        if let url { return NSItemProvider(object: url as NSURL) }
-        return NSItemProvider(object: (text ?? "") as NSString)
+        if let url { return url as NSURL }
+        return (text ?? "") as NSString
     }
 
     static func file(_ url: URL) -> StashItem {

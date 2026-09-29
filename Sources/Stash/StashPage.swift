@@ -63,11 +63,7 @@ private struct NotchStashSummary: View {
                     .industrialButton(.ghost)
                 }
                 .panelRow()
-                .onDrag {
-                    let provider = item.itemProvider
-                    Task { @MainActor in shelf.remove(item) }
-                    return provider
-                }
+                .stashDraggable(item) { shelf.remove(item) }
             }
         }
     }
@@ -154,9 +150,9 @@ private struct ExportPathRow: View {
 /// Isolated settings for the Stash tool.
 ///
 /// One list, no section headings: every row here is about the same thing, and
-/// a caption over each one was a label for a group of one. The three trigger
-/// switches sit under the master switch and only while it is on — a switch for
-/// a trigger that cannot fire is a control that does nothing.
+/// a caption over each one was a label for a group of one. The trigger switches
+/// and the drag-out choice sit under the master switch and only while it is on —
+/// a switch for a stash that cannot exist is a control that does nothing.
 struct StashSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var stash: StashCoordinator
@@ -176,6 +172,15 @@ struct StashSettingsPane: View {
                     SettingToggle(title: "Shake stash",
                                   detail: "Shake while dragging",
                                   isOn: $settings.stashShakeEnabled)
+                    // The detail states what happens *now*, in both positions,
+                    // rather than describing the switch — so it answers "what
+                    // will this drag do" without anyone having to work out which
+                    // way round on means.
+                    SettingToggle(title: "Move files when dragging out",
+                                  detail: settings.stashMovesOnDragOut
+                                      ? "The file leaves its original folder"
+                                      : "A copy is made; the original stays put",
+                                  isOn: $settings.stashMovesOnDragOut)
                 }
 
                 StashShortcutRow()

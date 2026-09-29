@@ -297,11 +297,7 @@ private struct NotchItemChip: View {
                       fill: hovering ? Color(hex: 0x17171A) : Theme.machined,
                       border: Theme.machinedBorder)
             .onHover { hovering = $0 }
-            .onDrag {
-                let provider = item.itemProvider
-                Task { @MainActor in state.remove(item) }
-                return provider
-            }
+            .stashDraggable(item) { state.remove(item) }
             .help(item.title)
     }
 }

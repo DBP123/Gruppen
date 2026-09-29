@@ -277,12 +277,9 @@ private struct StashRow: View {
                 state.select(item, gesture: .init(modifiers: NSEvent.modifierFlags))
             }
         )
-        .onDrag {
-            // Dragging out consumes the item; emptying the shelf closes it.
-            let provider = item.itemProvider
-            Task { @MainActor in state.remove(item) }
-            return provider
-        }
+        // Dragging out consumes the item once the drop lands; emptying the
+        // shelf closes it. Moved or copied per the stash setting.
+        .stashDraggable(item) { state.remove(item) }
     }
 
     private var actions: some View {
