@@ -124,8 +124,6 @@ final class ShelfWindowManager: ObservableObject {
     /// mean several objects disagreeing about what is running.
     weak var store: GroupStore?
 
-    var shelfCount: Int { activeShelves.count }
-
     private init() {}
 
     @discardableResult

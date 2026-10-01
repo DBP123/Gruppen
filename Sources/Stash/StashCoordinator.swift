@@ -42,6 +42,11 @@ final class StashCoordinator: ObservableObject {
         // Anything left in scratch belongs to a previous run: shelves do not
         // survive a relaunch, so nothing still there is referenced.
         IngestionManager.purgeScratch()
+        // A notch stash with nothing left on it has nothing left to show, so it
+        // slides away by itself — the same retraction as its close key. Only
+        // on *becoming* empty: a tray opened by a drag and not yet dropped on
+        // is empty too, and that one is governed by the withdrawal below.
+        notchShelf.onEmptied = { [weak self] in self?.closeNotch() }
     }
 
 
@@ -147,10 +152,10 @@ final class StashCoordinator: ObservableObject {
 
         let host = StashHostingView(
             rootView: AnyView(
-                // Taking a file *out* deliberately does not dismiss the tray. It
-                // used to, on the theory that the tray should get out of the way
-                // — but it also meant you got one file per opening, and had to
-                // re-summon it for the next. It closes when you close it.
+                // Taking a file *out* does not dismiss the tray while anything
+                // is left on it — dismissing on every drag-out meant one file
+                // per opening. It closes when you close it, or when the last
+                // item leaves (see `onEmptied` in `init`).
                 NotchHUDView(onClose: { [weak self] in self?.closeNotch() })
                 .environmentObject(notchShelf)
                 .environmentObject(presentation)
@@ -159,8 +164,8 @@ final class StashCoordinator: ObservableObject {
             registry: registry
         )
         // Empty tray, pointer gone — and only if nothing was ever dropped in it.
-        // A tray you have actually used stays until you close it, even after you
-        // drag the last thing back out of it.
+        // A tray you have actually used is closed by its last item leaving, not
+        // by the pointer.
         //
         // Deferred, and cancelled by coming back. Acting on the exit itself is
         // what made the tray flicker: every twitch across the boundary was a
@@ -277,6 +282,4 @@ final class StashCoordinator: ObservableObject {
         manager.dismissEmptySpeculativeShelves()
         if isNotchOpen, !isNotchPinned, !notchShelf.isTargeted { closeNotch() }
     }
-
-    var openShelfCount: Int { manager.shelfCount + (isNotchOpen ? 1 : 0) }
 }

@@ -60,6 +60,26 @@ func sectionStash() {
             shelf.dragBatch(for: shelf.items[0]).map(\.title), ["b"])
     T.equal("actionable is everything when nothing is selected", shelf.actionable.count, 2)
 
+    T.begin("D. Stash — emptying, which closes the notch tray")
+
+    // The notch tray closes on `onEmptied`, so when it fires is the behaviour.
+    let tray = ShelfState()
+    var emptied = 0
+    tray.onEmptied = { emptied += 1 }
+    tray.clear()
+    T.equal("a tray that never held anything does not close itself", emptied, 0)
+
+    let three = ["x", "y", "z"].map { StashItem.file(URL(fileURLWithPath: "/tmp/\($0)")) }
+    tray.add(three)
+    tray.remove(three[0])
+    T.equal("taking one item out leaves the tray open", emptied, 0)
+    tray.remove(Array(three.dropFirst()))
+    T.equal("the last items leaving together close it exactly once", emptied, 1)
+
+    tray.add([three[0]])
+    tray.clear()
+    T.equal("clearing a loaded tray closes it", emptied, 2)
+
     T.begin("D. Stash — batch extraction planning")
 
     withTempDir { dir in

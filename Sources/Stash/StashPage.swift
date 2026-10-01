@@ -21,7 +21,7 @@ struct StashPage: View {
     }
 }
 
-/// Contents of the notch stash, plus a live count of floating stashes.
+/// Contents of the notch stash, and whether its tray is out.
 private struct NotchStashSummary: View {
     @EnvironmentObject private var stash: StashCoordinator
     @EnvironmentObject private var store: GroupStore
@@ -35,7 +35,8 @@ private struct NotchStashSummary: View {
                     Text(shelf.isEmpty ? "Nothing on the notch stash" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
                         .font(Theme.sans(13))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("\(stash.openShelfCount) stash\(stash.openShelfCount == 1 ? "" : "es") open")
+                    // There is one notch, so one notch stash: open or not.
+                    Text(stash.isNotchOpen ? "Notch stash open" : "No stashes open")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.textMuted)
                 }
