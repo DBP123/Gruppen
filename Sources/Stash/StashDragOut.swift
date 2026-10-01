@@ -25,9 +25,9 @@ import SwiftUI
 /// ## Who moves the file
 ///
 /// **The receiver, never Gruppen.** This object only states what is allowed.
-/// Finder, handed a drag that permits `move` and nothing else, performs the move
-/// itself — the same code path as dragging between two Finder windows, with
-/// its progress, its conflict dialog, and its undo. The tempting alternative,
+/// Finder, handed a drag that permits `move`, performs the move itself — the
+/// same code path as dragging between two Finder windows, with its progress,
+/// its conflict dialog, and its undo. The tempting alternative,
 /// letting the receiver copy and then deleting the original here, is how
 /// people lose files: a drop is *accepted* the moment it lands, but a large
 /// copy is still running long after `endedAt` fires, and a source deleted
@@ -42,18 +42,50 @@ final class StashDragOut: NSObject, NSDraggingSource {
     ///   in-app that takes a drop, and it takes a *reference* — it performs no
     ///   file operation at all, and its drop zone answers `copy`. Offering
     ///   only `move` there would have it refuse the drop.
-    /// - **Outside, `move` alone when moving.** Not `move` *and* `copy`: with
-    ///   both on offer the choice goes back to the receiver, and Finder's
-    ///   default for a drag between disks is to copy — so the setting would
-    ///   hold on one volume and not another. Offering one operation makes the
-    ///   setting mean what it says on every destination.
+    /// - **Outside, `move` *and* `copy` when moving — and the `copy` is what
+    ///   makes browsers work.** This used to offer `move` alone, and that broke
+    ///   every web drop target. A browser turns the source's mask into the
+    ///   page's `effectAllowed`, and a page taking a file asks for
+    ///   `dropEffect = "copy"` — an upload reads the file, it cannot relocate
+    ///   it. With `move` the only thing allowed, the HTML drag-and-drop rules
+    ///   make that a mismatch, and Chrome, Safari and Firefox all refuse the
+    ///   drop: Google Drive, Gmail, Canvas, any `<input type=file>` zone. The
+    ///   same goes for the many native and Electron apps that only ever accept
+    ///   a copy.
+    ///
+    ///   With both on offer, each receiver takes the one that means something
+    ///   to it: Finder moves, a browser copies. The price is paid in one place,
+    ///   and it is Finder's own rule rather than anything Gruppen chose — given
+    ///   the choice, Finder moves within a disk and **copies between disks**,
+    ///   exactly as it does for a drag between two of its own windows, with ⌘
+    ///   to force the move. `endedAt` reports which one happened, and the item
+    ///   only leaves the stash when it was a move — see `consumes`.
     /// - **Only files can move.** Text and links have nothing on disk to
-    ///   relocate, so they are always offered as copies — a receiver that
-    ///   refuses a move of a string is refusing for no reason.
+    ///   relocate, so they are always offered as copies.
     nonisolated static func operations(for context: NSDraggingContext,
                                        moving: Bool) -> NSDragOperation {
         guard context == .outsideApplication, moving else { return .copy }
-        return .move
+        return [.move, .copy]
+    }
+
+    /// Whether a finished drag takes the item off the stash.
+    ///
+    /// **In move mode, the stash follows the file.** It leaves when the file
+    /// left — the receiver reported `move` — and stays when the receiver only
+    /// copied it. A browser upload, a Slack attachment, a Finder drop onto
+    /// another disk: in all of those the file is still exactly where it was, so
+    /// the stash keeps holding it, and you can still take it to the folder you
+    /// meant to move it to. Dropping it from the stash because *some* app read
+    /// it would leave a file that was never moved, no longer on the stash that
+    /// was carrying it.
+    ///
+    /// **In copy mode every drop is a copy**, and a copy consumes the item, as
+    /// dragging out always has.
+    ///
+    /// A drop nobody took consumes nothing, in either mode.
+    nonisolated static func consumes(_ operation: NSDragOperation, moving: Bool) -> Bool {
+        guard !operation.isEmpty else { return false }
+        return moving ? operation.contains(.move) : true
     }
 
     /// The one drag in flight, if any. AppKit runs a single dragging session at
@@ -77,7 +109,8 @@ final class StashDragOut: NSObject, NSDraggingSource {
     /// drag begins: a session started from the wrong event would pick up a
     /// stale position, and doing nothing is the honest failure.
     ///
-    /// `onAccepted` runs once the drop has landed. Not at the start, the way
+    /// `onAccepted` runs once the drop has landed, and only when that drop
+    /// takes the item off the stash — see `consumes`. Not at the start, the way
     /// `.onDrag` forced it to be: a drag that is cancelled now leaves the item
     /// on the stash rather than losing it, and a stash emptied by its last
     /// item no longer closes its own window out from under a drag still in
@@ -126,10 +159,11 @@ final class StashDragOut: NSObject, NSDraggingSource {
         // Logged with what the receiver *did*, not what was offered — so a
         // drop that was meant to move and was not is visible in the log
         // rather than a mystery.
+        let consumed = Self.consumes(operation, moving: drag.moving)
         GroupStore.log("STASH drag-out \(drag.title) — \(Self.describe(operation)) "
-                       + "(offered \(drag.moving ? "move" : "copy"))")
-        // An empty operation is a drop nobody accepted.
-        guard !operation.isEmpty else { return }
+                       + "(offered \(drag.moving ? "move or copy" : "copy"); "
+                       + "\(consumed ? "left the stash" : "kept on the stash"))")
+        guard consumed else { return }
         drag.onAccepted()
     }
 

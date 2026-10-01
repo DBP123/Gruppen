@@ -142,16 +142,31 @@ func sectionStash() {
 
     T.begin("D. Stash — dragging out: move or copy")
 
-    // What a receiver outside the app is allowed to do. One operation, never
-    // both — with both on offer Finder picks, and between disks it picks copy.
+    // What a receiver outside the app is allowed to do.
     let outside = NSDraggingContext.outsideApplication
     let inside = NSDraggingContext.withinApplication
-    T.equal("copy mode offers Finder a copy and nothing else",
+    T.equal("copy mode offers a copy and nothing else",
             StashDragOut.operations(for: outside, moving: false), .copy)
-    T.equal("move mode offers Finder a move and nothing else",
-            StashDragOut.operations(for: outside, moving: true), .move)
-    T.check("move mode never also offers copy, which would hand the choice back",
-            !StashDragOut.operations(for: outside, moving: true).contains(.copy))
+    T.check("move mode offers Finder a move",
+            StashDragOut.operations(for: outside, moving: true).contains(.move))
+    // A browser maps the mask onto the page's effectAllowed, and a page taking
+    // a file asks for "copy". Move alone was refused by every web drop zone.
+    T.check("move mode still offers copy, or every browser refuses the drop",
+            StashDragOut.operations(for: outside, moving: true).contains(.copy))
+    T.check("copy mode never offers a move — nothing may relocate the file",
+            !StashDragOut.operations(for: outside, moving: false).contains(.move))
+
+    // Whether the finished drag takes the item off the stash.
+    T.check("move mode: a file the receiver moved leaves the stash",
+            StashDragOut.consumes(.move, moving: true))
+    T.check("move mode: a file a browser only uploaded stays on the stash — "
+            + "it has not gone anywhere",
+            !StashDragOut.consumes(.copy, moving: true))
+    T.check("copy mode: a copy consumes the item, as dragging out always has",
+            StashDragOut.consumes(.copy, moving: false))
+    T.check("a cancelled drag consumes nothing in move mode",
+            !StashDragOut.consumes([], moving: true))
+    T.check("or in copy mode", !StashDragOut.consumes([], moving: false))
     // Another stash takes a reference and its drop zone answers copy; offering
     // only move there would make it refuse the drop.
     T.equal("a drop on another stash is a copy even in move mode",

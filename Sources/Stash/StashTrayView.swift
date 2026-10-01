@@ -277,8 +277,8 @@ private struct StashRow: View {
                 state.select(item, gesture: .init(modifiers: NSEvent.modifierFlags))
             }
         )
-        // Dragging out consumes the item once the drop lands; emptying the
-        // shelf closes it. Moved or copied per the stash setting.
+        // Dragging out consumes the item once the drop lands — in move mode,
+        // only if the file actually moved — and emptying the shelf closes it.
         .stashDraggable(item) { state.remove(item) }
     }
 
