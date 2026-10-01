@@ -297,7 +297,7 @@ private struct NotchItemChip: View {
                       fill: hovering ? Color(hex: 0x17171A) : Theme.machined,
                       border: Theme.machinedBorder)
             .onHover { hovering = $0 }
-            .stashDraggable(item) { state.remove(item) }
+            .stashDraggable(item, from: state)
             .help(item.title)
     }
 }

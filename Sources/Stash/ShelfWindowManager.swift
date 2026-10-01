@@ -38,82 +38,53 @@ final class ShelfState: ObservableObject, Identifiable {
         let wasFilled = !items.isEmpty
         items.removeAll { $0.id == item.id }
         selection.remove(item.id)
-        if anchorID == item.id { anchorID = nil }
         if wasFilled, items.isEmpty { onEmptied?() }
+    }
+
+    func remove(_ batch: [StashItem]) {
+        batch.forEach(remove)
     }
 
     func clear() {
         let wasFilled = !items.isEmpty
         items.removeAll()
         selection.removeAll()
-        anchorID = nil
         if wasFilled { onEmptied?() }
     }
 
     /// What a click means.
     ///
-    /// ⇧ and ⌘ used to do the same thing — both toggled one item — which left no
-    /// way to pick out a run of files except clicking each of them. They are the
-    /// two different gestures macOS users already have in their hands.
+    /// A stash is a handful of files, not a long list, so there are no ranges:
+    /// ⇧-click picks out exactly the item it lands on, the same as ⌘-click.
+    /// Clicking the first and third selects those two — never the second
+    /// between them.
     enum SelectionGesture {
         /// Plain click: this item alone. Clicking the only selected item clears
         /// the selection, so there is always a way back to "nothing picked out"
         /// without hunting for empty space.
         case replace
-        /// ⌘-click: add or remove this one and leave the rest alone.
+        /// ⇧- or ⌘-click: add or remove this one and leave the rest alone.
         case toggle
-        /// ⇧-click: everything from the anchor to here.
-        case extendRange
 
-        /// What the modifiers held at the moment of the click mean.
-        ///
-        /// Shift wins over command when both are down, which is what Finder
-        /// does: a range is the more specific request.
         init(modifiers: NSEvent.ModifierFlags) {
-            if modifiers.contains(.shift) { self = .extendRange }
-            else if modifiers.contains(.command) { self = .toggle }
-            else { self = .replace }
+            self = modifiers.isDisjoint(with: [.shift, .command]) ? .replace : .toggle
         }
     }
-
-    /// Where a range measures from.
-    ///
-    /// Moved by a plain click and by a ⌘-click, *read* by ⇧-click and
-    /// deliberately not moved by it — successive shift-clicks all measure from
-    /// the same origin, which is what makes a range adjustable rather than
-    /// ratcheting outward one item at a time. Same rule as Finder.
-    private var anchorID: UUID?
 
     func select(_ item: StashItem, gesture: SelectionGesture) {
         switch gesture {
         case .replace:
-            if selection == [item.id] {
-                selection.removeAll()
-                anchorID = nil
-            } else {
-                selection = [item.id]
-                anchorID = item.id
-            }
-
+            selection = selection == [item.id] ? [] : [item.id]
         case .toggle:
-            if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
-            anchorID = item.id
-
-        case .extendRange:
-            // No anchor — or an anchor for an item that has since been dragged
-            // off the shelf — means there is no range to draw. Behave like a
-            // plain click rather than doing nothing, which reads as broken.
-            guard let anchorID,
-                  let from = items.firstIndex(where: { $0.id == anchorID }),
-                  let to = items.firstIndex(where: { $0.id == item.id })
-            else {
-                selection = [item.id]
-                self.anchorID = item.id
-                return
-            }
-            let bounds = from <= to ? from...to : to...from
-            selection = Set(items[bounds].map(\.id))
+            if selection.remove(item.id) == nil { selection.insert(item.id) }
         }
+    }
+
+    /// What dragging `item` picks up: the whole selection when `item` is part
+    /// of it, otherwise `item` alone — grabbing a file you have not picked out
+    /// should not drag along a selection you made for something else.
+    func dragBatch(for item: StashItem) -> [StashItem] {
+        selection.contains(item.id) ? selectedItems : [item]
     }
 
     /// The selected items, in shelf order rather than set order — a batch that

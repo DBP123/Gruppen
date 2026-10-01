@@ -8,15 +8,21 @@ import Foundation
 /// written out as `.txt` on the way in. Uses the system `zip`, so no
 /// third-party archiver is involved.
 enum StashExporter {
+    /// Short enough to read at a glance on a 300pt shelf. `zip`'s own stderr is
+    /// kept on `zipFailed` for the log, not shown — it is written for a
+    /// terminal, not for a status line.
     enum ExportError: LocalizedError {
         case nothingToExport
+        case folderMissing(String)
+        case folderNotWritable(String)
         case zipFailed(String)
 
         var errorDescription: String? {
             switch self {
-            case .nothingToExport: return "There is nothing on this stash to export."
-            case .zipFailed(let message):
-                return message.isEmpty ? "The archive could not be created." : message
+            case .nothingToExport: return "Nothing to zip"
+            case .folderMissing(let folder): return "\(folder) folder not found"
+            case .folderNotWritable(let folder): return "Can't write to \(folder)"
+            case .zipFailed: return "Couldn't build the archive"
             }
         }
     }
@@ -26,6 +32,17 @@ enum StashExporter {
     nonisolated static func export(items: [(name: String, url: URL?, text: String?)],
                                    to destination: URL) throws -> URL {
         guard !items.isEmpty else { throw ExportError.nothingToExport }
+        // Checked before any work, because these are the two failures with a
+        // reason worth naming — left to `zip`, both come back as "could not
+        // create output file".
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: destination.path, isDirectory: &isFolder),
+              isFolder.boolValue else {
+            throw ExportError.folderMissing(destination.lastPathComponent)
+        }
+        guard FileManager.default.isWritableFile(atPath: destination.path) else {
+            throw ExportError.folderNotWritable(destination.lastPathComponent)
+        }
 
         let staging = FileManager.default.temporaryDirectory
             .appendingPathComponent("gruppen-stash-\(UUID().uuidString)", isDirectory: true)

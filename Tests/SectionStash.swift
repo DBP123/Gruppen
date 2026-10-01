@@ -28,25 +28,37 @@ func sectionStash() {
     }
     let none: NSEvent.ModifierFlags = []
 
-    tap(0, none); tap(3, .shift)
-    T.equal("⇧ takes the range from the anchor", titles(), ["a", "b", "c", "d"])
-    tap(1, .shift)
-    T.equal("a second ⇧ re-measures rather than ratcheting", titles(), ["a", "b"])
-    tap(3, none); tap(1, .shift)
-    T.equal("⇧ works backwards", titles(), ["b", "c", "d"])
-    tap(0, none); tap(4, .command)
-    T.equal("⌘ adds one", titles(), ["a", "e"])
-    tap(4, .command)
-    T.equal("⌘ removes one", titles(), ["a"])
-    tap(0, none)
-    T.equal("clicking the lone selection clears it", titles(), [])
+    tap(0, .shift); tap(2, .shift)
+    T.equal("⇧ on the 1st and 3rd selects those two, not the one between",
+            titles(), ["a", "c"])
+    tap(4, .shift)
+    T.equal("another ⇧ adds just that one", titles(), ["a", "c", "e"])
     tap(2, .shift)
-    T.equal("⇧ with no anchor behaves as a plain click", titles(), ["c"])
-    tap(0, none); tap(3, [.shift, .command])
-    T.equal("⇧ beats ⌘ when both are held", titles(), ["a", "b", "c", "d"])
-    T.equal("actionable is the selection when there is one", shelf.actionable.count, 4)
-    shelf.selection.removeAll()
-    T.equal("actionable is everything when there is not", shelf.actionable.count, 5)
+    T.equal("⇧ on a selected item takes it back out", titles(), ["a", "e"])
+    tap(1, none)
+    T.equal("a plain click replaces the selection", titles(), ["b"])
+    tap(3, .command)
+    T.equal("⌘ adds one, the same as ⇧", titles(), ["b", "d"])
+    tap(3, [.shift, .command])
+    T.equal("⇧⌘ together toggles too", titles(), ["b"])
+    tap(1, none)
+    T.equal("clicking the lone selection clears it", titles(), [])
+
+    tap(0, .shift); tap(2, .shift); tap(3, .shift)
+    T.equal("actionable is the selection when there is one", shelf.actionable.count, 3)
+
+    T.begin("D. Stash — dragging a selection")
+
+    T.equal("dragging a selected item takes the whole selection, in shelf order",
+            shelf.dragBatch(for: items[2]).map(\.title), ["a", "c", "d"])
+    T.equal("dragging an unselected item takes only that item",
+            shelf.dragBatch(for: items[1]).map(\.title), ["b"])
+    shelf.remove(shelf.dragBatch(for: items[0]))
+    T.equal("a dropped batch leaves the shelf together", shelf.items.map(\.title), ["b", "e"])
+    T.check("and leaves nothing selected", shelf.selection.isEmpty)
+    T.equal("with nothing selected, dragging takes just the one",
+            shelf.dragBatch(for: shelf.items[0]).map(\.title), ["b"])
+    T.equal("actionable is everything when nothing is selected", shelf.actionable.count, 2)
 
     T.begin("D. Stash — batch extraction planning")
 
@@ -123,6 +135,28 @@ func sectionStash() {
             _ = try StashExporter.export(items: [], to: dir)
             T.check("an empty export is refused", false, "it produced an archive")
         } catch { T.check("an empty export is refused", true, "\(error.localizedDescription)") }
+
+        // The failures the shelf has to put into words, read back the way the
+        // shelf reads them.
+        func failure(_ destination: URL) -> String? {
+            do { _ = try StashExporter.export(items: [("one.txt", a, nil)], to: destination); return nil }
+            catch { return (error as? StashExporter.ExportError)?.errorDescription }
+        }
+        let missing = dir.appendingPathComponent("Nowhere", isDirectory: true)
+        T.equal("a missing folder is named, not left to zip's stderr",
+                failure(missing), "Nowhere folder not found")
+
+        let locked = dir.appendingPathComponent("Locked", isDirectory: true)
+        try? FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
+        T.equal("a read-only folder says so", failure(locked), "Can't write to Locked")
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+
+        let messages = [StashExporter.ExportError.nothingToExport, .folderMissing("Downloads"),
+                        .folderNotWritable("Downloads"), .zipFailed(String(repeating: "x", count: 400))]
+            .compactMap(\.errorDescription)
+        T.check("every failure fits on the shelf's one line", messages.allSatisfy { $0.count <= 32 },
+                messages.map { "\($0.count)" }.joined(separator: ", ") + " characters")
     }
 
     T.begin("D. Stash — conversion targets")

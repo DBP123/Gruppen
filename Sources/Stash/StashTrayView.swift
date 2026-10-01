@@ -9,7 +9,7 @@ struct StashTrayView: View {
 
     var onClose: () -> Void
 
-    @State private var exportNote: String?
+    @State private var zip: ZipStatus?
     @State private var hovering = false
 
     /// Set by the hosting view, which is the only thing that sees the drag.
@@ -39,6 +39,15 @@ struct StashTrayView: View {
         // around the `if`, rather than inside the view being inserted.
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: state.selection.count)
         .onHover { hovering = $0 }
+        // A success note clears itself after five seconds. Keyed on the
+        // status, so a second zip started in that window cancels the timer
+        // rather than having it wipe the new zip's status. A failure stays
+        // until the next zip: it is the one you need time to read.
+        .task(id: zip) {
+            guard case .saved = zip else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            withAnimation(.easeOut(duration: 0.3)) { zip = nil }
+        }
     }
 
     private var shelfBackground: some View {
@@ -89,30 +98,32 @@ struct StashTrayView: View {
     private func exportZip() {
         let payload = state.actionable.map { (name: $0.title, url: $0.fileURL, text: $0.text) }
         let destination = settings.exportDirectory
-        exportNote = "Zipping…"
-        Task {
+        zip = .working
+        Task { @MainActor in
             do {
                 let archive = try await Task.detached(priority: .userInitiated) {
                     try StashExporter.export(items: payload, to: destination)
                 }.value
-                await MainActor.run {
-                    exportNote = "Saved \(archive.lastPathComponent)"
-                    FinderUtility.revealAndFocus(url: archive)
-                }
+                zip = .saved(archive.lastPathComponent)
+                FinderUtility.revealAndFocus(url: archive)
             } catch {
-                await MainActor.run { exportNote = "! \(error.localizedDescription)" }
+                // The full error goes to the log; the shelf gets one short line.
+                GroupStore.log("STASH zip failed — \(error)")
+                zip = .failed((error as? StashExporter.ExportError)?.errorDescription
+                              ?? "Couldn't create the zip")
             }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let exportNote {
-            Text(exportNote)
+        if let zip {
+            Text(zip.message)
                 .font(Theme.mono(9))
-                .foregroundStyle(exportNote.hasPrefix("!") ? Theme.red : Theme.green)
+                .foregroundStyle(zip.tint)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .transition(.opacity)
         }
         if state.isEmpty {
             VStack(spacing: 6) {
@@ -136,6 +147,29 @@ struct StashTrayView: View {
             .animation(.spring(response: 0.24, dampingFraction: 0.8), value: state.items.count)
             StashSelectionToolbar()
             ConvertBar()
+        }
+    }
+}
+
+/// The one line of feedback under a shelf's header after the zip key is pressed.
+private enum ZipStatus: Equatable {
+    case working
+    case saved(String)
+    case failed(String)
+
+    var message: String {
+        switch self {
+        case .working: return "Zipping…"
+        case .saved(let name): return "Saved \(name)"
+        case .failed(let reason): return "Zip failed: \(reason)"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .working: return Theme.textMuted
+        case .saved: return Theme.green
+        case .failed: return Theme.red
         }
     }
 }
@@ -259,27 +293,20 @@ private struct StashRow: View {
                   border: selected ? Theme.ambient : Theme.machinedBorder)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        // Click picks one out, ⇧-click takes the run from the last one you
-        // touched, ⌘-click adds or removes a single file. Zip, convert and
-        // extract then act on that set instead of the whole stash.
+        // Click picks one out; ⇧- or ⌘-click adds or removes just this one.
+        // Zip, convert, extract and dragging out then act on that set instead
+        // of the whole stash.
         //
-        // **One gesture, not three.** This used to be three
-        // `simultaneousGesture`s — `.modifiers(.shift)`, `.modifiers(.command)`
-        // and a plain one — and that is why shift-click only ever selected the
-        // item under the pointer. `.modifiers(.shift)` requires shift, but a
-        // plain `TapGesture` matches *regardless* of what is held, so a
-        // shift-click satisfied both: the range was drawn and then immediately
-        // replaced by the single item, in whichever order SwiftUI happened to
-        // deliver them. Reading the flags once, here, means exactly one gesture
-        // can fire and there is nothing left to race.
+        // **One gesture, reading the flags itself.** A plain `TapGesture`
+        // matches regardless of what is held, so pairing it with a
+        // `.modifiers(.shift)` twin meant a shift-click fired both and they
+        // raced. Reading the flags once means exactly one thing happens.
         .simultaneousGesture(
             TapGesture().onEnded {
                 state.select(item, gesture: .init(modifiers: NSEvent.modifierFlags))
             }
         )
-        // Dragging out consumes the item once the drop lands — in move mode,
-        // only if the file actually moved — and emptying the shelf closes it.
-        .stashDraggable(item) { state.remove(item) }
+        .stashDraggable(item, from: state)
     }
 
     private var actions: some View {

@@ -101,7 +101,7 @@ final class StashDragOut: NSObject, NSDraggingSource {
 
     private override init() { super.init() }
 
-    /// Starts dragging `item` from the mouse event now being handled.
+    /// Starts dragging `batch` from the mouse event now being handled.
     ///
     /// Called from inside a SwiftUI drag gesture, where `NSApp.currentEvent` is
     /// the `leftMouseDragged` that moved the gesture past its threshold —
@@ -110,35 +110,47 @@ final class StashDragOut: NSObject, NSDraggingSource {
     /// stale position, and doing nothing is the honest failure.
     ///
     /// `onAccepted` runs once the drop has landed, and only when that drop
-    /// takes the item off the stash — see `consumes`. Not at the start, the way
-    /// `.onDrag` forced it to be: a drag that is cancelled now leaves the item
-    /// on the stash rather than losing it, and a stash emptied by its last
-    /// item no longer closes its own window out from under a drag still in
-    /// progress.
-    func begin(_ item: StashItem, onAccepted: @escaping () -> Void) {
+    /// takes the batch off the stash — see `consumes`. Not at the start, the
+    /// way `.onDrag` forced it to be: a drag that is cancelled now leaves the
+    /// items on the stash rather than losing them, and a stash emptied by its
+    /// last items no longer closes its own window out from under a drag still
+    /// in progress.
+    ///
+    /// One session carries the whole batch, so the receiver gets every file in
+    /// a single drop and performs one operation on all of them.
+    func begin(_ batch: [StashItem], onAccepted: @escaping () -> Void) {
         guard inFlight == nil,
+              !batch.isEmpty,
               let event = NSApp.currentEvent,
               event.type == .leftMouseDragged,
               let view = event.window?.contentView
         else { return }
 
-        // A file that has gone since it was stashed falls back to its URL or
-        // text, like any other item — and there is then nothing to move.
-        let hasFile = item.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        // Moving needs a file to move. One that has gone since it was stashed
+        // falls back to its URL or text, like any other item.
+        let hasFile = batch.contains { item in
+            item.fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false
+        }
         let moving = hasFile && AppSettings.shared.stashMovesOnDragOut
 
-        let dragged = NSDraggingItem(pasteboardWriter: item.pasteboardWriter)
-        // The item's own icon, centred on the pointer. The frame is in the
+        // Each item's own icon, centred on the pointer. The frame is in the
         // coordinate space of the view the session starts from, and centring
         // on the converted point is right whether or not that view is flipped.
         let side: CGFloat = 32
         let point = view.convert(event.locationInWindow, from: nil)
-        dragged.setDraggingFrame(NSRect(x: point.x - side / 2, y: point.y - side / 2,
-                                        width: side, height: side),
-                                 contents: item.icon)
+        let frame = NSRect(x: point.x - side / 2, y: point.y - side / 2, width: side, height: side)
+        let dragged = batch.map { item in
+            let dragging = NSDraggingItem(pasteboardWriter: item.pasteboardWriter)
+            dragging.setDraggingFrame(frame, contents: item.icon)
+            return dragging
+        }
 
-        inFlight = InFlight(title: item.title, moving: moving, onAccepted: onAccepted)
-        let session = view.beginDraggingSession(with: [dragged], event: event, source: self)
+        let title = batch.count == 1 ? batch[0].title : "\(batch.count) items"
+        inFlight = InFlight(title: title, moving: moving, onAccepted: onAccepted)
+        let session = view.beginDraggingSession(with: dragged, event: event, source: self)
+        // Several items stack under the pointer with a count badge, the way a
+        // multi-file drag out of Finder looks.
+        session.draggingFormation = .pile
         // A drop nobody takes slides back to where it started, so a cancelled
         // drag visibly returns the thing to the stash it never left.
         session.animatesToStartingPositionsOnCancelOrFail = true
@@ -177,17 +189,20 @@ final class StashDragOut: NSObject, NSDraggingSource {
 }
 
 extension View {
-    /// Lets `item` be dragged off a stash — moved or copied, per the setting.
+    /// Lets `item` be dragged off `shelf` — moved or copied, per the setting —
+    /// taking the rest of the selection with it when `item` is part of one.
     ///
     /// The replacement for `.onDrag` at every stash drag site. A drag gesture
     /// with a small threshold, so a click stays a click: selection, hover and
     /// the row's own buttons all behave exactly as they did. Once the pointer
     /// has travelled four points the gesture hands the rest of the drag to
     /// AppKit, which tracks it from there.
-    func stashDraggable(_ item: StashItem, onAccepted: @escaping () -> Void) -> some View {
+    func stashDraggable(_ item: StashItem, from shelf: ShelfState) -> some View {
         gesture(
-            DragGesture(minimumDistance: 4)
-                .onChanged { _ in StashDragOut.shared.begin(item, onAccepted: onAccepted) }
+            DragGesture(minimumDistance: 4).onChanged { _ in
+                let batch = shelf.dragBatch(for: item)
+                StashDragOut.shared.begin(batch) { shelf.remove(batch) }
+            }
         )
     }
 }

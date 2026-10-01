@@ -63,7 +63,7 @@ private struct NotchStashSummary: View {
                     .industrialButton(.ghost)
                 }
                 .panelRow()
-                .stashDraggable(item) { shelf.remove(item) }
+                .stashDraggable(item, from: shelf)
             }
         }
     }
