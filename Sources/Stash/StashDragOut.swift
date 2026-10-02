@@ -58,8 +58,7 @@ final class StashDragOut: NSObject, NSDraggingSource {
     ///   and it is Finder's own rule rather than anything Gruppen chose — given
     ///   the choice, Finder moves within a disk and **copies between disks**,
     ///   exactly as it does for a drag between two of its own windows, with ⌘
-    ///   to force the move. `endedAt` reports which one happened, and the item
-    ///   only leaves the stash when it was a move — see `consumes`.
+    ///   to force the move.
     /// - **Only files can move.** Text and links have nothing on disk to
     ///   relocate, so they are always offered as copies.
     nonisolated static func operations(for context: NSDraggingContext,
@@ -70,22 +69,21 @@ final class StashDragOut: NSObject, NSDraggingSource {
 
     /// Whether a finished drag takes the item off the stash.
     ///
-    /// **In move mode, the stash follows the file.** It leaves when the file
-    /// left — the receiver reported `move` — and stays when the receiver only
-    /// copied it. A browser upload, a Slack attachment, a Finder drop onto
-    /// another disk: in all of those the file is still exactly where it was, so
-    /// the stash keeps holding it, and you can still take it to the folder you
-    /// meant to move it to. Dropping it from the stash because *some* app read
-    /// it would leave a file that was never moved, no longer on the stash that
-    /// was carrying it.
+    /// **Any drop that landed does, whatever the receiver did with it.** You
+    /// dragged it out; it is out. Only a drop nobody took — a cancelled drag —
+    /// leaves the item where it was.
     ///
-    /// **In copy mode every drop is a copy**, and a copy consumes the item, as
-    /// dragging out always has.
-    ///
-    /// A drop nobody took consumes nothing, in either mode.
-    nonisolated static func consumes(_ operation: NSDragOperation, moving: Bool) -> Bool {
-        guard !operation.isEmpty else { return false }
-        return moving ? operation.contains(.move) : true
+    /// This used to depend on the operation in move mode: the item stayed on
+    /// the stash unless the receiver reported `move`, on the theory that a
+    /// copied file had not gone anywhere. In use it read as the drag not
+    /// working. Receivers report `copy` for an upload, a drop onto another
+    /// disk, and anything else they choose to copy, and some report only a
+    /// generic "accepted" — measured in the log as `accepted`, three drags in a
+    /// row — so in move mode most drops anywhere but a Finder folder left the
+    /// item behind. Taking it off the stash loses nothing: a file that was only
+    /// copied is still in its original folder.
+    nonisolated static func consumes(_ operation: NSDragOperation) -> Bool {
+        !operation.isEmpty
     }
 
     /// The one drag in flight, if any. AppKit runs a single dragging session at
@@ -171,11 +169,9 @@ final class StashDragOut: NSObject, NSDraggingSource {
         // Logged with what the receiver *did*, not what was offered — so a
         // drop that was meant to move and was not is visible in the log
         // rather than a mystery.
-        let consumed = Self.consumes(operation, moving: drag.moving)
         GroupStore.log("STASH drag-out \(drag.title) — \(Self.describe(operation)) "
-                       + "(offered \(drag.moving ? "move or copy" : "copy"); "
-                       + "\(consumed ? "left the stash" : "kept on the stash"))")
-        guard consumed else { return }
+                       + "(offered \(drag.moving ? "move or copy" : "copy"))")
+        guard Self.consumes(operation) else { return }
         drag.onAccepted()
     }
 

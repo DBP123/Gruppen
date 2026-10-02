@@ -211,16 +211,15 @@ func sectionStash() {
             !StashDragOut.operations(for: outside, moving: false).contains(.move))
 
     // Whether the finished drag takes the item off the stash.
-    T.check("move mode: a file the receiver moved leaves the stash",
-            StashDragOut.consumes(.move, moving: true))
-    T.check("move mode: a file a browser only uploaded stays on the stash — "
-            + "it has not gone anywhere",
-            !StashDragOut.consumes(.copy, moving: true))
-    T.check("copy mode: a copy consumes the item, as dragging out always has",
-            StashDragOut.consumes(.copy, moving: false))
-    T.check("a cancelled drag consumes nothing in move mode",
-            !StashDragOut.consumes([], moving: true))
-    T.check("or in copy mode", !StashDragOut.consumes([], moving: false))
+    // Any drop that landed takes the item off the stash, whatever the receiver
+    // did with the file; only a cancelled drag leaves it there.
+    T.check("a moved file leaves the stash", StashDragOut.consumes(.move))
+    T.check("a copied file leaves the stash too — it was dragged out",
+            StashDragOut.consumes(.copy))
+    T.check("so does a drop the receiver only reported as generic — "
+            + "the 'accepted' drags that used to stay behind",
+            StashDragOut.consumes(.generic))
+    T.check("a cancelled drag leaves the item where it was", !StashDragOut.consumes([]))
     // Another stash takes a reference and its drop zone answers copy; offering
     // only move there would make it refuse the drop.
     T.equal("a drop on another stash is a copy even in move mode",
