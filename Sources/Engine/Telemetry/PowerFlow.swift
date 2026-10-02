@@ -305,10 +305,41 @@ struct PowerFlow: Equatable {
 
     /// Live system draw, in watts, from the SMC's `PSTR`.
     ///
-    /// Nil on a Mac that has no such key, in which case the caller falls back to
-    /// the controller's slow figure — stale beats absent.
+    /// Nil on a Mac that has no such key — **and on any Mac where nothing has
+    /// opened the SMC**, which is not a detail: `systemPower()` begins with
+    /// `guard smc != 0`, and that connection only exists while some sampler
+    /// holds it. See `PowerSampler.sample()`, which is where this module claims
+    /// its own reference. The caller falls back to the controller's slow figure.
     static func liveSystemDraw() -> Double? {
         AppleSiliconTelemetry.shared.systemPower()
+    }
+
+    /// System draw when there is no live rail to read.
+    ///
+    /// **On battery this must not be `SystemLoad`.** Unplugged, `SystemPowerIn`
+    /// is 0, and the controller's trio reconciles exactly — so `SystemLoad` is
+    /// identically `−BatteryPower`, and `BatteryPower` is the *derived* figure
+    /// this file already documents as able to sit on the wrong side of zero
+    /// (measured: +0.90 W while the pack charged at 62 W). Inverted, that is a
+    /// **negative system draw**: a laptop reported as consuming −17.4 W, which
+    /// is not a thing a laptop can do. It reached the screen because the draw
+    /// row is the one figure here that was never sign-checked — it is the one
+    /// quantity on this panel with no legitimate negative value, so nothing was
+    /// looking.
+    ///
+    /// Everything the machine burns on battery comes out of the cell, so the
+    /// draw *is* the pack's discharge — and the pack's discharge is measured by
+    /// the coulomb counter (`Amperage` × `Voltage`), which is the instrument
+    /// this file already concluded is the trustworthy one. Magnitude, because
+    /// current through a pack that is not being charged can only be flowing out,
+    /// whatever sign the register puts on it.
+    ///
+    /// On mains `SystemLoad` is the controller's own reading of the system and
+    /// is kept, clamped: stale is tolerable, backwards is not.
+    static func fallbackLoad(reportedSystem: Double?, reportedInput: Double?,
+                             pack: Double, plugged: Bool) -> Double {
+        guard plugged else { return abs(pack) }
+        return max(reportedSystem ?? ((reportedInput ?? 0) - pack), 0)
     }
 
     static func read(liveDraw: Double? = liveSystemDraw()) -> PowerFlow? {
@@ -367,10 +398,15 @@ struct PowerFlow: Equatable {
               maxmAh > 0
         else { return nil }
 
-        // The live rail first. The controller's `SystemLoad` is only reached for
-        // on a machine with no `PSTR`, and its own difference only when that is
-        // missing too.
-        let load = liveDraw ?? systemWatts ?? max((inputWatts ?? 0) - batteryWatts, 0)
+        // The live rail first; see `fallbackLoad` for what happens when there
+        // isn't one. Clamped either way, because there is no state of a computer
+        // that consumes a negative number of watts — a draw below zero is always
+        // an instrument being wrong, and it should read 0 rather than print the
+        // machine generating power.
+        let load = max(liveDraw ?? Self.fallbackLoad(reportedSystem: systemWatts,
+                                                     reportedInput: inputWatts,
+                                                     pack: batteryWatts,
+                                                     plugged: plugged), 0)
 
         return PowerFlow(
             systemLoad: load,
@@ -472,7 +508,27 @@ final class PowerSampler: TelemetrySampler {
     private var peakDraw: Double = 0
     private var peakPack: Double = 0
 
+    /// Whether this module holds the SMC connection.
+    ///
+    /// **It has to hold its own.** `PSTR` is read through
+    /// `AppleSiliconTelemetry`, whose every accessor begins `guard smc != 0`,
+    /// and that connection exists only while some sampler has called
+    /// `acquire()`. This module never did — only the thermal and GPU samplers
+    /// do — so `liveSystemDraw()` returned nil on every tick unless one of
+    /// *those* two happened to be alive beside it. On the dashboard they
+    /// usually are, which is why this went unnoticed; open the power card on
+    /// its own, as a popover or pinned, and the row labelled "(live)" was the
+    /// controller's once-a-minute figure the whole time.
+    ///
+    /// Opened on the first sample rather than at init, so a module that is
+    /// built and never started never touches the hardware.
+    private var hardware = false
+
     func sample() -> Reading? {
+        if !hardware {
+            hardware = true
+            AppleSiliconTelemetry.shared.acquire()
+        }
         // The live half, every tick: this is the figure that actually moves.
         let draw = PowerFlow.liveSystemDraw()
 
@@ -542,6 +598,19 @@ final class PowerSampler: TelemetrySampler {
         history.removeAll(keepingCapacity: false)
         peakDraw = 0
         peakPack = 0
+        guard hardware else { return }
+        hardware = false
+        AppleSiliconTelemetry.shared.release()
+    }
+
+    /// A safety net, the same one the thermal and GPU samplers carry.
+    /// `stopFetching` always tears a sampler down, but one dropped without it
+    /// would hold the SMC connection open for the life of the process. The
+    /// release goes back to the sampling queue, because that serial queue is
+    /// what makes the reference count safe without a lock.
+    deinit {
+        guard hardware else { return }
+        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
     }
 }
 

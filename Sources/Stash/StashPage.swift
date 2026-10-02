@@ -16,24 +16,12 @@ struct StashPage: View {
                     NotchStashSummary()
                         .environmentObject(stash.notchShelf)
                 }
-
-                LabeledSection(label: "HOW TO OPEN A STASH") {
-                    TriggerRow(systemImage: "macbook",
-                               title: "Drag to the notch",
-                               detail: "Opens the notch stash at the top of the screen")
-                    TriggerRow(systemImage: "arrow.left.and.right",
-                               title: "Shake while dragging",
-                               detail: "Spawns a new stash beside the pointer — shake again for another")
-                    TriggerRow(systemImage: "rectangle.lefthalf.inset.filled",
-                               title: "Drag to a screen edge",
-                               detail: "Either side edge spawns a stash too")
-                }
             }
         }
     }
 }
 
-/// Contents of the notch stash, plus a live count of floating stashes.
+/// Contents of the notch stash, and whether its tray is out.
 private struct NotchStashSummary: View {
     @EnvironmentObject private var stash: StashCoordinator
     @EnvironmentObject private var store: GroupStore
@@ -47,7 +35,8 @@ private struct NotchStashSummary: View {
                     Text(shelf.isEmpty ? "Nothing on the notch stash" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
                         .font(Theme.sans(13))
                         .foregroundStyle(Theme.textPrimary)
-                    Text("\(stash.openShelfCount) stash\(stash.openShelfCount == 1 ? "" : "es") open")
+                    // There is one notch, so one notch stash: open or not.
+                    Text(stash.isNotchOpen ? "Notch stash open" : "No stashes open")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.textMuted)
                 }
@@ -75,11 +64,7 @@ private struct NotchStashSummary: View {
                     .industrialButton(.ghost)
                 }
                 .panelRow()
-                .onDrag {
-                    let provider = item.itemProvider
-                    Task { @MainActor in shelf.remove(item) }
-                    return provider
-                }
+                .stashDraggable(item, from: shelf)
             }
         }
     }
@@ -127,27 +112,6 @@ private struct StashShortcutRow: View {
     }
 }
 
-private struct TriggerRow: View {
-    let systemImage: String
-    let title: String
-    let detail: String
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.orange)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
-            }
-            Spacer()
-        }
-        .panelRow()
-    }
-}
-
 /// Picks where "Export as Zip" writes.
 private struct ExportPathRow: View {
     @EnvironmentObject private var settings: AppSettings
@@ -187,9 +151,9 @@ private struct ExportPathRow: View {
 /// Isolated settings for the Stash tool.
 ///
 /// One list, no section headings: every row here is about the same thing, and
-/// a caption over each one was a label for a group of one. The three trigger
-/// switches sit under the master switch and only while it is on — a switch for
-/// a trigger that cannot fire is a control that does nothing.
+/// a caption over each one was a label for a group of one. The trigger switches
+/// and the drag-out choice sit under the master switch and only while it is on —
+/// a switch for a stash that cannot exist is a control that does nothing.
 struct StashSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var stash: StashCoordinator
@@ -209,6 +173,15 @@ struct StashSettingsPane: View {
                     SettingToggle(title: "Shake stash",
                                   detail: "Shake while dragging",
                                   isOn: $settings.stashShakeEnabled)
+                    // The detail states what happens *now*, in both positions,
+                    // rather than describing the switch — so it answers "what
+                    // will this drag do" without anyone having to work out which
+                    // way round on means.
+                    SettingToggle(title: "Move files when dragging out",
+                                  detail: settings.stashMovesOnDragOut
+                                      ? "The file leaves its original folder"
+                                      : "A copy is made; the original stays put",
+                                  isOn: $settings.stashMovesOnDragOut)
                 }
 
                 StashShortcutRow()

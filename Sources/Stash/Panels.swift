@@ -66,10 +66,6 @@ final class StashPanel: NSPanel {
 /// loop is not involved at all. So `mouseDown` is overridden as asked, and what
 /// it does is delegate.
 final class FloatingShelfPanel: NSPanel {
-    /// Set while the pointer is over something that is not a drag handle — a
-    /// button, an item, the scrub track — so those still get their clicks.
-    var isDragEnabled = true
-
     init(size: NSSize, content: NSView) {
         super.init(contentRect: NSRect(origin: .zero, size: size),
                    styleMask: [.borderless, .nonactivatingPanel],
@@ -96,8 +92,9 @@ final class FloatingShelfPanel: NSPanel {
         contentView = content
     }
 
+    /// Only ever called for events no view underneath claimed, so a click on a
+    /// key or an item still goes where it was aimed.
     override func mouseDown(with event: NSEvent) {
-        guard isDragEnabled else { super.mouseDown(with: event); return }
         performDrag(with: event)
     }
 
@@ -122,11 +119,6 @@ struct WindowDragHandle: NSViewRepresentable {
     private final class DragHandleView: NSView {
         override func mouseDown(with event: NSEvent) {
             window?.performDrag(with: event)
-        }
-
-        /// Transparent to everything except the drag itself.
-        override func hitTest(_ point: NSPoint) -> NSView? {
-            super.hitTest(point)
         }
     }
 }

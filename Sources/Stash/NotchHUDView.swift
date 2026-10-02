@@ -56,20 +56,17 @@ struct NotchHUDView: View {
     @EnvironmentObject private var presentation: NotchPresentation
 
     var onClose: () -> Void
-    /// The tray gets out of the way the moment something leaves it.
-    var onItemDraggedOut: () -> Void
 
     private var isTargeted: Bool { state.isTargeted }
 
     /// Exactly the notch. Anything wider would show its square top corners
     /// sticking out either side of the housing, which is the whole illusion
     /// gone.
+    /// The anchor display's notch, never `NSScreen.main`'s. Clicking onto a
+    /// Sidecar iPad used to make this fall through to the 200pt guess.
     static var width: CGFloat {
-        guard let screen = NSScreen.main,
-              let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea
-        else { return 200 }
-        return max(right.minX - left.maxX, 180)
+        guard let notch = NotchGeometryManager.shared.anchor.notch else { return 200 }
+        return max(notch.width, 180)
     }
 
     /// The part of the panel hidden behind the camera housing.
@@ -118,9 +115,9 @@ struct NotchHUDView: View {
         let height = panelHeight(on: screen) + buffer
         let trayWidth: CGFloat
         let trayX: CGFloat
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
-            trayX = left.maxX
-            trayWidth = right.minX - left.maxX
+        if let notch = NotchGeometryManager.notchBounds(of: screen) {
+            trayX = notch.minX
+            trayWidth = notch.width
         } else {
             trayWidth = width
             trayX = (screen.frame.midX - trayWidth / 2).rounded()
@@ -131,8 +128,16 @@ struct NotchHUDView: View {
                       height: height)
     }
 
-    private var band: CGFloat {
-        NSScreen.main.map { Self.bandHeight(on: $0) } ?? 32
+    /// Observed, not read once: a Sidecar connect changes the anchor, and the
+    /// tray has to redraw at the new notch's width rather than keep the old
+    /// display's geometry inside a correctly-moved window.
+    @ObservedObject private var geometry = NotchGeometryManager.shared
+
+    private var band: CGFloat { geometry.anchor.bandHeight }
+
+    /// Instance-level twin of `Self.width`, so the body tracks the anchor.
+    private var trayWidth: CGFloat {
+        max(geometry.anchor.notch?.width ?? 200, 180)
     }
 
     private var totalHeight: CGFloat { band + Self.trayHeight }
@@ -159,7 +164,7 @@ struct NotchHUDView: View {
             Color.clear.frame(height: band)
             tray
         }
-        .frame(width: Self.width, height: totalHeight, alignment: .top)
+        .frame(width: trayWidth, height: totalHeight, alignment: .top)
         .background(surface)
         .overlay(lightbar, alignment: .bottom)
         .clipShape(shape)
@@ -204,7 +209,7 @@ struct NotchHUDView: View {
     private var lightbar: some View {
         Capsule()
             .fill(accent)
-            .frame(width: isTargeted ? Self.width * 0.6 : 0, height: 3)
+            .frame(width: isTargeted ? trayWidth * 0.6 : 0, height: 3)
             .shadow(color: accent.opacity(isTargeted ? 0.85 : 0), radius: 8)
             .padding(.bottom, 5)
             .animation(.spring(response: 0.34, dampingFraction: 0.72), value: isTargeted)
@@ -220,8 +225,8 @@ struct NotchHUDView: View {
                 // put it in, and the tray is 76pt tall — a reserved row for one
                 // glyph would cost a fifth of it.
                 NotchCloseButton(action: onClose)
-                    .padding(.trailing, 4)
-                    .padding(.top, 2)
+                    .padding(.trailing, 5)
+                    .padding(.top, 4)
             }
     }
 
@@ -230,13 +235,13 @@ struct NotchHUDView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(state.items) { item in
-                    NotchItemChip(item: item, onDragOut: onItemDraggedOut)
+                    NotchItemChip(item: item)
                 }
             }
             .padding(.leading, 6)
             // The close key sits over the groove's top-right corner; this keeps
             // a scrolled icon from ending up underneath it.
-            .padding(.trailing, 24)
+            .padding(.trailing, 18)
             .frame(maxWidth: .infinity, alignment: state.items.isEmpty ? .center : .leading)
             .frame(height: 60)
         }
@@ -254,24 +259,29 @@ struct NotchHUDView: View {
     }
 }
 
-/// Close. A real key, and big enough to hit without aiming.
+/// Close.
+///
+/// Small on purpose — the tray is 76pt tall and sits over the notch, so a 26pt
+/// key was a quarter of its height spent on a control you press once. It is
+/// legible at 18 because it is the only glyph up there, and the glow does the
+/// work the size used to: dark and quiet until the pointer reaches it, then lit
+/// orange with a dip when it goes down.
 private struct NotchCloseButton: View {
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
         }
-        .hardwareKey(size: 26, tint: Color.white.opacity(0.45))
-        .help("Close the tray")
+        .hardwareKey(size: 18, tint: Color.white.opacity(0.4), glow: true)
+        .help("Close the stash")
     }
 }
 
-/// One held item.
+/// One held item, with a remove key that appears on hover.
 private struct NotchItemChip: View {
     @EnvironmentObject private var state: ShelfState
     let item: StashItem
-    var onDragOut: () -> Void
 
     @State private var hovering = false
 
@@ -286,13 +296,25 @@ private struct NotchItemChip: View {
             .machined(cornerRadius: 6,
                       fill: hovering ? Color(hex: 0x17171A) : Theme.machined,
                       border: Theme.machinedBorder)
-            .onHover { hovering = $0 }
-            .onDrag {
-                let provider = item.itemProvider
-                onDragOut()
-                Task { @MainActor in state.remove(item) }
-                return provider
+            // Inside the socket's corner, not hanging off it. The hover below
+            // tracks the socket's own frame, so a key drawn within that frame
+            // can be reached without the pointer ever leaving it — the key
+            // stays put while you move onto it. One overhanging the edge would
+            // vanish under the cursor halfway there.
+            .overlay(alignment: .topTrailing) {
+                if hovering {
+                    Button { state.remove(item) } label: {
+                        Image(systemName: "xmark").font(.system(size: 6, weight: .heavy))
+                    }
+                    .hardwareKey(size: 14, tint: .white.opacity(0.7), glow: true)
+                    .help("Remove from the stash")
+                    .padding(2)
+                    .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .onHover { hovering = $0 }
+            .stashDraggable(item, from: state)
             .help(item.title)
     }
 }

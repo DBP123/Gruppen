@@ -38,6 +38,33 @@ struct StashItem: Identifiable, Equatable {
         return url
     }
 
+    /// The directory this item's file already lives in.
+    ///
+    /// Not a stored property, because there is nothing to store: the shelf holds
+    /// files *by reference*, so `url` is already the file where it has always
+    /// been and its parent is the origin by definition.
+    ///
+    /// Nil in two cases, and the second is the one that matters. Text and links
+    /// have nothing on disk. **Virtual** items do have a file, but we wrote it
+    /// into `IngestionManager.scratch` on the way in, and that directory is
+    /// emptied on every launch — it is somewhere a file is passing through, not
+    /// somewhere anything should be written back to. Treating it as an origin
+    /// would extract an archive into a folder macOS deletes at next start.
+    var originDirectoryURL: URL? {
+        guard !isVirtual, let fileURL else { return nil }
+        return fileURL.deletingLastPathComponent()
+    }
+
+    /// Whether this is something `ditto -x -k` can open.
+    ///
+    /// The PKZip family only. `.tar.gz`, `.7z` and `.rar` are deliberately absent:
+    /// ditto does not read them, and offering an Extract button that fails on the
+    /// file you pressed it for is worse than not offering it.
+    var isArchive: Bool {
+        guard let fileURL else { return false }
+        return ["zip", "cbz", "jar", "ipa", "war"].contains(fileURL.pathExtension.lowercased())
+    }
+
     /// Resolved on demand and cached, so a shelf of twenty files doesn't hit
     /// IconServices twenty times per redraw.
     var icon: NSImage {
@@ -65,15 +92,21 @@ struct StashItem: Identifiable, Equatable {
     /// is to stop shipping anything that a name can be *derived from*. A bare
     /// file URL is what Finder itself puts on the pasteboard for a file drag
     /// (measured: `public.file-url`, `NSFilenamesPboardType`, and friends), and
-    /// a receiver given a path copies the file at that path. There is no
+    /// a receiver given a path acts on the file at that path. There is no
     /// content representation left to re-name, so the file that comes out is the
     /// file that went in, by construction rather than by correction.
-    var itemProvider: NSItemProvider {
+    ///
+    /// It is also what makes *moving* possible at all: a path is something a
+    /// receiver can relocate, where a blob of file data can only ever be copied.
+    /// Written straight to the pasteboard now rather than through
+    /// `NSItemProvider`, because the drag is an AppKit session — see
+    /// `StashDragOut` for why.
+    var pasteboardWriter: NSPasteboardWriting {
         if let fileURL, FileManager.default.fileExists(atPath: fileURL.path) {
-            return NSItemProvider(object: fileURL as NSURL)
+            return fileURL as NSURL
         }
-        if let url { return NSItemProvider(object: url as NSURL) }
-        return NSItemProvider(object: (text ?? "") as NSString)
+        if let url { return url as NSURL }
+        return (text ?? "") as NSString
     }
 
     static func file(_ url: URL) -> StashItem {

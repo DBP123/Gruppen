@@ -69,6 +69,42 @@ struct SystemBuildInfo: Codable, Hashable {
     var osBuildNumber: String
     var displayCount: Int
     var hasBuiltInDisplay: Bool
+
+    init(hardwareSerialNumber: String, chipArchitecture: String, totalMemoryGB: Int,
+         totalStorageGB: Int, gpuCoreCount: Int, osVersion: String, osBuildNumber: String,
+         displayCount: Int, hasBuiltInDisplay: Bool) {
+        self.hardwareSerialNumber = hardwareSerialNumber
+        self.chipArchitecture = chipArchitecture
+        self.totalMemoryGB = totalMemoryGB
+        self.totalStorageGB = totalStorageGB
+        self.gpuCoreCount = gpuCoreCount
+        self.osVersion = osVersion
+        self.osBuildNumber = osBuildNumber
+        self.displayCount = displayCount
+        self.hasBuiltInDisplay = hasBuiltInDisplay
+    }
+
+    /// Lenient, which `MacHardwareProfile` around it already was and this was
+    /// not — so the leniency up there never actually held: `buildInfo` is the
+    /// one key it decodes strictly, and this type required all nine of its own.
+    /// A cache written before any field here existed was thrown away whole.
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        hardwareSerialNumber = try box.decodeIfPresent(String.self, forKey: .hardwareSerialNumber) ?? "—"
+        chipArchitecture = try box.decodeIfPresent(String.self, forKey: .chipArchitecture) ?? "—"
+        totalMemoryGB = try box.decodeIfPresent(Int.self, forKey: .totalMemoryGB) ?? 0
+        totalStorageGB = try box.decodeIfPresent(Int.self, forKey: .totalStorageGB) ?? 0
+        gpuCoreCount = try box.decodeIfPresent(Int.self, forKey: .gpuCoreCount) ?? 0
+        osVersion = try box.decodeIfPresent(String.self, forKey: .osVersion) ?? "—"
+        osBuildNumber = try box.decodeIfPresent(String.self, forKey: .osBuildNumber) ?? "—"
+        displayCount = try box.decodeIfPresent(Int.self, forKey: .displayCount) ?? 0
+        hasBuiltInDisplay = try box.decodeIfPresent(Bool.self, forKey: .hasBuiltInDisplay) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case hardwareSerialNumber, chipArchitecture, totalMemoryGB, totalStorageGB
+        case gpuCoreCount, osVersion, osBuildNumber, displayCount, hasBuiltInDisplay
+    }
 }
 
 /// Everything Gruppen knows about the host Mac.
@@ -94,7 +130,11 @@ struct MacHardwareProfile: Codable, Hashable {
         marketingModelName = try box.decodeIfPresent(String.self, forKey: .marketingModelName) ?? "Mac"
         family = try box.decodeIfPresent(MacFamily.self, forKey: .family) ?? .unknown
         chassis = try box.decodeIfPresent(MacChassis.self, forKey: .chassis) ?? family.chassis
-        buildInfo = try box.decode(SystemBuildInfo.self, forKey: .buildInfo)
+        buildInfo = try box.decodeIfPresent(SystemBuildInfo.self, forKey: .buildInfo)
+            ?? SystemBuildInfo(hardwareSerialNumber: "—", chipArchitecture: "—",
+                               totalMemoryGB: 0, totalStorageGB: 0, gpuCoreCount: 0,
+                               osVersion: "—", osBuildNumber: "—",
+                               displayCount: 0, hasBuiltInDisplay: false)
         capturedAt = try box.decodeIfPresent(Date.self, forKey: .capturedAt) ?? Date()
     }
 

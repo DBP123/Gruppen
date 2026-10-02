@@ -7,9 +7,9 @@ struct StashTrayView: View {
     @EnvironmentObject private var state: ShelfState
     @EnvironmentObject private var settings: AppSettings
 
-    var onMinimize: () -> Void
+    var onClose: () -> Void
 
-    @State private var exportNote: String?
+    @State private var zip: ZipStatus?
     @State private var hovering = false
 
     /// Set by the hosting view, which is the only thing that sees the drag.
@@ -33,7 +33,21 @@ struct StashTrayView: View {
         .ambientGlow(isTargeted || hovering)
         .animation(.easeOut(duration: 0.12), value: isTargeted)
         .animation(.easeOut(duration: 0.2), value: hovering)
+        // What plays the selection toolbar's and the convert bar's transitions.
+        // Both appear and disappear with the selection, and a `.transition` is
+        // run by whatever animates the insertion — which has to be out here,
+        // around the `if`, rather than inside the view being inserted.
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: state.selection.count)
         .onHover { hovering = $0 }
+        // A success note clears itself after five seconds. Keyed on the
+        // status, so a second zip started in that window cancels the timer
+        // rather than having it wipe the new zip's status. A failure stays
+        // until the next zip: it is the one you need time to read.
+        .task(id: zip) {
+            guard case .saved = zip else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            withAnimation(.easeOut(duration: 0.3)) { zip = nil }
+        }
     }
 
     private var shelfBackground: some View {
@@ -60,19 +74,19 @@ struct StashTrayView: View {
                 }
                 .hardwareKey()
                 .help(state.selection.isEmpty
-                      ? "Compress the shelf into \(settings.exportDirectory.lastPathComponent)"
+                      ? "Compress the stash into \(settings.exportDirectory.lastPathComponent)"
                       : "Compress the \(state.selection.count) selected into \(settings.exportDirectory.lastPathComponent)")
-                Button { state.clear() } label: {
-                    Image(systemName: "trash").font(.system(size: 10, weight: .bold))
-                }
-                .hardwareKey()
-                .help("Clear the shelf")
             }
-            Button(action: onMinimize) {
-                Image(systemName: "minus").font(.system(size: 10, weight: .bold))
+            // One key, not two. There used to be a trash beside a minus, and
+            // they did the same thing: clearing a stash empties it, an emptied
+            // stash closes itself, and "minimise" destroyed the window outright
+            // — nothing was ever minimised anywhere to come back from. A stash
+            // holds files by reference, so closing one puts nothing at risk.
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
             }
-            .hardwareKey()
-            .help("Minimise the shelf")
+            .hardwareKey(size: 18, glow: true)
+            .help("Close the stash")
         }
         // The whole strip drags the window, handled by AppKit so it tracks the
         // cursor exactly. Sits behind the buttons so they still receive clicks.
@@ -84,27 +98,32 @@ struct StashTrayView: View {
     private func exportZip() {
         let payload = state.actionable.map { (name: $0.title, url: $0.fileURL, text: $0.text) }
         let destination = settings.exportDirectory
-        exportNote = "Zipping…"
-        Task {
+        zip = .working
+        Task { @MainActor in
             do {
                 let archive = try await Task.detached(priority: .userInitiated) {
                     try StashExporter.export(items: payload, to: destination)
                 }.value
-                await MainActor.run { exportNote = "Saved \(archive.lastPathComponent)" }
+                zip = .saved(archive.lastPathComponent)
+                FinderUtility.revealAndFocus(url: archive)
             } catch {
-                await MainActor.run { exportNote = "! \(error.localizedDescription)" }
+                // The full error goes to the log; the shelf gets one short line.
+                GroupStore.log("STASH zip failed — \(error)")
+                zip = .failed((error as? StashExporter.ExportError)?.errorDescription
+                              ?? "Couldn't create the zip")
             }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let exportNote {
-            Text(exportNote)
+        if let zip {
+            Text(zip.message)
                 .font(Theme.mono(9))
-                .foregroundStyle(exportNote.hasPrefix("!") ? Theme.red : Theme.green)
+                .foregroundStyle(zip.tint)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .transition(.opacity)
         }
         if state.isEmpty {
             VStack(spacing: 6) {
@@ -126,7 +145,31 @@ struct StashTrayView: View {
                 }
             }
             .animation(.spring(response: 0.24, dampingFraction: 0.8), value: state.items.count)
+            StashSelectionToolbar()
             ConvertBar()
+        }
+    }
+}
+
+/// The one line of feedback under a shelf's header after the zip key is pressed.
+private enum ZipStatus: Equatable {
+    case working
+    case saved(String)
+    case failed(String)
+
+    var message: String {
+        switch self {
+        case .working: return "Zipping…"
+        case .saved(let name): return "Saved \(name)"
+        case .failed(let reason): return "Zip failed: \(reason)"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .working: return Theme.textMuted
+        case .saved: return Theme.green
+        case .failed: return Theme.red
         }
     }
 }
@@ -250,20 +293,20 @@ private struct StashRow: View {
                   border: selected ? Theme.ambient : Theme.machinedBorder)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        // Click picks a file out; shift-click builds a set. Zip and convert
-        // then act on that set instead of the whole shelf.
+        // Click picks one out; ⇧- or ⌘-click adds or removes just this one.
+        // Zip, convert, extract and dragging out then act on that set instead
+        // of the whole stash.
+        //
+        // **One gesture, reading the flags itself.** A plain `TapGesture`
+        // matches regardless of what is held, so pairing it with a
+        // `.modifiers(.shift)` twin meant a shift-click fired both and they
+        // raced. Reading the flags once means exactly one thing happens.
         .simultaneousGesture(
-            TapGesture().modifiers(.shift).onEnded { state.select(item, extending: true) }
+            TapGesture().onEnded {
+                state.select(item, gesture: .init(modifiers: NSEvent.modifierFlags))
+            }
         )
-        .simultaneousGesture(
-            TapGesture().onEnded { state.select(item, extending: false) }
-        )
-        .onDrag {
-            // Dragging out consumes the item; emptying the shelf closes it.
-            let provider = item.itemProvider
-            Task { @MainActor in state.remove(item) }
-            return provider
-        }
+        .stashDraggable(item, from: state)
     }
 
     private var actions: some View {
@@ -286,7 +329,7 @@ private struct StashRow: View {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
             }
             .hardwareKey(size: 20)
-            .help("Take it off the shelf")
+            .help("Take it off the stash")
         }
     }
 

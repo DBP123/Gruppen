@@ -74,6 +74,16 @@ final class AppSettings: ObservableObject {
         didSet { persist(stashShakeEnabled, oldValue, Keys.stashShake) }
     }
 
+    /// Whether dragging a file off a stash moves it or copies it.
+    ///
+    /// Off — copy — by default, because that is what a stash has always done
+    /// and a setting that silently changed where people's files end up would be
+    /// a bad surprise. Read when each drag begins, so a change applies to the
+    /// next drag. See `StashDragOut` for how the choice reaches the receiver.
+    @Published var stashMovesOnDragOut: Bool {
+        didSet { persist(stashMovesOnDragOut, oldValue, Keys.stashMoveOnDragOut) }
+    }
+
     /// Whether Gruppen re-reads the machine's mutable hardware state at launch.
     ///
     /// On by default. Off means the cached profile is used exactly as written
@@ -134,6 +144,7 @@ final class AppSettings: ObservableObject {
         static let stashNotch = "stashNotchEnabled"
         static let stashEdge = "stashEdgeEnabled"
         static let stashShake = "stashShakeEnabled"
+        static let stashMoveOnDragOut = "stashMovesOnDragOut"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
@@ -154,6 +165,7 @@ final class AppSettings: ObservableObject {
             Keys.stashNotch: true,
             Keys.stashEdge: true,
             Keys.stashShake: true,
+            Keys.stashMoveOnDragOut: false,
             Keys.performanceMonitor: true,
             Keys.hardwareAutoDetection: true,
         ])
@@ -165,6 +177,7 @@ final class AppSettings: ObservableObject {
         stashNotchEnabled = defaults.bool(forKey: Keys.stashNotch)
         stashEdgeEnabled = defaults.bool(forKey: Keys.stashEdge)
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
+        stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
         hardwareAutoDetection = defaults.bool(forKey: Keys.hardwareAutoDetection)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path

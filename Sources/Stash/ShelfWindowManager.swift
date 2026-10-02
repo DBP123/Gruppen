@@ -11,9 +11,9 @@ final class ShelfState: ObservableObject, Identifiable {
     /// that would otherwise fade for being empty.
     @Published var isTargeted = false
 
-    /// Which items are picked out. Click selects one, shift-click adds to the
-    /// set; zip and convert act on the selection when there is one and on the
-    /// whole shelf when there is not.
+    /// Which items are picked out. See `SelectionGesture` for what each click
+    /// means; zip, convert and extract act on the selection when there is one
+    /// and on the whole stash when there is not.
     @Published var selection: Set<UUID> = []
 
     /// Called when the shelf goes from holding something to holding nothing —
@@ -41,6 +41,10 @@ final class ShelfState: ObservableObject, Identifiable {
         if wasFilled, items.isEmpty { onEmptied?() }
     }
 
+    func remove(_ batch: [StashItem]) {
+        batch.forEach(remove)
+    }
+
     func clear() {
         let wasFilled = !items.isEmpty
         items.removeAll()
@@ -48,17 +52,52 @@ final class ShelfState: ObservableObject, Identifiable {
         if wasFilled { onEmptied?() }
     }
 
-    /// Plain click replaces the selection; shift-click extends it. Clicking the
-    /// only selected item clears it, so there is always a way back to "no
-    /// selection" without hunting for empty space.
-    func select(_ item: StashItem, extending: Bool) {
-        if extending {
-            if selection.contains(item.id) { selection.remove(item.id) } else { selection.insert(item.id) }
-        } else if selection == [item.id] {
-            selection.removeAll()
-        } else {
-            selection = [item.id]
+    /// What a click means.
+    ///
+    /// A stash is a handful of files, not a long list, so there are no ranges:
+    /// ⇧-click picks out exactly the item it lands on, the same as ⌘-click.
+    /// Clicking the first and third selects those two — never the second
+    /// between them.
+    enum SelectionGesture {
+        /// Plain click: this item alone. Clicking the only selected item clears
+        /// the selection, so there is always a way back to "nothing picked out"
+        /// without hunting for empty space.
+        case replace
+        /// ⇧- or ⌘-click: add or remove this one and leave the rest alone.
+        case toggle
+
+        init(modifiers: NSEvent.ModifierFlags) {
+            self = modifiers.isDisjoint(with: [.shift, .command]) ? .replace : .toggle
         }
+    }
+
+    func select(_ item: StashItem, gesture: SelectionGesture) {
+        switch gesture {
+        case .replace:
+            selection = selection == [item.id] ? [] : [item.id]
+        case .toggle:
+            if selection.remove(item.id) == nil { selection.insert(item.id) }
+        }
+    }
+
+    /// What dragging `item` picks up: the whole selection when `item` is part
+    /// of it, otherwise `item` alone — grabbing a file you have not picked out
+    /// should not drag along a selection you made for something else.
+    func dragBatch(for item: StashItem) -> [StashItem] {
+        selection.contains(item.id) ? selectedItems : [item]
+    }
+
+    /// The selected items, in shelf order rather than set order — a batch that
+    /// reports "3 items" should list them the way they are laid out.
+    var selectedItems: [StashItem] { items.filter { selection.contains($0.id) } }
+
+    /// How many distinct directories the actionable items came from.
+    ///
+    /// Counts only items that *have* an origin. Text, links and virtual files
+    /// have nowhere on disk they came from, so they are not locations and must
+    /// not inflate the number the toolbar shows.
+    var selectedOriginsCount: Int {
+        Set(actionable.compactMap(\.originDirectoryURL)).count
     }
 
     /// What an action should act on: the selection if there is one, otherwise
@@ -72,8 +111,8 @@ final class ShelfState: ObservableObject, Identifiable {
 ///
 /// A shake spawns a *new* shelf with its own window, its own state and its own
 /// identity, so you can carry several piles at once. A shelf destroys itself
-/// when it is emptied, minimised, or when it was opened speculatively and the
-/// drag ended without anything being dropped on it.
+/// when it is emptied, when it is closed, or when it was opened speculatively
+/// and the drag ended without anything being dropped on it.
 @MainActor
 final class ShelfWindowManager: ObservableObject {
     static let shared = ShelfWindowManager()
@@ -84,8 +123,6 @@ final class ShelfWindowManager: ObservableObject {
     /// there is exactly one store in the app and re-reading it per shelf would
     /// mean several objects disagreeing about what is running.
     weak var store: GroupStore?
-
-    var shelfCount: Int { activeShelves.count }
 
     private init() {}
 
@@ -163,7 +200,7 @@ final class FloatingShelfController {
         let host = StashHostingView(
             rootView: AnyView(
                 StashTrayView(
-                    onMinimize: { [weak self] in
+                    onClose: { [weak self] in
                         guard let self else { return }
                         self.onDestroy(self.state.id)
                     }

@@ -99,10 +99,7 @@ final class ScriptLibrary: ObservableObject {
     // MARK: Persistence
 
     private func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([Script].self, from: data)
-        else { return }
-        scripts = decoded
+        scripts = LenientLibrary.load(Script.self, from: fileURL, label: "SCRIPTS")
     }
 
     private func save() {

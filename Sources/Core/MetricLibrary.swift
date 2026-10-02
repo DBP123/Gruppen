@@ -27,10 +27,7 @@ final class MetricLibrary: ObservableObject {
 
     init(fileURL: URL = MetricLibrary.defaultFileURL) {
         self.fileURL = fileURL
-        if let data = try? Data(contentsOf: fileURL),
-           let decoded = try? JSONDecoder().decode([MetricDefinition].self, from: data) {
-            metrics = decoded
-        }
+        metrics = LenientLibrary.load(MetricDefinition.self, from: fileURL, label: "METRICS")
     }
 
     @discardableResult

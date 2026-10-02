@@ -43,6 +43,26 @@ struct MetricDefinition: Identifiable, Codable, Hashable {
         self.condition = condition
     }
 
+    /// Lenient, for the reason `AppGroup` and `WorkspaceProfile` are: a missing
+    /// key must never be an error, or every field added later invalidates every
+    /// library already written. The library decodes as `[MetricDefinition]`, so
+    /// one undecodable entry would otherwise erase the rest of the file.
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try box.decodeIfPresent(String.self, forKey: .name) ?? "Untitled metric"
+        isRecording = try box.decodeIfPresent(Bool.self, forKey: .isRecording) ?? false
+        source = try box.decodeIfPresent(MetricSource.self, forKey: .source) ?? MetricSource()
+        sniffedKeys = try box.decodeIfPresent([String].self, forKey: .sniffedKeys) ?? []
+        sample = try box.decodeIfPresent([String: String].self, forKey: .sample) ?? [:]
+        prunedKeys = try box.decodeIfPresent(Set<String>.self, forKey: .prunedKeys) ?? []
+        condition = try box.decodeIfPresent(String.self, forKey: .condition) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isRecording, source, sniffedKeys, sample, prunedKeys, condition
+    }
+
     /// The fields that survive pruning, in their original order.
     var keptKeys: [String] {
         sniffedKeys.filter { !prunedKeys.contains($0) }
@@ -116,6 +136,19 @@ struct MetricSource: Codable, Hashable {
 
     var kind: Kind = .musicTrack
     var customName: String = ""
+
+    init() {}
+
+    /// Lenient for the same reason as everything else persisted here, and with
+    /// the extra job of surviving a source kind this build has never heard of —
+    /// which is what reading a file written by a *newer* build looks like.
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        kind = ((try? box.decodeIfPresent(Kind.self, forKey: .kind)) ?? nil) ?? .musicTrack
+        customName = try box.decodeIfPresent(String.self, forKey: .customName) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, customName }
 
     var isConfigured: Bool {
         kind == .custom ? !customName.isEmpty : true

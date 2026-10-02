@@ -206,9 +206,7 @@ final class GroupStore: ObservableObject {
     private func load() {
         isLoading = true
         defer { isLoading = false }
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([AppGroup].self, from: data) else { return }
-        groups = decoded
+        groups = LenientLibrary.load(AppGroup.self, from: fileURL, label: "GROUPS")
     }
 
     private func save() {

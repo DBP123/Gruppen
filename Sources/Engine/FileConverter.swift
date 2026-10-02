@@ -131,7 +131,11 @@ enum FileConverter {
     // MARK: - Renderers
 
     /// One image, one page, at the image's own size.
-    private nonisolated static func imageToPDF(_ url: URL, output: URL) throws {
+    ///
+    /// Internal rather than private: `StashFileMerger` needs exactly this page
+    /// for each image it folds into a document, and a second copy of it would be
+    /// a second place for the media-box size to be got wrong.
+    nonisolated static func imageToPDF(_ url: URL, output: URL) throws {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw ConversionError.unreadable(url.lastPathComponent) }
@@ -152,7 +156,11 @@ enum FileConverter {
     /// with CoreText directly: read the document into an attributed string —
     /// which covers txt, rtf, doc and docx — then let a framesetter walk it page
     /// by page until the content runs out.
-    private nonisolated static func documentToPDF(_ url: URL, output: URL) throws {
+    ///
+    /// Internal for the same reason as `imageToPDF` above: the merger paginates
+    /// text through this rather than repeating the CoreText walk and the
+    /// zero-length-frame guard that keeps it from looping forever.
+    nonisolated static func documentToPDF(_ url: URL, output: URL) throws {
         let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [:]
         guard let text = try? NSAttributedString(url: url, options: options,
                                                  documentAttributes: nil),

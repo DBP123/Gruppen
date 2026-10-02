@@ -312,6 +312,11 @@ private struct MetricDetail: View {
                 await MainActor.run {
                     noteFailed = false
                     note = "Saved \(url.lastPathComponent) to \(destination.lastPathComponent)"
+                    // Show it, rather than only naming it. A log written to a
+                    // folder you are not looking at is a log you have to go and
+                    // find, and the stash's zip and extract already both reveal
+                    // what they wrote.
+                    FinderUtility.revealAndFocus(url: url)
                 }
             } catch {
                 await MainActor.run {

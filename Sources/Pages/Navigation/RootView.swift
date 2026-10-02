@@ -96,9 +96,11 @@ private struct ToolHeader: View {
                 .tracking(1.3)
                 .foregroundStyle(Theme.textSecondary)
 
-            Chip(text: inSettings ? page.settingsPaneBadge : page.badge,
-                 tint: page.isImplemented ? Theme.orange : Theme.textMuted,
-                 size: 9)
+            if let badge = inSettings ? page.settingsPaneBadge : page.badge {
+                Chip(text: badge,
+                     tint: page.isImplemented ? Theme.orange : Theme.textMuted,
+                     size: 9)
+            }
 
             Spacer()
 
