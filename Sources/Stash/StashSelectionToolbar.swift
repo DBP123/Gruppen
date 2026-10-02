@@ -1,19 +1,26 @@
 import AppKit
 import SwiftUI
 
-/// The bar that appears when files are picked out of a shelf.
+/// The row of actions that appears when files are picked out of a shelf.
 ///
-/// Present only while something is selected — an empty selection has nothing to
-/// act on, and a row of disabled buttons is worse than no row. The subtitle is
-/// the point of the component: a batch drawn from more than one folder behaves
-/// differently from one drawn from a single folder, and the moment to say so is
-/// before the button is pressed, not in the result afterwards.
+/// One slim line of small keys and nothing else. It used to be a boxed panel
+/// with a two-line heading, full-size buttons and a note underneath — most of
+/// the height of a 300pt-wide shelf, to say very little. The count it led with
+/// ("3 items selected") is already in the shelf's header as "3/5", and the
+/// "across 2 locations" line only matters to one action, so it now lives in
+/// that action's tooltip.
+///
+/// Present only while something is selected — an empty selection has nothing
+/// to act on, and a row of disabled keys is worse than no row.
 struct StashSelectionToolbar: View {
     @EnvironmentObject private var state: ShelfState
 
     /// Where extraction writes when an origin cannot take it.
     @EnvironmentObject private var settings: AppSettings
 
+    /// One line: what the last extraction did, or why an action failed. A
+    /// successful merge needs none — the merged file appearing on the shelf is
+    /// the result, and it clears the selection, which removes this row anyway.
     @State private var note: String?
     @State private var working = false
 
@@ -33,96 +40,80 @@ struct StashSelectionToolbar: View {
 
     var body: some View {
         if !selected.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(headline)
-                            .font(Theme.mono(10, .semibold))
-                            .foregroundStyle(Theme.textPrimary)
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(Theme.mono(9))
-                                .foregroundStyle(Theme.textMuted)
-                                .lineLimit(1)
-                        }
-                    }
-
-                    Spacer(minLength: 8)
-
-                    if !archives.isEmpty {
-                        // One button for the ordinary case, a menu only when
-                        // there is a genuine choice to make — which there is
-                        // only once an origin is involved at all.
-                        if origins > 0 {
-                            Menu {
-                                Button("Back to \(origins == 1 ? "its folder" : "their folders")") {
-                                    extract(.origin)
-                                }
-                                Button("All to \(settings.exportDirectory.lastPathComponent)") {
-                                    extract(.fallback)
-                                }
-                            } label: {
-                                Text(working ? "Extracting…" : "Extract \(archives.count)")
-                            }
-                            .menuStyle(.borderlessButton)
-                            .fixedSize()
-                            .disabled(working)
-                        } else {
-                            Button(working ? "Extracting…" : "Extract \(archives.count)") {
-                                extract(.fallback)
-                            }
-                            .industrialButton(.secondary)
-                            .disabled(working)
-                        }
-                    }
-
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    if !archives.isEmpty { extractKey }
                     if let merge {
-                        Button(working ? "Combining…" : merge.label) { combine(merge) }
-                            .industrialButton(.secondary)
-                            .disabled(working)
-                            .help(mergeHelp(merge))
+                        Button(working ? "Combining…" : "Combine · \(merge.ext.uppercased())") {
+                            combine(merge)
+                        }
+                        .industrialButton(.secondary, compact: true)
+                        .disabled(working)
+                        .help(mergeHelp(merge))
                     }
-
+                    Spacer(minLength: 0)
                     Button("Deselect") { state.selection.removeAll() }
-                        .industrialButton(.ghost)
+                        .industrialButton(.ghost, compact: true)
                         .disabled(working)
                 }
 
                 if let note {
                     Text(note)
-                        .font(Theme.mono(9))
-                        .foregroundStyle(Theme.textMuted)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .font(Theme.mono(8.5))
+                        .foregroundStyle(note.hasPrefix("!") ? Theme.red : Theme.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(note)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .machined(cornerRadius: Theme.radiusSm)
             // Rises from the bottom edge, which is where it sits and where the
             // rows above it make room. The animation that drives this lives on
             // the enclosing stack in `StashTrayView`: a `.transition` is played
             // by whatever animates the *insertion*, so an `.animation` attached
-            // here would only ever cover changes within a bar already on screen.
+            // here would only ever cover changes within a row already on screen.
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    /// Extract, as one key.
+    ///
+    /// A menu only when there is a genuine choice — back to the archives' own
+    /// folders, or all into the download folder — which there is only once an
+    /// origin is involved. The tooltip is where "across 2 locations" lives now:
+    /// it is the one action a multi-folder selection behaves differently for,
+    /// and the moment to say so is before the key is pressed.
+    @ViewBuilder
+    private var extractKey: some View {
+        let label = working ? "Extracting…" : "Extract \(archives.count)"
+        if origins > 0 {
+            Menu {
+                Button("Back to \(origins == 1 ? "its folder" : "their folders")") { extract(.origin) }
+                Button("All to \(settings.exportDirectory.lastPathComponent)") { extract(.fallback) }
+            } label: {
+                Text(label).font(Theme.mono(9, .semibold))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(working)
+            .help(locations.map { "Extract \(archives.count) — \($0)" } ?? "Extract \(archives.count)")
+        } else {
+            Button(label) { extract(.fallback) }
+                .industrialButton(.secondary, compact: true)
+                .disabled(working)
+                .help("Extract into \(settings.exportDirectory.lastPathComponent)")
         }
     }
 
     // MARK: Copy
 
-    private var headline: String {
-        "\(selected.count) item\(selected.count == 1 ? "" : "s") selected"
-    }
-
     /// Says where things came from, and only when that is load-bearing.
     ///
-    /// One location is the unremarkable case and gets no second line. More than
-    /// one is the whole reason this component exists. Items with no origin —
-    /// text, links, files we wrote to scratch — are counted separately rather
-    /// than folded in, because "3 items across 1 location" would be a lie about
-    /// a selection where two of them came from nowhere.
-    private var subtitle: String? {
+    /// One location is the unremarkable case and says nothing. More than one is
+    /// worth knowing before extracting. Items with no origin — text, links,
+    /// files we wrote to scratch — are counted separately rather than folded
+    /// in, because "across 1 location" would be a lie about a selection where
+    /// two of them came from nowhere.
+    private var locations: String? {
         let originless = selected.count - selected.filter { $0.originDirectoryURL != nil }.count
         switch (origins, originless) {
         case (0, _):
@@ -174,7 +165,6 @@ struct StashSelectionToolbar: View {
                 // act on. Deselecting rather than removing keeps them on the
                 // shelf, which is the point.
                 state.selection.removeAll()
-                note = "Combined \(batch.count) → \(merged.lastPathComponent)"
                 GroupStore.log("STASH combine ×\(batch.count) [\(plan.ext)] — \(merged.lastPathComponent)")
             } catch {
                 note = "! \(error.localizedDescription)"

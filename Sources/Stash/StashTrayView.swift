@@ -194,33 +194,31 @@ private struct ConvertBar: View {
 
     var body: some View {
         if !targets.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("CONVERT")
+            // One line, in the selection row's small keys. The count it used
+            // to carry ("3 selected") is already the header's "3/5"; what is
+            // left to say is the scope, and only when it is the whole shelf.
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Text(state.selection.isEmpty ? "CONVERT ALL" : "CONVERT")
                         .font(Theme.mono(8, .semibold))
                         .tracking(1)
                         .foregroundStyle(Theme.textMuted)
-                    Text(state.selection.isEmpty ? "all \(subjects.count)" : "\(subjects.count) selected")
-                        .font(Theme.mono(8))
-                        .foregroundStyle(Theme.textMuted.opacity(0.7))
-                    Spacer(minLength: 0)
-                    if let note {
-                        Text(note)
-                            .font(Theme.mono(8))
-                            .foregroundStyle(note.hasPrefix("!") ? Theme.red : Theme.green)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                HStack(spacing: 4) {
+                        .fixedSize()
                     ForEach(targets) { target in
                         Button(target.label) { convert(to: target) }
-                            .industrialButton(.secondary)
+                            .industrialButton(.secondary, compact: true)
                             .disabled(working)
                     }
+                    Spacer(minLength: 0)
+                }
+                if let note {
+                    Text(note)
+                        .font(Theme.mono(8.5))
+                        .foregroundStyle(note.hasPrefix("!") ? Theme.red : Theme.green)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
-            .padding(.top, 2)
         }
     }
 
@@ -323,7 +321,7 @@ private struct StashRow: View {
                         .font(.system(size: 9, weight: .bold))
                 }
                 .hardwareKey(size: 20)
-                .help("Copy the POSIX path")
+                .help("Copy path")
             }
             Button { state.remove(item) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))

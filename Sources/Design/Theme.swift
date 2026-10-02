@@ -230,30 +230,37 @@ struct IndustrialButtonStyle: ButtonStyle {
     enum Kind { case secondary, primary, danger, ghost }
 
     var kind: Kind = .secondary
+    /// Half the size, in mono: for a stash, where the whole window is 300pt
+    /// wide and a row of full-size buttons is most of it.
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration, kind: kind)
+        StyleBody(configuration: configuration, kind: kind, compact: compact)
     }
 
     private struct StyleBody: View {
         let configuration: ButtonStyleConfiguration
         let kind: Kind
+        let compact: Bool
         @State private var hovering = false
         @Environment(\.isEnabled) private var isEnabled
 
+        private var radius: CGFloat { compact ? 4 : Theme.radiusSm }
+
         var body: some View {
             configuration.label
-                .font(Theme.sans(12, .medium))
+                .font(compact ? Theme.mono(9, .semibold) : Theme.sans(12, .medium))
+                .lineLimit(1)
                 .foregroundStyle(foreground)
-                .padding(.horizontal, kind == .ghost ? 8 : 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, compact ? 6 : (kind == .ghost ? 8 : 12))
+                .padding(.vertical, compact ? 3 : 6)
                 .background(
-                    RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(background(pressed: configuration.isPressed))
                         .overlay(
                             // Lit cap: brighter along the top, like the
                             // illuminated rocker on the panel.
-                            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                            RoundedRectangle(cornerRadius: radius, style: .continuous)
                                 .fill(
                                     LinearGradient(colors: [.white.opacity(kind == .primary ? 0.22 : 0.06), .clear],
                                                    startPoint: .top, endPoint: .center)
@@ -261,7 +268,7 @@ struct IndustrialButtonStyle: ButtonStyle {
                         )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .strokeBorder(border, lineWidth: 1)
                 )
                 .opacity(isEnabled ? 1 : 0.35)
@@ -306,8 +313,9 @@ struct IndustrialButtonStyle: ButtonStyle {
 }
 
 extension View {
-    func industrialButton(_ kind: IndustrialButtonStyle.Kind = .secondary) -> some View {
-        buttonStyle(IndustrialButtonStyle(kind: kind))
+    func industrialButton(_ kind: IndustrialButtonStyle.Kind = .secondary,
+                          compact: Bool = false) -> some View {
+        buttonStyle(IndustrialButtonStyle(kind: kind, compact: compact))
     }
 
     /// The keys on a stash: zip, close.
