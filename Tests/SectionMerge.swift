@@ -67,6 +67,7 @@ func sectionMerge() {
             StashFileMerger.plan(for: [txt, bin]) == nil)
     T.equal("text merges to .txt", StashFileMerger.Plan.text.ext, "txt")
     T.equal("every other merge is .pdf", StashFileMerger.Plan.mixed.ext, "pdf")
+    T.equal("the key says what it makes", StashFileMerger.Plan.pdf.label, "Combine to PDF")
 
     T.begin("H. Merge — text")
 

@@ -33,10 +33,9 @@ struct StashTrayView: View {
         .ambientGlow(isTargeted || hovering)
         .animation(.easeOut(duration: 0.12), value: isTargeted)
         .animation(.easeOut(duration: 0.2), value: hovering)
-        // What plays the selection toolbar's and the convert bar's transitions.
-        // Both appear and disappear with the selection, and a `.transition` is
-        // run by whatever animates the insertion — which has to be out here,
-        // around the `if`, rather than inside the view being inserted.
+        // Animates the action bar's keys coming and going with the selection.
+        // A change is animated by whatever watches it from outside the view
+        // being changed, which is why this sits out here.
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: state.selection.count)
         .onHover { hovering = $0 }
         // A success note clears itself after five seconds. Keyed on the
@@ -145,8 +144,7 @@ struct StashTrayView: View {
                 }
             }
             .animation(.spring(response: 0.24, dampingFraction: 0.8), value: state.items.count)
-            StashSelectionToolbar()
-            ConvertBar()
+            StashActionBar()
         }
     }
 }
@@ -170,86 +168,6 @@ private enum ZipStatus: Equatable {
         case .working: return Theme.textMuted
         case .saved: return Theme.green
         case .failed: return Theme.red
-        }
-    }
-}
-
-/// Appears when what is selected can become something else.
-///
-/// Only offers conversions that make sense for the selection: the targets come
-/// from the files' own family, and a mixed selection offers nothing, because
-/// there is no single sensible answer for "convert a png and a wav".
-private struct ConvertBar: View {
-    @EnvironmentObject private var state: ShelfState
-    @State private var note: String?
-    @State private var working = false
-
-    private var subjects: [StashItem] {
-        state.actionable.filter { $0.fileURL != nil }
-    }
-
-    private var targets: [FileConverter.Target] {
-        FileConverter.targets(for: subjects.compactMap(\.fileURL))
-    }
-
-    var body: some View {
-        if !targets.isEmpty {
-            // One line, in the selection row's small keys. The count it used
-            // to carry ("3 selected") is already the header's "3/5"; what is
-            // left to say is the scope, and only when it is the whole shelf.
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Text(state.selection.isEmpty ? "CONVERT ALL" : "CONVERT")
-                        .font(Theme.mono(8, .semibold))
-                        .tracking(1)
-                        .foregroundStyle(Theme.textMuted)
-                        .fixedSize()
-                    ForEach(targets) { target in
-                        Button(target.label) { convert(to: target) }
-                            .industrialButton(.secondary, compact: true)
-                            .disabled(working)
-                    }
-                    Spacer(minLength: 0)
-                }
-                if let note {
-                    Text(note)
-                        .font(Theme.mono(8.5))
-                        .foregroundStyle(note.hasPrefix("!") ? Theme.red : Theme.green)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-        }
-    }
-
-    private func convert(to target: FileConverter.Target) {
-        let urls = subjects.compactMap(\.fileURL)
-        guard !urls.isEmpty else { return }
-        working = true
-        note = "Converting…"
-        Task {
-            do {
-                let results = try await Task.detached(priority: .userInitiated) {
-                    try FileConverter.convert(urls, to: target)
-                }.value
-                await MainActor.run {
-                    // The shelf ends up holding the *result*, not both, and the
-                    // result lives in the stash's temporary directory rather
-                    // than beside the original. The original is untouched, right
-                    // where it was, and nothing new appears in its folder.
-                    let converted = subjects
-                    state.add(results.map { StashItem.virtual(file: $0, kind: .file,
-                                                              title: $0.lastPathComponent) })
-                    converted.forEach { state.remove($0) }
-                    note = "\(results.count) → \(target.label)"
-                    working = false
-                }
-            } catch {
-                await MainActor.run {
-                    note = "! \(error.localizedDescription)"
-                    working = false
-                }
-            }
         }
     }
 }

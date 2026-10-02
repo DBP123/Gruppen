@@ -1,26 +1,32 @@
 import AppKit
 import SwiftUI
 
-/// The row of actions that appears when files are picked out of a shelf.
+/// Everything a shelf can do with its files, in one row at the bottom.
 ///
-/// One slim line of small keys and nothing else. It used to be a boxed panel
-/// with a two-line heading, full-size buttons and a note underneath — most of
-/// the height of a 300pt-wide shelf, to say very little. The count it led with
-/// ("3 items selected") is already in the shelf's header as "3/5", and the
-/// "across 2 locations" line only matters to one action, so it now lives in
-/// that action's tooltip.
+/// `[Extract ⌄] [Combine to PDF] [Convert ⌄] ······ [Deselect]`
 ///
-/// Present only while something is selected — an empty selection has nothing
-/// to act on, and a row of disabled keys is worse than no row.
-struct StashSelectionToolbar: View {
+/// **One row, and Deselect always last.** This used to be two bars stacked —
+/// the selection's actions above, conversions below — each appearing only when
+/// it had something to offer. Which of them showed depended on the files
+/// picked, so Deselect sat on a different line from one selection to the next,
+/// sometimes on a row of its own, and the pair took two rows of a 200pt shelf.
+/// Converting is a menu key now rather than a row of format buttons, which is
+/// what lets it all fit on one line: Extract and Combine never appear together
+/// (an archive cannot be merged), so the widest case is Combine, Convert and
+/// Deselect.
+///
+/// The count is not repeated here — the header already shows "3/5" — and
+/// "across 2 locations" lives in Extract's tooltip, the one action it changes.
+struct StashActionBar: View {
     @EnvironmentObject private var state: ShelfState
 
     /// Where extraction writes when an origin cannot take it.
     @EnvironmentObject private var settings: AppSettings
 
-    /// One line: what the last extraction did, or why an action failed. A
-    /// successful merge needs none — the merged file appearing on the shelf is
-    /// the result, and it clears the selection, which removes this row anyway.
+    /// One line, under the row: why something failed, or where an extraction
+    /// went. Successes that leave their result on the shelf — a merge, a
+    /// conversion — need no line; the new file is the result. Clears after five
+    /// seconds, like the zip key's status.
     @State private var note: String?
     @State private var working = false
 
@@ -38,23 +44,36 @@ struct StashSelectionToolbar: View {
         StashFileMerger.plan(for: selected.compactMap(\.fileURL))
     }
 
+    /// What converting acts on: the selection when there is one, otherwise
+    /// every file on the shelf.
+    private var convertible: [StashItem] {
+        state.actionable.filter { $0.fileURL != nil }
+    }
+
+    private var targets: [FileConverter.Target] {
+        FileConverter.targets(for: convertible.compactMap(\.fileURL))
+    }
+
+    private var hasSelection: Bool { !selected.isEmpty }
+
     var body: some View {
-        if !selected.isEmpty {
+        if hasSelection || !targets.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     if !archives.isEmpty { extractKey }
                     if let merge {
-                        Button(working ? "Combining…" : "Combine · \(merge.ext.uppercased())") {
-                            combine(merge)
-                        }
-                        .industrialButton(.secondary, compact: true)
-                        .disabled(working)
-                        .help(mergeHelp(merge))
+                        Button(working ? "Combining…" : merge.label) { combine(merge) }
+                            .industrialButton(.secondary, compact: true)
+                            .disabled(working)
+                            .help(mergeHelp(merge))
                     }
+                    if !targets.isEmpty { convertKey }
                     Spacer(minLength: 0)
-                    Button("Deselect") { state.selection.removeAll() }
-                        .industrialButton(.ghost, compact: true)
-                        .disabled(working)
+                    if hasSelection {
+                        Button("Deselect") { state.selection.removeAll() }
+                            .industrialButton(.ghost, compact: true)
+                            .disabled(working)
+                    }
                 }
 
                 if let note {
@@ -64,24 +83,20 @@ struct StashSelectionToolbar: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .help(note)
+                        .transition(.opacity)
                 }
             }
-            // Rises from the bottom edge, which is where it sits and where the
-            // rows above it make room. The animation that drives this lives on
-            // the enclosing stack in `StashTrayView`: a `.transition` is played
-            // by whatever animates the *insertion*, so an `.animation` attached
-            // here would only ever cover changes within a row already on screen.
-            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .task(id: note) {
+                guard note != nil else { return }
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                withAnimation(.easeOut(duration: 0.3)) { note = nil }
+            }
         }
     }
 
-    /// Extract, as one key.
-    ///
-    /// A menu only when there is a genuine choice — back to the archives' own
-    /// folders, or all into the download folder — which there is only once an
-    /// origin is involved. The tooltip is where "across 2 locations" lives now:
-    /// it is the one action a multi-folder selection behaves differently for,
-    /// and the moment to say so is before the key is pressed.
+    /// Extract, as one key — a menu when there is a genuine choice, back to
+    /// the archives' own folders or all into the download folder, which there
+    /// is only once an origin is involved.
     @ViewBuilder
     private var extractKey: some View {
         let label = working ? "Extracting…" : "Extract \(archives.count)"
@@ -90,10 +105,9 @@ struct StashSelectionToolbar: View {
                 Button("Back to \(origins == 1 ? "its folder" : "their folders")") { extract(.origin) }
                 Button("All to \(settings.exportDirectory.lastPathComponent)") { extract(.fallback) }
             } label: {
-                Text(label).font(Theme.mono(9, .semibold))
+                MenuKeyLabel(title: label)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            .compactMenuKey()
             .disabled(working)
             .help(locations.map { "Extract \(archives.count) — \($0)" } ?? "Extract \(archives.count)")
         } else {
@@ -102,6 +116,20 @@ struct StashSelectionToolbar: View {
                 .disabled(working)
                 .help("Extract into \(settings.exportDirectory.lastPathComponent)")
         }
+    }
+
+    /// Convert, as one key whose menu lists the formats. "Convert all" when
+    /// nothing is selected, so the scope is never a guess.
+    private var convertKey: some View {
+        Menu {
+            ForEach(targets) { target in
+                Button("To \(target.label)") { convert(to: target) }
+            }
+        } label: {
+            MenuKeyLabel(title: working ? "Converting…" : (hasSelection ? "Convert" : "Convert all"))
+        }
+        .compactMenuKey()
+        .disabled(working)
     }
 
     // MARK: Copy
@@ -129,7 +157,7 @@ struct StashSelectionToolbar: View {
         }
     }
 
-    /// Says which merge is about to happen, since "Combine into PDF" does not
+    /// Says which merge is about to happen, since "Combine to PDF" does not
     /// distinguish appending six PDFs from rendering six screenshots.
     private func mergeHelp(_ plan: StashFileMerger.Plan) -> String {
         switch plan {
@@ -174,6 +202,36 @@ struct StashSelectionToolbar: View {
         }
     }
 
+    /// Converts what is selected — or everything — and swaps the results in.
+    ///
+    /// The shelf ends up holding the *result*, not both, and the result lives
+    /// in the stash's temporary directory rather than beside the original. The
+    /// original is untouched, right where it was, and nothing new appears in
+    /// its folder.
+    private func convert(to target: FileConverter.Target) {
+        let subjects = convertible
+        let urls = subjects.compactMap(\.fileURL)
+        guard !working, !urls.isEmpty else { return }
+        working = true
+        note = nil
+
+        Task { @MainActor in
+            do {
+                let results = try await Task.detached(priority: .userInitiated) {
+                    try FileConverter.convert(urls, to: target)
+                }.value
+                // Added before the originals go, so the shelf is never empty
+                // in between — an emptied shelf closes itself.
+                state.add(results.map { StashItem.virtual(file: $0, kind: .file,
+                                                          title: $0.lastPathComponent) })
+                subjects.forEach { state.remove($0) }
+            } catch {
+                note = "! \(error.localizedDescription)"
+            }
+            working = false
+        }
+    }
+
     private func extract(_ mode: UnzipDestinationMode) {
         guard !working else { return }
         working = true
@@ -195,6 +253,45 @@ struct StashSelectionToolbar: View {
             }
             GroupStore.log("STASH extract ×\(batch.count) [\(mode == .origin ? "origin" : "fallback")] — "
                            + report.summary)
+        }
+    }
+}
+
+/// A menu key's title with its chevron, drawn as part of the label.
+///
+/// The system's own menu indicator is not drawn once a menu takes a custom
+/// button style — measured: a bare "Convert" key, indistinguishable from one
+/// that converts on the spot, to an unstated format. The chevron is what says
+/// "this opens a list".
+private struct MenuKeyLabel: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text(title)
+            Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
+        }
+    }
+}
+
+extension View {
+    /// A `Menu` drawn as one of the stash's compact keys, so a key that opens
+    /// a list looks like the keys beside it.
+    ///
+    /// macOS 14 lets a menu take a button style; 13 does not, and gets the
+    /// plain borderless menu, which still reads as a key in a row of them. The
+    /// system indicator is hidden on both, since the label carries its own.
+    @ViewBuilder
+    func compactMenuKey() -> some View {
+        if #available(macOS 14.0, *) {
+            menuStyle(.button)
+                .buttonStyle(IndustrialButtonStyle(kind: .secondary, compact: true))
+                .menuIndicator(.hidden)
+                .fixedSize()
+        } else {
+            menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
         }
     }
 }

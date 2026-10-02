@@ -52,8 +52,8 @@ enum StashFileMerger {
         /// What the button should say.
         var label: String {
             switch self {
-            case .text: return "Combine into TXT"
-            case .pdf, .images, .mixed: return "Combine into PDF"
+            case .text: return "Combine to TXT"
+            case .pdf, .images, .mixed: return "Combine to PDF"
             }
         }
 
