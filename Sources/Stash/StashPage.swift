@@ -182,6 +182,11 @@ struct StashSettingsPane: View {
                                       ? "The file leaves its original folder"
                                       : "A copy is made; the original stays put",
                                   isOn: $settings.stashMovesOnDragOut)
+                    SettingToggle(title: "Clear the notch stash when closing it",
+                                  detail: settings.notchCloseClearsStash
+                                      ? "Closing empties it"
+                                      : "Closing keeps its files for next time",
+                                  isOn: $settings.notchCloseClearsStash)
                 }
 
                 StashShortcutRow()

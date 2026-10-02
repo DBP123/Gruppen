@@ -9,8 +9,8 @@ import SwiftUI
 /// is called from a system event.
 @MainActor
 final class StashCoordinator: ObservableObject {
-    /// The notch's own stash. Kept across open and close, so closing the tray
-    /// does not throw away what is on it.
+    /// The notch's own stash. Kept across open and close unless the close key
+    /// is set to clear it — see `dismissNotch`.
     let notchShelf = ShelfState()
     /// Needed by the routing chips inside the HUD.
     private let store: GroupStore
@@ -70,9 +70,15 @@ final class StashCoordinator: ObservableObject {
         let monitor = DragMonitor(
             onShake: { [weak self] point in self?.manager.spawnShelf(at: point) },
             // Sentinels live only for the duration of a drag.
-            onDragBegan: { [weak self] in self?.sentinels?.install() },
+            onDragBegan: { [weak self] in
+                self?.sentinels?.install()
+                // A tray left open with files on it becomes a full drop
+                // target again for the length of the new drag.
+                self?.notchPresentation?.isDragging = true
+            },
             onDragEnded: { [weak self] in
                 self?.sentinels?.remove()
+                self?.notchPresentation?.isDragging = false
                 self?.handleDragEnded()
             },
             shakeWanted: { AppSettings.shared.stashShakeEnabled }
@@ -148,6 +154,9 @@ final class StashCoordinator: ObservableObject {
         notchRegistry = registry
 
         let presentation = NotchPresentation()
+        // Only ever opened by a drag crossing the notch tripwire, so one is in
+        // progress by definition.
+        presentation.isDragging = true
         notchPresentation = presentation
 
         let host = StashHostingView(
@@ -156,7 +165,7 @@ final class StashCoordinator: ObservableObject {
                 // is left on it — dismissing on every drag-out meant one file
                 // per opening. It closes when you close it, or when the last
                 // item leaves (see `onEmptied` in `init`).
-                NotchHUDView(onClose: { [weak self] in self?.closeNotch() })
+                NotchHUDView(onClose: { [weak self] in self?.dismissNotch() })
                 .environmentObject(notchShelf)
                 .environmentObject(presentation)
                 .environmentObject(store)
@@ -188,6 +197,17 @@ final class StashCoordinator: ObservableObject {
         // spring has a state change to animate from. Without the hop, SwiftUI
         // sees only the final value and the tray is simply *there*.
         DispatchQueue.main.async { presentation.isVisible = true }
+    }
+
+    /// The close key: put the tray away, emptying it first if that is what
+    /// the setting asks for.
+    ///
+    /// Clearing a stash that holds something closes it by itself, through
+    /// `onEmptied`; the explicit close after it covers an empty tray, which has
+    /// no emptying to report, and is a no-op otherwise.
+    private func dismissNotch() {
+        if AppSettings.shared.notchCloseClearsStash { notchShelf.clear() }
+        closeNotch()
     }
 
     func closeNotch() {

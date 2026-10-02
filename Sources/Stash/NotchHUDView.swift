@@ -39,6 +39,9 @@ struct BottomRoundedShape: InsettableShape {
 @MainActor
 final class NotchPresentation: ObservableObject {
     @Published var isVisible = false
+    /// A drag is under way somewhere on screen. While it is, the whole window
+    /// is a drop target — see `dropCatcher` in `NotchHUDView`.
+    @Published var isDragging = false
 }
 
 /// The notch tray.
@@ -152,9 +155,38 @@ struct NotchHUDView: View {
         // so a micro-movement off the tray's edge is not an exit.
         trayColumn
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .background(dropCatcher)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             .ignoresSafeArea(.all)
+    }
+
+    /// Makes the whole window a drop target while a drag is in progress.
+    ///
+    /// **Why the window did not already take drops everywhere.** It is a
+    /// borderless, non-opaque panel, and for those the window server decides
+    /// what is under the pointer per pixel: where nothing is drawn, events —
+    /// drags included — fall through to whatever window is underneath. So only
+    /// the black tray itself ever received a drop. The 20pt buffer meant to
+    /// forgive a near miss took nothing, and neither did the column the tray
+    /// slides down through while it was still on its way. That was the
+    /// flicker: the pointer slipped onto an undrawn pixel, the drag "left", the
+    /// tray withdrew, the tripwire re-armed under the pointer and opened it
+    /// again — and the drop never had anywhere to land.
+    ///
+    /// A fill too faint to see, but not zero, makes every pixel count: the
+    /// notch column from the top of the screen to below the tray, the path it
+    /// animates along, and the buffer around it.
+    ///
+    /// Only during a drag. The rest of the time the undrawn pixels should let
+    /// clicks through, so the margin around a tray left open with files on it
+    /// never swallows a click meant for the window underneath.
+    @ViewBuilder
+    private var dropCatcher: some View {
+        // 1% black: rounds to 3/255 of alpha, which is enough for the window
+        // server and nothing anyone can see. 0.1% rounds to zero and does
+        // nothing.
+        if presentation.isDragging { Color.black.opacity(0.01) }
     }
 
     private var trayColumn: some View {
@@ -178,7 +210,9 @@ struct NotchHUDView: View {
                 .stroke(isTargeted ? accent.opacity(0.5) : Color.white.opacity(0.05),
                         lineWidth: 1)
         )
-        .ambientGlow(isTargeted || hovering)
+        // Fades out inside the window's buffer rather than being cut off at
+        // its edge.
+        .ambientGlow(isTargeted || hovering, within: Self.buffer)
         .animation(.easeOut(duration: 0.16), value: isTargeted)
         .animation(.easeOut(duration: 0.2), value: hovering)
         // Slides out from behind the bezel, and back up into it. Its own height
@@ -302,10 +336,13 @@ private struct NotchItemChip: View {
             // vanish under the cursor halfway there.
             .overlay(alignment: .topTrailing) {
                 if hovering {
+                    // Orange at rest, not only under the pointer: a pale glyph
+                    // on a dark key, sitting over a file's own icon, was easy
+                    // to miss entirely.
                     Button { state.remove(item) } label: {
-                        Image(systemName: "xmark").font(.system(size: 6, weight: .heavy))
+                        Image(systemName: "xmark").font(.system(size: 7, weight: .heavy))
                     }
-                    .hardwareKey(size: 14, tint: .white.opacity(0.7), glow: true)
+                    .hardwareKey(size: 14, tint: Theme.ambient, glow: true)
                     .help("Remove from the stash")
                     .padding(2)
                     .transition(.opacity)

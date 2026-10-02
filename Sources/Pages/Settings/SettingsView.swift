@@ -32,12 +32,6 @@ struct GeneralSettingsPane: View {
             Button("Open Telemetry Settings") { navigation.openTelemetrySettings() }
                 .industrialButton(.secondary)
 
-            // Temporary, for developing the notchless stash on a notched Mac.
-            // Remove before publishing — see `AppSettings.simulateNoNotch`.
-            SettingToggle(title: "Simulate a Mac without a notch",
-                          detail: "Temporary · the stash behaves as it would with no camera notch",
-                          isOn: $settings.simulateNoNotch)
-
             LabeledSection(label: "BUILD") {
                 KeyValue("Version", Bundle.versionString)
                 KeyValue("Bundle", Bundle.main.bundleIdentifier ?? "—")

@@ -263,4 +263,15 @@ func sectionStash() {
     T.check("and survives a relaunch", AppSettings().stashMovesOnDragOut)
     if let saved { defaults.set(saved, forKey: "stashMovesOnDragOut") }
     else { defaults.removeObject(forKey: "stashMovesOnDragOut") }
+
+    // The notch close key's setting: keeping is what closing has always done.
+    let savedClose = defaults.object(forKey: "notchCloseClearsStash")
+    defaults.removeObject(forKey: "notchCloseClearsStash")
+    T.check("closing the notch stash keeps its files by default",
+            AppSettings().notchCloseClearsStash == false)
+    let closeSettings = AppSettings()
+    closeSettings.notchCloseClearsStash = true
+    T.check("choosing to clear on close survives a relaunch", AppSettings().notchCloseClearsStash)
+    if let savedClose { defaults.set(savedClose, forKey: "notchCloseClearsStash") }
+    else { defaults.removeObject(forKey: "notchCloseClearsStash") }
 }

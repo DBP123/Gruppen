@@ -106,11 +106,6 @@ final class NotchGeometryManager: ObservableObject {
     }
 
     private var observer: NSObjectProtocol?
-    /// Re-resolves when settings change, which is how flipping "simulate no
-    /// notch" reaches an open tray: the same path a display being plugged in
-    /// takes. Every other setting resolves to the same anchor, and `reanchor`
-    /// does nothing when the answer has not changed.
-    private var settingsObserver: NSObjectProtocol?
     private var coalescing: Task<Void, Never>?
 
     /// How long to wait for a burst of parameter changes to settle.
@@ -137,13 +132,6 @@ final class NotchGeometryManager: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.screenParametersDidChange() }
         }
-        settingsObserver = NotificationCenter.default.addObserver(
-            forName: AppSettings.didChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reanchor() }
-        }
     }
 
     /// The singleton never deinitialises, but the teardown is correct anyway:
@@ -152,7 +140,6 @@ final class NotchGeometryManager: ObservableObject {
     /// singleton is a trap for whoever makes a second one.
     deinit {
         if let observer { NotificationCenter.default.removeObserver(observer) }
-        if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
         coalescing?.cancel()
     }
 
@@ -271,7 +258,7 @@ final class NotchGeometryManager: ObservableObject {
     /// There used to be a `safeAreaInsets.top` step between the two. It could
     /// only matter on a display reporting a top inset but no auxiliary areas,
     /// which no notched Mac on macOS 13 or later does, and keeping it would have
-    /// been a second place to teach about simulating a notchless Mac.
+    /// been a second way to ask the same question.
     static func bandHeight(of screen: NSScreen) -> CGFloat {
         screen.notchFlanks?.left.height ?? NSStatusBar.system.thickness
     }
@@ -299,15 +286,8 @@ extension NSScreen {
     /// tray's sides, the band it hides behind, which display it anchors to and
     /// the sentinel that summons it all derive from this answer, so nothing
     /// else asks the screen directly.
-    ///
-    /// It is also the only place the temporary "simulate no notch" setting is
-    /// read. With it on, every display answers nil here, and everything
-    /// downstream takes the path a Mac without a notch takes — because that is
-    /// the answer it was given, not because it was told to pretend.
-    @MainActor
     var notchFlanks: (left: NSRect, right: NSRect)? {
-        guard !AppSettings.shared.simulateNoNotch,
-              let left = auxiliaryTopLeftArea,
+        guard let left = auxiliaryTopLeftArea,
               let right = auxiliaryTopRightArea else { return nil }
         return (left, right)
     }

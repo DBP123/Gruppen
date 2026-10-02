@@ -693,6 +693,27 @@ extension View {
                radius: active ? 25 : 8,
                y: active ? 20 : 4)
     }
+
+    /// The same warmth, sized to fade out completely within `margin`.
+    ///
+    /// For a view whose window is only `margin` larger than it. A glow still
+    /// lit at the window's edge is cut off there, and the cut shows as a hard
+    /// rectangle of light around a window that is supposed to be invisible.
+    /// Measured at a 20pt margin, on the alpha of the window's outermost row:
+    ///
+    /// ```
+    ///   blur 25, drop 20   7.1%   the visible box
+    ///   blur 10, drop 3    2.0%   still a line
+    ///   blur  7, drop 2    <1/255 nothing on screen
+    /// ```
+    ///
+    /// So the blur scales with the margin it has to end inside, and the colour
+    /// is brighter to carry the same warmth over the shorter distance.
+    func ambientGlow(_ active: Bool, within margin: CGFloat) -> some View {
+        shadow(color: active ? Theme.ambient.opacity(0.5) : .black.opacity(0.45),
+               radius: margin * 0.35,
+               y: margin * 0.1)
+    }
 }
 
 /// An indicator lamp, borrowed from the switch panel in the app icon: a lens
