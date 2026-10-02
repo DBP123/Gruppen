@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The banner at the top of the telemetry dashboard.
+/// The banner at the top of the dashboard's Hardware tab.
 ///
 /// Not a telemetry card: nothing in it moves, so it carries no gauges and no
 /// colour beyond the machine's own drawing. It says what this Mac *is*, which is
@@ -50,16 +50,7 @@ struct SystemHeroCard: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .fill(Theme.machined)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-        )
+        .specPlate()
     }
 
     /// Name, then what the machine actually is, then what it is running.
@@ -111,12 +102,28 @@ struct SystemHeroCard: View {
     }
 }
 
+extension View {
+    /// The machined plate the Hardware tab's spec sheets sit on.
+    func specPlate() -> some View {
+        padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
+                    .fill(Theme.machined)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+            )
+    }
+}
+
 /// One column of key/value rows, keys aligned within the column.
 ///
 /// The key column is sized to the widest label this app actually uses
 /// (`GRAPHICS`) rather than to its own contents, so all three columns line up
 /// with each other instead of each finding its own width.
-private struct SpecColumn: View {
+struct SpecColumn: View {
     let rows: [(String, String)]
 
     var body: some View {

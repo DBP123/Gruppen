@@ -451,7 +451,7 @@ private struct EnergyImpactRows: View {
                     .foregroundStyle(Theme.textMuted)
                     .padding(.vertical, 3)
             } else {
-                ForEach(monitor.rows) { row in
+                ScrollingRows(items: monitor.rows) { row in
                     HStack(spacing: 8) {
                         Text(row.name)
                             .font(Theme.mono(10))

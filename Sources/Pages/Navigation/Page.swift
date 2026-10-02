@@ -49,10 +49,11 @@ enum Page: String, CaseIterable, Identifiable {
 
     /// Chip shown beside the title in the tool header — when it says something
     /// the title does not. Stash has none: its chip read "STASH" beside the
-    /// title "STASH".
+    /// title "STASH". Telemetry has none either: a "HARDWARE" chip above a
+    /// TELEMETRY | HARDWARE switch read as which tab was selected.
     var badge: String? {
         switch self {
-        case .telemetry: return "HARDWARE"
+        case .telemetry: return nil
         case .stash: return nil
         case .scripts: return "AUTOMATION"
         case .workspaces: return "SYSTEM OVERVIEW"

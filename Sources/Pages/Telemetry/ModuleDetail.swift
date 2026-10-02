@@ -210,6 +210,42 @@ struct TableHeader: View {
     }
 }
 
+/// A table's rows, four at a time.
+///
+/// Every process table sits under a `TableHeader` inside a card you can size
+/// yourself, and a long list used to either push the card's content past its
+/// edge or get cut off at an arbitrary count. Past `visible` rows this scrolls
+/// inside a box exactly that many rows tall, so the header stays put and the
+/// card keeps its height. At or under `visible`, it is just the rows — no scroll
+/// view, no space held open for rows that are not there.
+///
+/// Every row is given the same height, which is what makes "four rows tall" an
+/// exact measurement rather than an estimate.
+struct ScrollingRows<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    var visible = 4
+    var rowHeight: CGFloat = 15
+    var spacing: CGFloat = 5
+    @ViewBuilder let row: (Item) -> Row
+
+    var body: some View {
+        if items.count > visible {
+            ScrollView(.vertical) { rows }
+                .frame(height: CGFloat(visible) * rowHeight + CGFloat(visible - 1) * spacing)
+        } else {
+            rows
+        }
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(items) { item in
+                row(item).frame(height: rowHeight)
+            }
+        }
+    }
+}
+
 /// A colour chip and its name, for a stacked bar's legend.
 struct Key: View {
     let label: String

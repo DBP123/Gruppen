@@ -73,11 +73,14 @@ final class MemorySampler: TelemetrySampler {
     /// The top-five table, and when it was last built.
     ///
     /// Building it is a `proc_pid_rusage` walk over every process — the one
-    /// genuinely expensive thing in this sampler, and a list of the five
-    /// heaviest processes does not change five times in five seconds. The
+    /// genuinely expensive thing in this sampler, and a list of the heaviest
+    /// processes does not change five times in five seconds. The
     /// pressure figures above it still move every tick; only the table waits.
     private var consumersCache: (rows: [MemoryConsumer], at: Date)?
     private static let consumersInterval: TimeInterval = 5
+    /// Rows the consumers table holds; it shows four and scrolls the rest.
+    /// Names are paid for only for these, about a microsecond each.
+    static let consumerCount = 10
 
     /// One process's memory footprint.
     struct MemoryConsumer: Equatable, Identifiable {
@@ -96,10 +99,10 @@ final class MemorySampler: TelemetrySampler {
         guard bytes > 0 else { return [] }
 
         // Footprints first, names afterwards. `proc_name` is the most expensive
-        // call in this sweep — about 0.18 ms across every pid — and all but five
-        // of those names are sorted straight off the end of the list. Collecting
-        // the cheap number for everyone and paying for the string only for the
-        // five that get drawn is the same trick `EnergyImpactSampler` uses.
+        // call in this sweep — about 0.18 ms across every pid — and nearly all
+        // of those names would be sorted straight off the end of the list.
+        // Collecting the cheap number for everyone and paying for the string
+        // only for the rows kept is the same trick `EnergyImpactSampler` uses.
         var weights: [(pid: pid_t, footprint: UInt64)] = []
         weights.reserveCapacity(Int(bytes) / MemoryLayout<pid_t>.size)
         for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
@@ -111,8 +114,8 @@ final class MemorySampler: TelemetrySampler {
 
         var nameBuffer = [CChar](repeating: 0, count: 256)
         var rows: [MemoryConsumer] = []
-        rows.reserveCapacity(5)
-        for entry in weights.prefix(5) {
+        rows.reserveCapacity(Self.consumerCount)
+        for entry in weights.prefix(Self.consumerCount) {
             guard proc_name(entry.pid, &nameBuffer, 256) > 0 else { continue }
             rows.append(MemoryConsumer(pid: entry.pid,
                                        name: String(cString: nameBuffer),
@@ -228,6 +231,13 @@ final class NetworkSampler: TelemetrySampler {
     /// a VPN's bytes are already counted on the interface carrying them.
     private static let ethernet: UInt8 = 0x06
 
+    /// Processes kept, busiest by total first. Ten rather than the four a table
+    /// shows: each direction re-sorts this one list, and with only five kept a
+    /// heavy uploader could push the busiest downloader out of the inbound
+    /// table entirely. Free — every flow is already named — and the tables
+    /// scroll past four.
+    static let talkerCount = 10
+
     private var previous: (down: UInt64, up: UInt64, at: Date)?
     /// The per-process subscription is opened on the first sample and closed by
     /// `teardown`, on the same terms as every other kernel object here.
@@ -267,7 +277,7 @@ final class NetworkSampler: TelemetrySampler {
                        downTotal: down,
                        upTotal: up,
                        interfaces: interfaces,
-                       talkers: Array(talkers.prefix(5)))
+                       talkers: Array(talkers.prefix(Self.talkerCount)))
     }
 
     private static func counters() -> (UInt64, UInt64, Int)? {

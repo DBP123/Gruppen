@@ -70,6 +70,7 @@ struct ToolHost: View {
 /// and out of its isolated settings pane.
 private struct ToolHeader: View {
     @EnvironmentObject private var navigation: NavigationModel
+    @AppStorage(TelemetryTab.storageKey) private var telemetryTab: TelemetryTab = .telemetry
 
     private var page: Page { navigation.page }
     private var inSettings: Bool { navigation.showingSettingsPane }
@@ -102,7 +103,7 @@ private struct ToolHeader: View {
             // Icon only, the label lives in the tooltip: the board's own bar
             // used to carry a labelled button and a "DEFAULT LAYOUT" caption
             // above every card, which was a row of chrome for one action.
-            if page == .telemetry, !inSettings {
+            if page == .telemetry, !inSettings, telemetryTab == .telemetry {
                 Button { navigation.requestLayoutReset() } label: {
                     Image(systemName: "arrow.counterclockwise")
                         .font(.system(size: 12, weight: .medium))

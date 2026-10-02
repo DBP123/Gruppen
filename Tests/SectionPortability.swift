@@ -129,4 +129,26 @@ func sectionPortability() {
     }
     T.equal("the default group colour is a valid hex string",
             Theme.defaultGroupHex.count, 7)
+
+    T.begin("G. Portability — the Hardware tab's core layout")
+
+    let cores = CoreLayout.current()
+    T.note("cores: \(cores.performance.map { "\($0)P" } ?? "-") "
+           + "\(cores.efficiency.map { "\($0)E" } ?? "-") · \(cores.physical) physical · \(cores.logical) logical")
+    T.check("a split, when there is one, has both halves",
+            (cores.performance == nil) == (cores.efficiency == nil))
+    if let performance = cores.performance, let efficiency = cores.efficiency {
+        T.equal("performance and efficiency cores add up to every core",
+                performance + efficiency, cores.physical)
+    }
+    T.check("there are at least as many threads as cores", cores.logical >= cores.physical)
+    #if arch(arm64)
+    T.check("Apple silicon reports its performance/efficiency split",
+            cores.performance != nil, "hw.nperflevels ≥ 2")
+    #endif
+
+    // The selected tab is stored by its raw value; renaming a case would
+    // quietly reset everyone to the default tab.
+    T.equal("the stored tab names are stable",
+            TelemetryTab.allCases.map(\.rawValue), ["telemetry", "hardware"])
 }

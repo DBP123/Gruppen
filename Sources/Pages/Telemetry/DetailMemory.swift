@@ -62,7 +62,7 @@ struct MemoryDetail: View {
                 Well {
                     TableHeader(columns: [("PROCESS NAME", .leading, nil),
                                           ("MEMORY", .trailing, 74)])
-                    ForEach(reading.consumers) { consumer in
+                    ScrollingRows(items: reading.consumers) { consumer in
                         HStack(spacing: 8) {
                             Text(consumer.name)
                                 .font(Theme.mono(10)).foregroundStyle(Theme.textPrimary)

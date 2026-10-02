@@ -65,10 +65,6 @@ private struct TrafficTable: View {
     let rows: [NetworkTalkers.Talker]
     let value: KeyPath<NetworkTalkers.Talker, UInt64>
 
-    /// Both halves show the same number of rows, so neither direction looks
-    /// more important than the other.
-    private static let limit = 4
-
     var body: some View {
         Well {
             HStack(spacing: 5) {
@@ -85,7 +81,9 @@ private struct TrafficTable: View {
                 Text("No attributed connections")
                     .font(Theme.mono(9.5)).foregroundStyle(Theme.textMuted)
             } else {
-                ForEach(rows.prefix(Self.limit)) { row in
+                // Both halves show four rows and scroll the rest, so neither
+                // direction looks more important than the other.
+                ScrollingRows(items: rows) { row in
                     HStack(spacing: 8) {
                         Text(row.name)
                             .font(Theme.mono(10)).foregroundStyle(Theme.textPrimary)

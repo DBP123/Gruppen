@@ -168,10 +168,16 @@ final class StorageSampler: TelemetrySampler {
 /// is running, and each read is a registry match.
 struct StorageIdentity: Equatable {
     var model: String
-    var protocolName: String
+    /// How the drive is attached — "Apple Fabric" on Apple silicon.
+    var link: String
+    /// The NVMe revision it speaks, "NVMe 1.10".
+    var revision: String
     var firmware: String
     /// Whether the drive publishes a SMART interface at all.
     var smartCapable: Bool
+
+    /// Both together, for the storage card's one-line description.
+    var protocolName: String { "\(link) · \(revision)" }
 
     static let shared: StorageIdentity? = {
         var iterator: io_iterator_t = 0
@@ -193,7 +199,8 @@ struct StorageIdentity: Equatable {
         let link = string("Physical Interconnect") ?? "NVMe"
         let revision = string("NVMe Revision Supported").map { "NVMe \($0)" } ?? "NVMe"
         return StorageIdentity(model: string("Model Number") ?? "Internal drive",
-                               protocolName: "\(link) · \(revision)",
+                               link: link,
+                               revision: revision,
                                firmware: string("Firmware Revision") ?? "—",
                                smartCapable: smartInterfacePresent())
     }()
