@@ -84,6 +84,15 @@ final class AppSettings: ObservableObject {
         didSet { persist(stashMovesOnDragOut, oldValue, Keys.stashMoveOnDragOut) }
     }
 
+    /// **Temporary, for development: remove before publishing.** Makes every
+    /// display answer "no notch" to the one question the app asks about one —
+    /// see `NSScreen.notchFlanks` — so the notchless stash can be worked on from
+    /// a notched Mac. Nothing else reads it; everything downstream takes the
+    /// notchless path because that is the answer it got.
+    @Published var simulateNoNotch: Bool {
+        didSet { persist(simulateNoNotch, oldValue, Keys.simulateNoNotch) }
+    }
+
     /// Whether Gruppen re-reads the machine's mutable hardware state at launch.
     ///
     /// On by default. Off means the cached profile is used exactly as written
@@ -145,6 +154,7 @@ final class AppSettings: ObservableObject {
         static let stashEdge = "stashEdgeEnabled"
         static let stashShake = "stashShakeEnabled"
         static let stashMoveOnDragOut = "stashMovesOnDragOut"
+        static let simulateNoNotch = "debugSimulateNoNotch"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
@@ -166,6 +176,7 @@ final class AppSettings: ObservableObject {
             Keys.stashEdge: true,
             Keys.stashShake: true,
             Keys.stashMoveOnDragOut: false,
+            Keys.simulateNoNotch: false,
             Keys.performanceMonitor: true,
             Keys.hardwareAutoDetection: true,
         ])
@@ -178,6 +189,7 @@ final class AppSettings: ObservableObject {
         stashEdgeEnabled = defaults.bool(forKey: Keys.stashEdge)
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
         stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
+        simulateNoNotch = defaults.bool(forKey: Keys.simulateNoNotch)
         hardwareAutoDetection = defaults.bool(forKey: Keys.hardwareAutoDetection)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path

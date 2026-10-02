@@ -129,4 +129,34 @@ func sectionPortability() {
     }
     T.equal("the default group colour is a valid hex string",
             Theme.defaultGroupHex.count, 7)
+
+    T.begin("G. Portability — simulating a Mac without a notch")
+
+    // On this machine's real screens. The setting must turn every notch
+    // question into "none", and the anchor must follow it without anything
+    // else being told.
+    let settings = AppSettings.shared
+    let saved = settings.simulateNoNotch
+    let geometry = NotchGeometryManager.shared
+    let hasNotch = NSScreen.screens.contains { $0.notchFlanks != nil }
+    T.note(hasNotch ? "this Mac has a notched display" : "no notched display attached")
+
+    settings.simulateNoNotch = true
+    T.check("with it on, no display reports a notch",
+            NSScreen.screens.allSatisfy { $0.notchFlanks == nil })
+    T.check("so no display has housing bounds",
+            NSScreen.screens.allSatisfy { NotchGeometryManager.notchBounds(of: $0) == nil })
+    T.check("and every band is a standard menu bar",
+            NSScreen.screens.allSatisfy {
+                NotchGeometryManager.bandHeight(of: $0) == NSStatusBar.system.thickness })
+    T.check("the anchor follows on its own — the settings change re-resolved it",
+            !geometry.anchor.hasPhysicalNotch)
+
+    settings.simulateNoNotch = false
+    T.check("turning it off gives the real notch back",
+            NSScreen.screens.contains { $0.notchFlanks != nil } == hasNotch)
+    if hasNotch {
+        T.check("and the anchor finds it again", geometry.anchor.hasPhysicalNotch)
+    }
+    settings.simulateNoNotch = saved
 }

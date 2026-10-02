@@ -71,8 +71,7 @@ struct NotchHUDView: View {
 
     /// The part of the panel hidden behind the camera housing.
     static func bandHeight(on screen: NSScreen) -> CGFloat {
-        if let aux = screen.auxiliaryTopLeftArea { return aux.height }
-        return screen.safeAreaInsets.top > 0 ? screen.safeAreaInsets.top : NSStatusBar.system.thickness
+        NotchGeometryManager.bandHeight(of: screen)
     }
 
     /// The part you can actually see: 8pt margin, a 60pt groove, 8pt margin.
