@@ -1,0 +1,9 @@
+# Everything ./build.sh, ./Tests/run.sh and Tools/makeicon.swift write:
+# the .app, DMGs, the test binary and the generated iconset.
+build/
+
+# Finder metadata.
+.DS_Store
+
+# Claude Code's per-machine settings.
+.claude/settings.local.json

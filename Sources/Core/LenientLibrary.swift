@@ -5,7 +5,7 @@ import Foundation
 /// ## Why this exists
 ///
 /// Every library in Gruppen is a JSON array decoded in one call —
-/// `try? JSONDecoder().decode([Script].self, from: data)` and its three
+/// `try? JSONDecoder().decode([Script].self, from: data)` and its two
 /// siblings. That is all-or-nothing by construction: `Decodable` on an array
 /// fails the *array* when any element fails, and the `try?` then turns that
 /// failure into `nil`, which every loader reads as "there was nothing here".

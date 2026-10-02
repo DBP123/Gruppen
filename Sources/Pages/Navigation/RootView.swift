@@ -60,11 +60,6 @@ struct ToolHost: View {
             ScriptBuilderView()
         case .workspaces:
             if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
-        case .metrics:
-            // Unreachable in a release build — `Page.isInThisBuild` keeps it out
-            // of the rail — but still compiled, so the tool does not rot while
-            // it is switched off.
-            MetricsView()
         case .settings:
             GeneralSettingsPane()
         }
@@ -98,7 +93,7 @@ private struct ToolHeader: View {
 
             if let badge = inSettings ? page.settingsPaneBadge : page.badge {
                 Chip(text: badge,
-                     tint: page.isImplemented ? Theme.orange : Theme.textMuted,
+                     tint: Theme.orange,
                      size: 9)
             }
 

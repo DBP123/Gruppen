@@ -5,16 +5,13 @@ import SwiftUI
 struct GruppenApp: App {
     @StateObject private var store: GroupStore
     @StateObject private var stash: StashCoordinator
-        @StateObject private var settings = AppSettings.shared
+    @StateObject private var settings = AppSettings.shared
     @StateObject private var navigation = NavigationModel()
     @StateObject private var widgets = WidgetManager.shared
     @StateObject private var scripts: ScriptLibrary
     @StateObject private var triggers: ScriptTriggerCoordinator
     @StateObject private var workspaces = WorkspaceEngine()
     @StateObject private var hardware = HardwareProfileStore.shared
-    @StateObject private var metrics: MetricLibrary
-    @StateObject private var collector: MetricsCollector
-    @StateObject private var metricStore: MetricStoreBox
 
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
@@ -31,13 +28,6 @@ struct GruppenApp: App {
         let triggers = ScriptTriggerCoordinator(library: scripts)
         _scripts = StateObject(wrappedValue: scripts)
         _triggers = StateObject(wrappedValue: triggers)
-
-        // Metrics: definitions in JSON, captured rows in SQLite.
-        let metrics = MetricLibrary()
-        let metricStore = MetricStore()
-        _metrics = StateObject(wrappedValue: metrics)
-        _metricStore = StateObject(wrappedValue: MetricStoreBox(metricStore))
-        _collector = StateObject(wrappedValue: MetricsCollector(library: metrics, store: metricStore))
     }
 
     private func applyStashSetting() {
@@ -56,9 +46,6 @@ struct GruppenApp: App {
                 .environmentObject(triggers)
                 .environmentObject(workspaces)
                 .environmentObject(hardware)
-                .environmentObject(metrics)
-                .environmentObject(collector)
-                .environmentObject(metricStore)
                 .frame(minWidth: 860, minHeight: 560)
                 .onAppear {
                     settings.applyActivationPolicy()
@@ -88,11 +75,6 @@ struct GruppenApp: App {
                         coordinator?.run(script, paths: [])
                         return true
                     }
-                    // Data is not in a release build, so its page cannot be
-                    // reached to disarm anything. Arming it anyway would leave a
-                    // machine that had metrics recording before the pivot still
-                    // recording them, with no page to see or stop it on.
-                    if Page.metrics.isInThisBuild { collector.rearm() }
                     // The menu bar is `NSStatusItem`s rather than a
                     // `MenuBarExtra`, because that scene type owns exactly one
                     // item and the point is to have several. It lives outside
@@ -103,7 +85,6 @@ struct GruppenApp: App {
                     AppDelegate.willTerminate = {
                         stash.disable()
                         triggers.disarm()
-                        collector.disarm()
                         widgets.shutdown()
                         MenuBarManager.shared.shutdown()
                     }

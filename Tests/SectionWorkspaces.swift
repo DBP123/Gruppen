@@ -52,46 +52,6 @@ func sectionWorkspaces() async {
         T.check("a partial telemetry layout decodes", false, "decode threw")
     }
 
-    T.begin("F. Metrics — definitions and the database")
-
-    let metricDir = URL(fileURLWithPath: NSTemporaryDirectory())
-        .appendingPathComponent("gruppen-metrics-\(UUID().uuidString)", isDirectory: true)
-    try? FileManager.default.createDirectory(at: metricDir, withIntermediateDirectories: true)
-    do {
-        let store = MetricStore(url: metricDir.appendingPathComponent("metrics.sqlite"))
-        let id = UUID()
-        store.insert(metric: id, values: ["track": "Song", "artist": "Someone"])
-        store.insert(metric: id, values: ["track": "Другая", "artist": "Ыыы"])
-        store.insert(metric: id, values: ["track": "emoji 🎧", "artist": "quote\"and'apostrophe"])
-
-        let rows = await store.records(for: id, limit: 100)
-        let counted = await store.count(for: id)
-        T.equal("every row written comes back", rows.count, 3)
-        T.equal("the count agrees with the rows", counted, 3)
-        T.check("non-ASCII survives the round trip",
-                rows.contains { $0.values["track"] == "Другая" })
-        T.check("quotes and apostrophes are not an injection",
-                rows.contains { $0.values["artist"] == "quote\"and'apostrophe" },
-                "values are bound, not interpolated")
-
-        await store.deleteAll(for: id)
-        let remaining = await store.count(for: id)
-        T.equal("deleting a metric empties it", remaining, 0)
-    }
-    try? FileManager.default.removeItem(at: metricDir)
-
-    // A definition written by an earlier build.
-    let legacyMetric = """
-    [{"id":"22222222-2222-2222-2222-222222222222","name":"Tracks","isRecording":true,
-      "source":{"kind":"musicTrack"}}]
-    """.data(using: .utf8)!
-    if let decoded = try? JSONDecoder().decode([MetricDefinition].self, from: legacyMetric) {
-        T.check("a metric definition from an earlier build still loads",
-                decoded[0].name == "Tracks")
-    } else {
-        T.check("a metric definition from an earlier build still loads", false, "decode threw")
-    }
-
     T.begin("F. Libraries — one bad record must not take the file with it")
 
     // This is the failure mode that matters: these loaders decode the whole
