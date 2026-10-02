@@ -278,7 +278,7 @@ private struct NotchCloseButton: View {
     }
 }
 
-/// One held item.
+/// One held item, with a remove key that appears on hover.
 private struct NotchItemChip: View {
     @EnvironmentObject private var state: ShelfState
     let item: StashItem
@@ -296,6 +296,23 @@ private struct NotchItemChip: View {
             .machined(cornerRadius: 6,
                       fill: hovering ? Color(hex: 0x17171A) : Theme.machined,
                       border: Theme.machinedBorder)
+            // Inside the socket's corner, not hanging off it. The hover below
+            // tracks the socket's own frame, so a key drawn within that frame
+            // can be reached without the pointer ever leaving it — the key
+            // stays put while you move onto it. One overhanging the edge would
+            // vanish under the cursor halfway there.
+            .overlay(alignment: .topTrailing) {
+                if hovering {
+                    Button { state.remove(item) } label: {
+                        Image(systemName: "xmark").font(.system(size: 6, weight: .heavy))
+                    }
+                    .hardwareKey(size: 14, tint: .white.opacity(0.7), glow: true)
+                    .help("Remove from the stash")
+                    .padding(2)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.12), value: hovering)
             .onHover { hovering = $0 }
             .stashDraggable(item, from: state)
             .help(item.title)

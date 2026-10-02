@@ -246,10 +246,12 @@ private struct ToolRow: View {
                 Text(page.shortTitle)
                     .font(Theme.sans(13, .medium))
                     .foregroundStyle(Theme.textPrimary)
-                Text(page.badge)
-                    .font(Theme.mono(9))
-                    .tracking(0.6)
-                    .foregroundStyle(Theme.textMuted)
+                if let badge = page.badge {
+                    Text(badge)
+                        .font(Theme.mono(9))
+                        .tracking(0.6)
+                        .foregroundStyle(Theme.textMuted)
+                }
             }
             Spacer(minLength: 8)
             Toggle("", isOn: Binding(get: { enabled }, set: change))
