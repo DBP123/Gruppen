@@ -34,15 +34,21 @@ final class ShelfState: ObservableObject, Identifiable {
         items.append(contentsOf: newItems)
     }
 
-    func remove(_ item: StashItem) {
+    /// Takes `item` off the shelf.
+    ///
+    /// `keepingOpen` is for a file deleted by hand with its own remove key:
+    /// that never closes the shelf, even when it was the last file. Emptying a
+    /// shelf by dragging its files out still does — the files went somewhere,
+    /// and the shelf goes with them.
+    func remove(_ item: StashItem, keepingOpen: Bool = false) {
         let wasFilled = !items.isEmpty
         items.removeAll { $0.id == item.id }
         selection.remove(item.id)
-        if wasFilled, items.isEmpty { onEmptied?() }
+        if wasFilled, items.isEmpty, !keepingOpen { onEmptied?() }
     }
 
     func remove(_ batch: [StashItem]) {
-        batch.forEach(remove)
+        batch.forEach { remove($0) }
     }
 
     func clear() {

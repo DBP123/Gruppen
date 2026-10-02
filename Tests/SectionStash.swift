@@ -80,6 +80,14 @@ func sectionStash() {
     tray.clear()
     T.equal("clearing a loaded tray closes it", emptied, 2)
 
+    // A file deleted with its own remove key never closes the stash, even the
+    // last one; the tray stays open, empty, until it is closed on purpose.
+    tray.add([three[0], three[1]])
+    tray.remove(three[0], keepingOpen: true)
+    tray.remove(three[1], keepingOpen: true)
+    T.check("deleting the last file by hand leaves the stash open",
+            emptied == 2 && tray.isEmpty, "emptied \(emptied) time(s), \(tray.items.count) left")
+
     T.begin("D. Stash — batch extraction planning")
 
     withTempDir { dir in
