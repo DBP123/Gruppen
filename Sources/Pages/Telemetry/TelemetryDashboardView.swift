@@ -2,8 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 
-/// The landing page: every armed hardware module, live, as a grid of cards —
-/// and, on its Hardware tab, the machine's spec sheet.
+/// The landing page: every armed hardware module, live, as a grid of cards.
 ///
 /// ## What makes this cheap
 ///
@@ -30,33 +29,8 @@ struct TelemetryDashboardView: View {
     @ObservedObject private var manager = WidgetManager.shared
     @StateObject private var window = WindowVisibility()
     @StateObject private var layout = DashboardLayout()
-    @AppStorage(TelemetryTab.storageKey) private var tab: TelemetryTab = .telemetry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            TelemetryTabPicker(selection: $tab)
-                .padding(.horizontal, 18)
-                .padding(.top, 14)
-            switch tab {
-            case .telemetry: liveBoard
-            case .hardware: hardwareSheet
-            }
-        }
-        .background(Theme.panel.grain(0.26))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(WindowVisibilityProbe(report: { window.update($0) },
-                                          reportFocus: { WidgetManager.shared.dashboardDidChangeFocus($0) })
-            .frame(width: 0, height: 0))
-    }
-
-    /// The live cards, and with them the whole sampling lifecycle.
-    ///
-    /// The lifecycle hangs off this view rather than the page, so the Hardware
-    /// tab costs exactly what leaving the page does: switching to it removes
-    /// this view, `onDisappear` tears every module down, and switching back
-    /// builds them again. A tab showing static specs has no business keeping
-    /// eight samplers alive behind it.
-    private var liveBoard: some View {
         // One `GeometryReader` around both halves, and the measured width passed
         // down as a plain argument.
         //
@@ -72,7 +46,12 @@ struct TelemetryDashboardView: View {
             let available = max(Slot.defaultSize.width, geometry.size.width - 36)
             board(order: order, available: available)
         }
+        .background(Theme.panel.grain(0.26))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay { if !settings.showPerformanceMonitor { MonitorOffNotice() } }
+        .background(WindowVisibilityProbe(report: { window.update($0) },
+                                          reportFocus: { WidgetManager.shared.dashboardDidChangeFocus($0) })
+            .frame(width: 0, height: 0))
         // The two halves of the lifecycle rule.
         .onAppear { refreshDemand() }
         .onDisappear {
@@ -88,15 +67,6 @@ struct TelemetryDashboardView: View {
             layout.reset()
             manager.thawAll()
         }
-    }
-
-    private var hardwareSheet: some View {
-        ScrollView(.vertical) {
-            HardwareSheet()
-                .frame(maxWidth: 920, alignment: .leading)
-                .padding(18)
-        }
-        .scrollContentBackground(.hidden)
     }
 
     /// The window's width decides how many columns the *default* board has:
@@ -149,53 +119,6 @@ struct TelemetryDashboardView: View {
         } else {
             WidgetManager.shared.dashboardDidDisappear()
         }
-    }
-}
-
-/// The dashboard's two views of one machine: what it is doing, and what it is.
-enum TelemetryTab: String, CaseIterable, Identifiable {
-    case telemetry, hardware
-
-    var id: Self { self }
-
-    /// Remembered across launches, and shared with the tool header, which
-    /// hides its layout-reset key on the Hardware tab — there is no layout
-    /// there to reset.
-    static let storageKey = "telemetryTab"
-}
-
-/// The two tabs, built like the power-mode selector: one recessed strip with
-/// the active segment lit.
-private struct TelemetryTabPicker: View {
-    @Binding var selection: TelemetryTab
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(TelemetryTab.allCases) { tab in
-                segment(tab, active: tab == selection)
-            }
-        }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(Color(hex: 0x0F0F13)))
-        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-    }
-
-    private func segment(_ tab: TelemetryTab, active: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
-        return Button { selection = tab } label: {
-            Text(tab.rawValue.uppercased())
-                .font(Theme.mono(9, .semibold)).tracking(0.7)
-                .foregroundStyle(active ? Theme.orange : Theme.textMuted)
-                .frame(width: 96)
-                .padding(.vertical, 5)
-                .background(shape.fill(active ? Theme.orange.opacity(0.15) : .clear))
-                .overlay(shape.strokeBorder(active ? Theme.orange.opacity(0.45) : .clear, lineWidth: 1))
-                .contentShape(shape)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 

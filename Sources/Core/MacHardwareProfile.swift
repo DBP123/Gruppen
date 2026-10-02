@@ -178,33 +178,3 @@ struct MacHardwareProfile: Codable, Hashable {
                                        hasBuiltInDisplay: true))
     }
 }
-
-/// How the CPU's cores are arranged.
-///
-/// Read from `sysctl` on demand rather than kept in the cached profile: it is
-/// four integer reads, it cannot change while the machine is on, and a cached
-/// copy would only be one more field for an old profile file to be missing.
-struct CoreLayout: Equatable {
-    /// Performance and efficiency cores, or nil on a Mac with one kind of core.
-    ///
-    /// Decided by `hw.nperflevels`, not by whether `hw.perflevel0` exists: an
-    /// Intel Mac on a recent macOS reports a single performance level holding
-    /// every core, which read naively would call an i9 "8 performance cores,
-    /// no efficiency cores".
-    var performance: Int?
-    var efficiency: Int?
-    var physical: Int
-    /// Hardware threads. Equal to `physical` on Apple silicon, which has no
-    /// simultaneous multithreading; double it on a hyper-threaded Intel part.
-    var logical: Int
-
-    static func current() -> CoreLayout {
-        func count(_ name: String) -> Int? { ModelNameResolver.sysctlInteger(name).map(Int.init) }
-        let fallback = ProcessInfo.processInfo.processorCount
-        let split = (count("hw.nperflevels") ?? 1) >= 2
-        return CoreLayout(performance: split ? count("hw.perflevel0.physicalcpu") : nil,
-                          efficiency: split ? count("hw.perflevel1.physicalcpu") : nil,
-                          physical: count("hw.physicalcpu") ?? fallback,
-                          logical: count("hw.logicalcpu") ?? fallback)
-    }
-}
