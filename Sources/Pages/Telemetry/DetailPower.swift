@@ -265,15 +265,28 @@ struct BatteryGlyph: View {
                     .strokeBorder(shell, lineWidth: max(1, height * 0.1))
 
                 if let symbol {
-                    Image(systemName: symbol)
-                        // The glyph is a cut-out: it reads as a hole punched in
-                        // the fill, so it takes the housing colour rather than
-                        // a colour of its own — except on a fault, where there
-                        // is no fill to punch through.
-                        .font(.system(size: height * 0.52, weight: .bold))
-                        .foregroundStyle(condition == .fault ? Theme.cellLow : Theme.housing)
-                        .opacity(condition == .charging && pulse ? 0.5 : 1)
-                        .frame(width: width)
+                    // Two-tone, split exactly at the fill's edge: dark where it
+                    // sits on the fill, light where it sits on the empty track.
+                    // In the housing colour alone it was a cut-out that
+                    // vanished the moment it crossed into the empty half —
+                    // half a bolt at 50%, none at all below about 40%.
+                    let glyph = Image(systemName: symbol)
+                        .font(.system(size: height * 0.6, weight: .heavy))
+                        .frame(width: width, height: height)
+                    let inset = height * 0.1
+                    ZStack {
+                        // Label colour follows the menu bar's appearance, so on
+                        // a light menu bar the empty side gets a dark glyph.
+                        glyph.foregroundStyle(condition == .fault ? Theme.cellLow
+                                                                  : Color(nsColor: .labelColor))
+                        glyph.foregroundStyle(Theme.housing)
+                            .mask(alignment: .leading) {
+                                Rectangle()
+                                    .frame(width: inset + max(width - inset * 2, 0) * level)
+                                    .animation(still ? nil : .easeOut(duration: 0.4), value: level)
+                            }
+                    }
+                    .opacity(condition == .charging && pulse ? 0.5 : 1)
                 }
             }
             .frame(width: width, height: height)
