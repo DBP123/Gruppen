@@ -1,21 +1,22 @@
 import AppKit
 import SwiftUI
 
-/// The Stash page: what the notch stash is holding, how many stashes are open,
-/// and the ways to summon one.
+/// The Stash page: what the notch stash is holding, and every stash setting.
+///
+/// One page rather than a page and a settings pane: the page itself was a
+/// single row, and sending you somewhere else for eight switches made the
+/// settings the harder thing to find.
 struct StashPage: View {
     @EnvironmentObject private var stash: StashCoordinator
-    @EnvironmentObject private var navigation: NavigationModel
 
     var body: some View {
-        if navigation.showingSettingsPane {
-            StashSettingsPane()
-        } else {
-            SettingsScroll {
-                LabeledSection(label: "NOTCH STASH") {
-                    NotchStashSummary()
-                        .environmentObject(stash.notchShelf)
-                }
+        SettingsScroll {
+            LabeledSection(label: "NOTCH STASH") {
+                NotchStashSummary()
+                    .environmentObject(stash.notchShelf)
+            }
+            LabeledSection(label: "SETTINGS") {
+                StashSettings()
             }
         }
     }
@@ -70,23 +71,138 @@ private struct NotchStashSummary: View {
     }
 }
 
-/// Records the global shortcut that summons a stash.
+/// Every stash setting, in two cards.
+///
+/// The first is the master switch and the three ways of opening a stash,
+/// drawn as options *of* that switch — pills inside its card — rather than as
+/// three more switches that look like settings in their own right. They fold
+/// away when stashes are off, since an option of nothing does nothing.
+///
+/// The second is how stashes behave. No line of grey under any title: each
+/// title says what the control does, and the control shows its state.
+private struct StashSettings: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsCard {
+                SwitchRow(title: "Enable stashes", isOn: $settings.stashEnabled)
+                if settings.stashEnabled {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { triggers }
+                        VStack(spacing: 6) { triggers }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: settings.stashEnabled)
+
+            SettingsCard {
+                SwitchRow(title: "Move files when dragging out", isOn: $settings.stashMovesOnDragOut)
+                CardDivider()
+                SwitchRow(title: "Clear the notch stash on close", isOn: $settings.notchCloseClearsStash)
+                CardDivider()
+                StashShortcutRow()
+                CardDivider()
+                ExportFolderRow()
+            }
+        }
+    }
+
+    @ViewBuilder private var triggers: some View {
+        OptionPill(title: "Drag to the notch", isOn: $settings.stashNotchEnabled)
+        OptionPill(title: "Drag to a screen edge", isOn: $settings.stashEdgeEnabled)
+        OptionPill(title: "Shake while dragging", isOn: $settings.stashShakeEnabled)
+    }
+}
+
+/// One machined card holding several rows, so related settings read as a
+/// group instead of a column of identical boxes.
+private struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .machined(cornerRadius: 10)
+    }
+}
+
+private struct CardDivider: View {
+    var body: some View {
+        Rectangle().fill(Theme.machinedBorder).frame(height: 1).padding(.leading, 12)
+    }
+}
+
+/// A title and its switch, sized to sit inside a card.
+private struct SwitchRow: View {
+    let title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
+            Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.industrial)
+        }
+        .cardRow()
+    }
+}
+
+/// One way of opening a stash: a check and a label, lit when chosen.
+private struct OptionPill: View {
+    let title: String
+    @Binding var isOn: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 7) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isOn ? Theme.orange : Theme.textMuted)
+                Text(title)
+                    .font(Theme.sans(12))
+                    .foregroundStyle(isOn ? Theme.textPrimary : Theme.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isOn ? Theme.orange.opacity(0.10)
+                               : Color.white.opacity(hovering ? 0.05 : 0.025))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(isOn ? Theme.orange.opacity(0.55) : Theme.borderStrong.opacity(0.5),
+                                  lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+/// Records the global shortcut that opens a stash. The modifier rule lives in
+/// the tooltip and the recording state in the key itself, so the row needs no
+/// second line.
 private struct StashShortcutRow: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var stash: StashCoordinator
     @StateObject private var recorder = KeyRecorder()
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Stash shortcut")
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(recorder.isRecording ? "Press keys to set shortcut" : "Requires ⌘, ⌥ or ⌃")
-                    .font(Theme.mono(10))
-                    .foregroundStyle(recorder.isRecording ? Theme.ambient : Theme.textMuted)
-            }
-            Spacer()
+        HStack(spacing: 8) {
+            Text("Shortcut to open a stash").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
             if let shortcut = settings.stashShortcut, !recorder.isRecording {
                 KeyBadge(text: shortcut.display)
                 Button("Clear") {
@@ -95,7 +211,7 @@ private struct StashShortcutRow: View {
                 }
                 .industrialButton(.ghost)
             }
-            Button(recorder.isRecording ? "Cancel" : "Record Shortcut") {
+            Button(recorder.isRecording ? "Press keys…" : (settings.stashShortcut == nil ? "Record" : "Change")) {
                 if recorder.isRecording {
                     recorder.stop()
                 } else {
@@ -106,38 +222,39 @@ private struct StashShortcutRow: View {
                 }
             }
             .industrialButton(recorder.isRecording ? .danger : .secondary)
+            .help(recorder.isRecording ? "Click to cancel" : "Use ⌘, ⌥ or ⌃ with a key")
         }
-        .panelRow()
+        .cardRow()
         .onDisappear { recorder.stop() }
     }
 }
 
-/// Picks where "Export as Zip" writes.
-private struct ExportPathRow: View {
+/// Where zips and extractions are written. The folder's name is the button;
+/// its full path is the tooltip.
+private struct ExportFolderRow: View {
     @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Download folder")
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(settings.exportDirectory.path)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            Text("Save zips and extractions to").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
+            Button(action: choose) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill").font(.system(size: 11))
+                    Text(settings.exportDirectory.lastPathComponent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
-            Spacer()
-            Button("Choose…", action: choose)
-                .industrialButton(.secondary)
+            .industrialButton(.secondary)
+            .help(settings.exportDirectory.path)
         }
-        .panelRow()
+        .cardRow()
     }
 
     private func choose() {
         let panel = NSOpenPanel()
-        panel.title = "Choose a download folder"
+        panel.title = "Choose where zips and extractions go"
         panel.prompt = "Choose"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -148,50 +265,9 @@ private struct ExportPathRow: View {
     }
 }
 
-/// Isolated settings for the Stash tool.
-///
-/// One list, no section headings: every row here is about the same thing, and
-/// a caption over each one was a label for a group of one. The trigger switches
-/// and the drag-out choice sit under the master switch and only while it is on —
-/// a switch for a stash that cannot exist is a control that does nothing.
-struct StashSettingsPane: View {
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var stash: StashCoordinator
-
-    var body: some View {
-        SettingsScroll {
-            VStack(alignment: .leading, spacing: 8) {
-                SettingToggle(title: "Enable stashes", isOn: $settings.stashEnabled)
-
-                if settings.stashEnabled {
-                    SettingToggle(title: "Notch stash",
-                                  detail: "Drag toward the notch",
-                                  isOn: $settings.stashNotchEnabled)
-                    SettingToggle(title: "Screen-edge stash",
-                                  detail: "Drag to either side of the screen",
-                                  isOn: $settings.stashEdgeEnabled)
-                    SettingToggle(title: "Shake stash",
-                                  detail: "Shake while dragging",
-                                  isOn: $settings.stashShakeEnabled)
-                    // The detail states what happens *now*, in both positions,
-                    // rather than describing the switch — so it answers "what
-                    // will this drag do" without anyone having to work out which
-                    // way round on means.
-                    SettingToggle(title: "Move files when dragging out",
-                                  detail: settings.stashMovesOnDragOut
-                                      ? "The file leaves its original folder"
-                                      : "A copy is made; the original stays put",
-                                  isOn: $settings.stashMovesOnDragOut)
-                    SettingToggle(title: "Clear the notch stash when closing it",
-                                  detail: settings.notchCloseClearsStash
-                                      ? "Closing empties it"
-                                      : "Closing keeps its files for next time",
-                                  isOn: $settings.notchCloseClearsStash)
-                }
-
-                StashShortcutRow()
-                ExportPathRow()
-            }
-        }
+private extension View {
+    /// The padding every row inside a `SettingsCard` shares.
+    func cardRow() -> some View {
+        padding(.horizontal, 12).padding(.vertical, 10)
     }
 }

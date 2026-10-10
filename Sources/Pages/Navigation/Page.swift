@@ -68,8 +68,8 @@ enum Page: String, CaseIterable, Identifiable {
     /// two different places.
     var hasSettingsPane: Bool {
         switch self {
-        case .telemetry, .workspaces, .stash: return true
-        case .scripts, .settings: return false
+        case .telemetry, .workspaces: return true
+        case .stash, .scripts, .settings: return false
         }
     }
 
