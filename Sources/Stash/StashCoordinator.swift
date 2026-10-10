@@ -90,18 +90,22 @@ final class StashCoordinator: ObservableObject {
         // coalesces the burst of parameter changes and reports once.
         NotchGeometryManager.shared.onChange = { [weak self] _ in self?.reanchorNotch() }
 
-        applySummonShortcut()
+        applyShortcuts()
     }
 
-    /// Binds — or rebinds — the global shortcut that summons a shelf.
+    /// Binds — or rebinds — the stash's two global shortcuts: one summons a
+    /// shelf, the other hides or shows them all.
     ///
     /// Owned separately from the Gruppe hotkeys so re-syncing those cannot drop
-    /// this one, and re-applied whenever the setting changes.
-    func applySummonShortcut() {
+    /// these, and re-applied whenever either setting changes.
+    func applyShortcuts() {
         HotkeyCenter.shared.unregisterAll(owner: "stash")
-        guard isEnabled, let shortcut = AppSettings.shared.stashShortcut else { return }
-        HotkeyCenter.shared.register(shortcut, owner: "stash") { [weak self] in
-            self?.summonShelf()
+        guard isEnabled else { return }
+        if let summon = AppSettings.shared.stashShortcut {
+            HotkeyCenter.shared.register(summon, owner: "stash") { [weak self] in self?.summonShelf() }
+        }
+        if let toggle = AppSettings.shared.stashToggleShortcut {
+            HotkeyCenter.shared.register(toggle, owner: "stash") { [weak self] in self?.manager.toggleHidden() }
         }
     }
 

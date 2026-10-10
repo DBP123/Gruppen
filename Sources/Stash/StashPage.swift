@@ -1,20 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// The Stash page: what the notch stash is holding, and every stash setting.
+/// The Stash page: the stashes you have hidden, and every stash setting.
 ///
 /// One page rather than a page and a settings pane: the page itself was a
 /// single row, and sending you somewhere else for eight switches made the
 /// settings the harder thing to find.
 struct StashPage: View {
-    @EnvironmentObject private var stash: StashCoordinator
-
     var body: some View {
         SettingsScroll {
-            LabeledSection(label: "NOTCH STASH") {
-                NotchStashSummary()
-                    .environmentObject(stash.notchShelf)
-            }
+            HiddenStashes()
             LabeledSection(label: "SETTINGS") {
                 StashSettings()
             }
@@ -22,52 +17,82 @@ struct StashPage: View {
     }
 }
 
-/// Contents of the notch stash, and whether its tray is out.
-private struct NotchStashSummary: View {
-    @EnvironmentObject private var stash: StashCoordinator
-    @EnvironmentObject private var store: GroupStore
-    @EnvironmentObject private var shelf: ShelfState
+/// Floating stashes put away with their hide key, each drawn as what it holds,
+/// with a way back. Nothing at all when none are hidden — an empty section
+/// would only say so.
+private struct HiddenStashes: View {
+    @ObservedObject private var manager = ShelfWindowManager.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                LED(color: Theme.orange, lit: !shelf.isEmpty, size: 9)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(shelf.isEmpty ? "Nothing on the notch stash" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
-                        .font(Theme.sans(13))
-                        .foregroundStyle(Theme.textPrimary)
-                    // There is one notch, so one notch stash: open or not.
-                    Text(stash.isNotchOpen ? "Notch stash open" : "No stashes open")
-                        .font(Theme.mono(10))
+        let hidden = manager.hiddenShelves
+        if !hidden.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("HIDDEN STASHES")
+                        .font(Theme.mono(10, .semibold))
+                        .tracking(1.1)
                         .foregroundStyle(Theme.textMuted)
+                    Spacer()
+                    if hidden.count > 1 {
+                        Button("Reopen all") { manager.reopenAll() }
+                            .industrialButton(.secondary, compact: true)
+                    }
                 }
-                Spacer()
-                if !shelf.isEmpty {
-                    Button("Clear") { shelf.clear() }
-                        .industrialButton(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+                    ForEach(hidden) { shelf in
+                        HiddenStashCard(shelf: shelf) { manager.reopen(shelf.id) }
+                    }
                 }
             }
-            .panelRow()
+            .transition(.opacity)
+        }
+    }
+}
 
-            ForEach(shelf.items) { item in
-                HStack(spacing: 10) {
+/// One hidden stash: its files as a row of icons, and the key that brings it
+/// back where it was.
+private struct HiddenStashCard: View {
+    @ObservedObject var shelf: ShelfState
+    let reopen: () -> Void
+
+    private static let shown = 5
+
+    private var summary: String {
+        shelf.items.count == 1 ? shelf.items[0].title : "\(shelf.items.count) items"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: -6) {
+                ForEach(shelf.items.prefix(Self.shown)) { item in
                     Image(nsImage: item.icon)
-                        .resizable().interpolation(.high)
-                        .frame(width: 20, height: 20)
-                    Text(item.title)
-                        .font(Theme.sans(13))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button { shelf.remove(item) } label: {
-                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                    }
-                    .industrialButton(.ghost)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 28, height: 28)
+                        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
                 }
-                .panelRow()
-                .stashDraggable(item, from: shelf)
+                if shelf.items.count > Self.shown {
+                    Text("+\(shelf.items.count - Self.shown)")
+                        .font(Theme.mono(10, .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.leading, 12)
+                }
+            }
+            HStack(spacing: 8) {
+                Text(summary)
+                    .font(Theme.sans(12))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 4)
+                Button("Reopen", action: reopen)
+                    .industrialButton(.secondary, compact: true)
             }
         }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .machined(cornerRadius: 10)
+        .help(shelf.items.map(\.title).joined(separator: "\n"))
     }
 }
 
@@ -104,7 +129,9 @@ private struct StashSettings: View {
                 CardDivider()
                 SwitchRow(title: "Clear the notch stash on close", isOn: $settings.notchCloseClearsStash)
                 CardDivider()
-                StashShortcutRow()
+                ShortcutRow(title: "Shortcut to open a stash", shortcut: $settings.stashShortcut)
+                CardDivider()
+                ShortcutRow(title: "Shortcut to hide or show stashes", shortcut: $settings.stashToggleShortcut)
                 CardDivider()
                 ExportFolderRow()
             }
@@ -112,40 +139,35 @@ private struct StashSettings: View {
     }
 
     @ViewBuilder private var triggers: some View {
-        OptionPill(title: "Drag to the notch", isOn: $settings.stashNotchEnabled)
-        OptionPill(title: "Drag to a screen edge", isOn: $settings.stashEdgeEnabled)
-        OptionPill(title: "Shake while dragging", isOn: $settings.stashShakeEnabled)
+        OptionPill(title: "Drag to notch", isOn: $settings.stashNotchEnabled)
+        OptionPill(title: "Drag to edges", isOn: $settings.stashEdgeEnabled)
+        OptionPill(title: "Shake to enable", isOn: $settings.stashShakeEnabled)
     }
 }
 
-/// Records the global shortcut that opens a stash. The modifier rule lives in
+/// Records one of the stash's global shortcuts. The modifier rule lives in
 /// the tooltip and the recording state in the key itself, so the row needs no
 /// second line.
-private struct StashShortcutRow: View {
-    @EnvironmentObject private var settings: AppSettings
+private struct ShortcutRow: View {
+    let title: String
+    @Binding var shortcut: Shortcut?
     @EnvironmentObject private var stash: StashCoordinator
     @StateObject private var recorder = KeyRecorder()
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("Shortcut to open a stash").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 12)
-            if let shortcut = settings.stashShortcut, !recorder.isRecording {
+            if let shortcut, !recorder.isRecording {
                 KeyBadge(text: shortcut.display)
-                Button("Clear") {
-                    settings.stashShortcut = nil
-                    stash.applySummonShortcut()
-                }
-                .industrialButton(.ghost)
+                Button("Clear") { set(nil) }
+                    .industrialButton(.ghost)
             }
-            Button(recorder.isRecording ? "Press keys…" : (settings.stashShortcut == nil ? "Record" : "Change")) {
+            Button(recorder.isRecording ? "Press keys…" : (shortcut == nil ? "Record" : "Change")) {
                 if recorder.isRecording {
                     recorder.stop()
                 } else {
-                    recorder.start { recorded in
-                        settings.stashShortcut = recorded
-                        stash.applySummonShortcut()
-                    }
+                    recorder.start { set($0) }
                 }
             }
             .industrialButton(recorder.isRecording ? .danger : .secondary)
@@ -153,6 +175,11 @@ private struct StashShortcutRow: View {
         }
         .cardRow()
         .onDisappear { recorder.stop() }
+    }
+
+    private func set(_ value: Shortcut?) {
+        shortcut = value
+        stash.applyShortcuts()
     }
 }
 

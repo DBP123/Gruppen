@@ -114,14 +114,13 @@ final class AppSettings: ObservableObject {
 
     /// Summons a shelf in front of everything, from anywhere. Nil for none.
     @Published var stashShortcut: Shortcut? {
-        didSet {
-            guard stashShortcut != oldValue else { return }
-            if let stashShortcut, let data = try? JSONEncoder().encode(stashShortcut) {
-                defaults.set(data, forKey: Keys.stashShortcut)
-            } else {
-                defaults.removeObject(forKey: Keys.stashShortcut)
-            }
-        }
+        didSet { persist(stashShortcut, oldValue, Keys.stashShortcut) }
+    }
+
+    /// Hides every floating stash on screen, or brings the hidden ones back
+    /// when none are showing. Nil for none.
+    @Published var stashToggleShortcut: Shortcut? {
+        didSet { persist(stashToggleShortcut, oldValue, Keys.stashToggleShortcut) }
     }
 
     @Published private(set) var loginItemError: String?
@@ -134,6 +133,20 @@ final class AppSettings: ObservableObject {
         guard value != oldValue else { return }
         defaults.set(value, forKey: key)
         NotificationCenter.default.post(name: Self.didChange, object: self)
+    }
+
+    /// Shortcuts are stored as JSON, and nil removes the key.
+    private func persist(_ value: Shortcut?, _ oldValue: Shortcut?, _ key: String) {
+        guard value != oldValue else { return }
+        if let value, let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private static func shortcut(forKey key: String) -> Shortcut? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
     }
 
     private enum Keys {
@@ -150,6 +163,7 @@ final class AppSettings: ObservableObject {
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
+        static let stashToggleShortcut = "stashToggleShortcut"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -182,8 +196,8 @@ final class AppSettings: ObservableObject {
         notchCloseClearsStash = defaults.bool(forKey: Keys.notchCloseClears)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
-        stashShortcut = defaults.data(forKey: Keys.stashShortcut)
-            .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
+        stashShortcut = Self.shortcut(forKey: Keys.stashShortcut)
+        stashToggleShortcut = Self.shortcut(forKey: Keys.stashToggleShortcut)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

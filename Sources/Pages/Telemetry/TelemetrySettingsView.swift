@@ -64,7 +64,7 @@ private struct ModuleRow: View {
             Spacer(minLength: 12)
 
             Group {
-                if armed && pinned { styleKey }
+                if armed && pinned && kind.hasMenuBarStyles { styleKey }
             }
             .frame(width: 96, alignment: .trailing)
 

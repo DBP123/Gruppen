@@ -8,6 +8,9 @@ struct StashTrayView: View {
     @EnvironmentObject private var settings: AppSettings
 
     var onClose: () -> Void
+    /// Puts the shelf away, files and all, until the Stash page or the
+    /// hide/show shortcut brings it back.
+    var onHide: () -> Void
 
     @State private var zip: ZipStatus?
     @State private var hovering = false
@@ -76,11 +79,17 @@ struct StashTrayView: View {
                       ? "Compress the stash into \(settings.exportDirectory.lastPathComponent)"
                       : "Compress the \(state.selection.count) selected into \(settings.exportDirectory.lastPathComponent)")
             }
-            // One key, not two. There used to be a trash beside a minus, and
-            // they did the same thing: clearing a stash empties it, an emptied
-            // stash closes itself, and "minimise" destroyed the window outright
-            // — nothing was ever minimised anywhere to come back from. A stash
-            // holds files by reference, so closing one puts nothing at risk.
+            // Hide keeps the shelf and its files for later; close is done
+            // with it. A shelf holds files by reference, so closing one puts
+            // nothing at risk — and an empty shelf has nothing worth keeping,
+            // so it gets no hide key.
+            if !state.isEmpty {
+                Button(action: onHide) {
+                    Image(systemName: "minus").font(.system(size: 8, weight: .bold))
+                }
+                .hardwareKey(size: 18, glow: true)
+                .help("Hide the stash — reopen it from the Stash page")
+            }
             Button(action: onClose) {
                 Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
             }

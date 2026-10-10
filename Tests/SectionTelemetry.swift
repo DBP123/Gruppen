@@ -163,6 +163,10 @@ func sectionTelemetry() {
 
     T.begin("E. Telemetry — power, the panel's arithmetic")
 
+    T.check("the battery has no menu bar style to choose", !WidgetKind.power.hasMenuBarStyles)
+    T.equal("in the menu bar it is always the battery glyph",
+            WidgetKind.power.defaultMenuBarMode, .sparkline)
+
     if let flow = onQueue({ PowerFlow.read(liveDraw: nil) }) {
         T.check("system draw is never negative", flow.systemLoad >= 0,
                 String(format: "%.2f W", flow.systemLoad))

@@ -125,6 +125,13 @@ final class ShelfWindowManager: ObservableObject {
 
     @Published private(set) var activeShelves: [UUID: FloatingShelfController] = [:]
 
+    /// Shelves put away with their hide key, oldest first. Still alive, files
+    /// and all — only their windows are off screen until the Stash page or the
+    /// hide/show shortcut brings them back.
+    @Published private(set) var hiddenIDs: [UUID] = []
+
+    var hiddenShelves: [ShelfState] { hiddenIDs.compactMap { activeShelves[$0]?.state } }
+
     /// Set once by the coordinator. Shelves need it for their routing chips;
     /// there is exactly one store in the app and re-reading it per shelf would
     /// mean several objects disagreeing about what is running.
@@ -138,15 +145,15 @@ final class ShelfWindowManager: ObservableObject {
         // is already open and still empty, move it to the pointer instead —
         // there is nothing on it to keep in its old place.
         if urls.isEmpty,
-           let (id, existing) = activeShelves.first(where: { $0.value.state.isEmpty }) {
+           let (id, existing) = activeShelves.first(where: { $0.value.state.isEmpty && !hiddenIDs.contains($0.key) }) {
             existing.move(to: point)
             return id
         }
 
         let state = ShelfState(items: urls.map { $0.isFileURL ? StashItem.file($0) : StashItem.link($0) })
-        let controller = FloatingShelfController(state: state, anchor: point) { [weak self] id in
-            self?.destroyShelf(id: id)
-        }
+        let controller = FloatingShelfController(state: state, anchor: point,
+                                                 onDestroy: { [weak self] id in self?.destroyShelf(id: id) },
+                                                 onHide: { [weak self] id in self?.hide(id) })
         // Emptying a shelf closes it: an empty shelf you have already used is
         // just a box in the way.
         state.onEmptied = { [weak self] in
@@ -159,6 +166,7 @@ final class ShelfWindowManager: ObservableObject {
 
     func destroyShelf(id: UUID, scaling: Bool = false) {
         guard let controller = activeShelves[id] else { return }
+        hiddenIDs.removeAll { $0 == id }
         controller.dismiss(scaling: scaling) { [weak self] in
             self?.activeShelves.removeValue(forKey: id)
         }
@@ -168,10 +176,41 @@ final class ShelfWindowManager: ObservableObject {
         activeShelves.keys.forEach { destroyShelf(id: $0) }
     }
 
+    // MARK: Hiding
+
+    func hide(_ id: UUID) {
+        guard let controller = activeShelves[id], !hiddenIDs.contains(id) else { return }
+        hiddenIDs.append(id)
+        controller.hide()
+    }
+
+    func reopen(_ id: UUID) {
+        guard let controller = activeShelves[id], hiddenIDs.contains(id) else { return }
+        hiddenIDs.removeAll { $0 == id }
+        controller.show()
+    }
+
+    func reopenAll() {
+        hiddenIDs.forEach(reopen)
+    }
+
+    /// The hide/show shortcut: puts away every shelf holding something, or —
+    /// when none is showing — brings back every hidden one. Empty shelves are
+    /// left alone; there is nothing on them to keep.
+    func toggleHidden() {
+        let showing = activeShelves.filter { !$0.value.state.isEmpty && !hiddenIDs.contains($0.key) }
+        if showing.isEmpty {
+            reopenAll()
+        } else {
+            showing.keys.forEach(hide)
+        }
+    }
+
     /// Called when a drag session ends. A shelf that was opened by a shake but
     /// never received anything fades out rather than lingering.
     func dismissEmptySpeculativeShelves() {
-        for (id, controller) in activeShelves where controller.state.isEmpty && !controller.state.isTargeted {
+        for (id, controller) in activeShelves
+        where controller.state.isEmpty && !controller.state.isTargeted && !hiddenIDs.contains(id) {
             destroyShelf(id: id)
         }
     }
@@ -188,11 +227,15 @@ final class FloatingShelfController {
     private var registry: DropZoneRegistry?
     private let anchor: NSPoint
     private let onDestroy: (UUID) -> Void
+    private let onHide: (UUID) -> Void
+    private var isHidden = false
 
-    init(state: ShelfState, anchor: NSPoint, onDestroy: @escaping (UUID) -> Void) {
+    init(state: ShelfState, anchor: NSPoint,
+         onDestroy: @escaping (UUID) -> Void, onHide: @escaping (UUID) -> Void) {
         self.state = state
         self.anchor = anchor
         self.onDestroy = onDestroy
+        self.onHide = onHide
     }
 
     func present(store: GroupStore?) {
@@ -209,6 +252,10 @@ final class FloatingShelfController {
                     onClose: { [weak self] in
                         guard let self else { return }
                         self.onDestroy(self.state.id)
+                    },
+                    onHide: { [weak self] in
+                        guard let self else { return }
+                        self.onHide(self.state.id)
                     }
                 )
                 .environmentObject(state)
@@ -248,6 +295,33 @@ final class FloatingShelfController {
                 self?.panel = nil
                 completion()
             }
+        }
+    }
+
+    /// Fades the window out and orders it off screen, keeping it — frame,
+    /// contents and all — for `show`.
+    func hide() {
+        guard let panel else { return }
+        isHidden = true
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            panel.animator().alphaValue = 0
+        } completionHandler: { [weak self] in
+            // Unless it was reopened before the fade finished.
+            Task { @MainActor in if self?.isHidden == true { panel.orderOut(nil) } }
+        }
+    }
+
+    /// Back where it was hidden from.
+    func show() {
+        guard let panel else { return }
+        isHidden = false
+        panel.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            panel.animator().alphaValue = 1
         }
     }
 
