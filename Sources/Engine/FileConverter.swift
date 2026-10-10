@@ -157,15 +157,33 @@ enum FileConverter {
     /// which covers txt, rtf, doc and docx — then let a framesetter walk it page
     /// by page until the content runs out.
     ///
+    /// **Plain text is set in monospace.** The reader gives a `.txt` no font of
+    /// its own, so it came out in proportional Helvetica — and code, logs, CSV
+    /// and Markdown are exactly the files whose meaning lives in their columns
+    /// and indentation. Whether a file is plain is the reader's answer, not an
+    /// extension list, so rtf, doc and docx keep the fonts they were written in.
+    ///
+    /// Menlo rather than the system monospace: that one is private
+    /// (`.SFNSMono`), and a PDF naming it is a PDF no reader can identify the
+    /// font of — measured, PDFKit reads it back as Times. Menlo ships on every
+    /// Mac and survives the round trip.
+    ///
     /// Internal for the same reason as `imageToPDF` above: the merger paginates
     /// text through this rather than repeating the CoreText walk and the
     /// zero-length-frame guard that keeps it from looping forever.
     nonisolated static func documentToPDF(_ url: URL, output: URL) throws {
-        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [:]
-        guard let text = try? NSAttributedString(url: url, options: options,
-                                                 documentAttributes: nil),
-              text.length > 0
+        var attributes: NSDictionary?
+        guard let read = try? NSAttributedString(url: url, options: [:],
+                                                 documentAttributes: &attributes),
+              read.length > 0
         else { throw ConversionError.unreadable(url.lastPathComponent) }
+
+        let type = attributes?[NSAttributedString.DocumentAttributeKey.documentType.rawValue] as? String
+        let text = type == NSAttributedString.DocumentType.plain.rawValue
+            ? NSAttributedString(string: read.string,
+                                 attributes: [.font: NSFont(name: "Menlo-Regular", size: 10)
+                                                     ?? .monospacedSystemFont(ofSize: 10, weight: .regular)])
+            : read
 
         var page = CGRect(x: 0, y: 0, width: 612, height: 792)
         let margin: CGFloat = 54
