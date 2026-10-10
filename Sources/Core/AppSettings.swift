@@ -94,15 +94,6 @@ final class AppSettings: ObservableObject {
         didSet { persist(notchCloseClearsStash, oldValue, Keys.notchCloseClears) }
     }
 
-    /// Whether Gruppen re-reads the machine's mutable hardware state at launch.
-    ///
-    /// On by default. Off means the cached profile is used exactly as written
-    /// and no IOKit or `sysctl` probe runs on the app's behalf — which also
-    /// means an OS update or a newly attached display will not be noticed.
-    @Published var hardwareAutoDetection: Bool {
-        didSet { persist(hardwareAutoDetection, oldValue, Keys.hardwareAutoDetection) }
-    }
-
     /// Where "Export as Zip" writes to.
     @Published var exportPath: String {
         didSet {
@@ -159,7 +150,6 @@ final class AppSettings: ObservableObject {
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
-        static let hardwareAutoDetection = "enableHardwareAutoDetection"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -179,7 +169,6 @@ final class AppSettings: ObservableObject {
             Keys.stashMoveOnDragOut: false,
             Keys.notchCloseClears: false,
             Keys.performanceMonitor: true,
-            Keys.hardwareAutoDetection: true,
         ])
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
         showDockIcon = defaults.bool(forKey: Keys.showDockIcon)
@@ -191,7 +180,6 @@ final class AppSettings: ObservableObject {
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
         stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
         notchCloseClearsStash = defaults.bool(forKey: Keys.notchCloseClears)
-        hardwareAutoDetection = defaults.bool(forKey: Keys.hardwareAutoDetection)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
         stashShortcut = defaults.data(forKey: Keys.stashShortcut)

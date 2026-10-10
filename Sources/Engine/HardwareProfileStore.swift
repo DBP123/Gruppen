@@ -40,12 +40,8 @@ final class HardwareProfileStore: ObservableObject {
     /// replaced when the background pass lands.
     @Published private(set) var profile: MacHardwareProfile
 
-    /// Set while a probe is in flight, for the settings pane's spinner.
-    @Published private(set) var isProbing = false
-
-    /// Whether the last pass actually reached the hardware, as opposed to
-    /// reading the cache because detection is switched off.
-    @Published private(set) var lastProbeWasLive = false
+    /// Set while a probe is in flight, so a second call does not start another.
+    private var isProbing = false
 
     private let fileURL: URL
 
@@ -64,15 +60,7 @@ final class HardwareProfileStore: ObservableObject {
     // MARK: Launch pass
 
     /// The startup hook. Cheap, asynchronous, and safe to call more than once.
-    ///
-    /// With detection off this does nothing at all — not a reduced probe, no
-    /// probe. The cached profile loaded in `init` is what the app runs on, and
-    /// no IOKit or `sysctl` call is made on the user's behalf.
     func refreshOnLaunch() {
-        guard AppSettings.shared.hardwareAutoDetection else {
-            lastProbeWasLive = false
-            return
-        }
         refresh()
     }
 
@@ -83,11 +71,11 @@ final class HardwareProfileStore: ObservableObject {
     /// Only a machine with no cache — or one whose serial no longer matches the
     /// cache, which means the file was copied from another Mac — pays for the
     /// full capture.
-    func refresh(forceFullCapture: Bool = false) {
+    func refresh() {
         guard !isProbing else { return }
         isProbing = true
 
-        let cached = forceFullCapture ? nil : Self.load(from: fileURL)
+        let cached = Self.load(from: fileURL)
         let url = fileURL
         // Read here, on the main actor, and carried into the probe.
         //
@@ -100,9 +88,9 @@ final class HardwareProfileStore: ObservableObject {
         // the question.
         let screens = Self.attachedDisplays()
 
-        // `.userInitiated` rather than `.utility`: the banner and the settings
-        // pane are both waiting on this, so it is latency that matters, not
-        // throughput. It is also over in a few milliseconds.
+        // `.userInitiated` rather than `.utility`: the dashboard is waiting on
+        // this, so it is latency that matters, not throughput. It is also over
+        // in a few milliseconds.
         // `[weak self]` on the outer closure too: a weak capture only on the
         // inner `Task` leaves the dispatch block holding `self` strongly, which
         // is two different answers about the same object.
@@ -113,16 +101,8 @@ final class HardwareProfileStore: ObservableObject {
                 guard let self else { return }
                 self.profile = probed
                 self.isProbing = false
-                self.lastProbeWasLive = true
             }
         }
-    }
-
-    /// Throws the cache away and re-reads everything, including the parts that
-    /// cannot change. The escape hatch for a profile captured wrong.
-    func resetAndRecapture() {
-        try? FileManager.default.removeItem(at: fileURL)
-        refresh(forceFullCapture: true)
     }
 
     // MARK: Probing

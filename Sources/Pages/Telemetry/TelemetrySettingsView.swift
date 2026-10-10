@@ -1,239 +1,113 @@
 import SwiftUI
 
-/// Mission control for telemetry.
+/// What telemetry reads, and where each reading shows up.
 ///
-/// Every hardware module Gruppen can read, with the three switches that decide
-/// what it costs you. They are deliberately separate rather than one "on":
+/// One switch per module, and two options of it:
 ///
-/// - **Telemetry** is the outer one. Off means the module does not exist — no
-///   timer, no IORegistry handle, no SMC connection. Nothing about the other
-///   two switches can bring it back.
-/// - **Panel** puts it in the dropdown, where it refreshes at 2 Hz while you
-///   are looking at it and stops the moment you close it.
-/// - **Menu bar** gives it its own item, which is the only setting that costs
-///   anything while the dropdown is shut — 0.5 Hz, permanently.
+/// - **The switch** is whether the module exists at all. Off means no timer,
+///   no IORegistry handle, no SMC connection.
+/// - **Panel** puts it in the dropdown, which refreshes at 2 Hz only while it
+///   is open.
+/// - **Menu bar** gives it an item of its own — the one choice that costs
+///   anything while the dropdown is shut — with its style key beside it.
 ///
-/// The panel row and the menu bar row are both greyed out when telemetry is
-/// off, because a preference that cannot take effect should not look live.
+/// The options are pills that appear only while the module is on, the same
+/// way the stash's triggers sit under "Enable stashes": an option of a module
+/// that is not running is a control that does nothing. What each module reads
+/// is the title's tooltip rather than a line of grey under it.
 struct TelemetrySettingsView: View {
     @EnvironmentObject private var settings: AppSettings
-    @ObservedObject private var widgets = WidgetManager.shared
-    @EnvironmentObject private var hardware: HardwareProfileStore
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                master
-                hardwareDetection
-                modules
-            }
-            .padding(20)
-            .frame(maxWidth: 720, alignment: .leading)
-        }
-        .scrollContentBackground(.hidden)
-        .background(Theme.panel.grain(0.26))
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: Sections
-
-    private var master: some View {
-        LabeledSection(label: "TELEMETRY") {
-            SettingToggle(title: "System Performance Monitor",
-                          isOn: $settings.showPerformanceMonitor)
-        }
-    }
-
-    /// The detection switch, and what the last pass actually found.
-    private var hardwareDetection: some View {
-        LabeledSection(label: "HARDWARE PROFILE") {
-            SettingToggle(title: "Dynamic hardware detection",
-                          detail: "Probe for updated feature state upon app launch",
-                          isOn: $settings.hardwareAutoDetection)
-
-            if !settings.hardwareAutoDetection {
-                Text("Warning: disabling this prevents Gruppen from capturing updates to your Mac's hardware profile, attached display arrays, thermal sensor nodes, or firmware capabilities on launch.")
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.amber)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .panelRow()
-            }
-
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hardware.profile.marketingModelName)
-                        .font(Theme.mono(11, .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(detectionDetail)
-                        .font(Theme.mono(9.5))
-                        .foregroundStyle(Theme.textMuted)
+        SettingsScroll {
+            VStack(alignment: .leading, spacing: 10) {
+                SettingsCard {
+                    SwitchRow(title: "Enable telemetry", isOn: $settings.showPerformanceMonitor)
                 }
-                Spacer(minLength: 8)
-                Button { hardware.resetAndRecapture() } label: {
-                    Text(hardware.isProbing ? "Probing…" : "Re-probe")
+                if settings.showPerformanceMonitor {
+                    SettingsCard {
+                        ForEach(WidgetKind.configurable) { kind in
+                            if kind != WidgetKind.configurable.first { CardDivider() }
+                            ModuleRow(kind: kind)
+                        }
+                    }
+                    .transition(.opacity)
                 }
-                .industrialButton(.secondary)
-                .disabled(hardware.isProbing)
-                .help("Throw away the cached profile and read every value again, including the fixed ones")
             }
-            .panelRow()
-        }
-    }
-
-    private var detectionDetail: String {
-        let build = hardware.profile.buildInfo
-        let screens = build.displayCount == 1 ? "1 display" : "\(build.displayCount) displays"
-        return "\(hardware.profile.chassis.label) · \(screens) · build \(build.osBuildNumber)"
-    }
-
-    private var modules: some View {
-        LabeledSection(label: "HARDWARE MODULES") {
-            HStack(spacing: 0) {
-                Text("MODULE")
-                    .font(Theme.mono(9, .semibold))
-                    .tracking(1)
-                    .foregroundStyle(Theme.textMuted)
-                Spacer()
-                ColumnHeader("TELEMETRY")
-                ColumnHeader("PANEL")
-                ColumnHeader("MENU BAR")
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 2)
-
-            ForEach(WidgetKind.configurable) { kind in
-                ModuleRow(kind: kind)
-                    .opacity(settings.showPerformanceMonitor ? 1 : 0.4)
-                    .disabled(!settings.showPerformanceMonitor)
-            }
+            .animation(.easeOut(duration: 0.18), value: settings.showPerformanceMonitor)
         }
     }
 }
 
-// MARK: - Rows
-
-private struct ColumnHeader: View {
-    let text: String
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(Theme.mono(9, .semibold))
-            .tracking(0.8)
-            .foregroundStyle(Theme.textMuted)
-            .frame(width: 78)
-    }
-}
-
-/// One module and its three switches.
+/// One module: its switch, and while it is on, where it appears.
+///
+/// Every slot has a fixed width, so the pills line up in columns down the card
+/// whatever each row is showing. The menu bar style key sits at the left of
+/// the group, where an empty slot is just more of the gap after the title.
 private struct ModuleRow: View {
     let kind: WidgetKind
     @ObservedObject private var widgets = WidgetManager.shared
-    @State private var hovering = false
-
-    init(kind: WidgetKind) { self.kind = kind }
 
     private var armed: Bool { widgets.isArmed(kind) }
-
-    /// The appearance picker only exists while the module has an item to apply
-    /// it to. A control for a thing that is not there is worse than no control.
-    private var showsAppearance: Bool { armed && kind.isPinnable && widgets.isPinned(kind) }
+    private var pinned: Bool { kind.isPinnable && widgets.isPinned(kind) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            switches
-            if showsAppearance {
-                DashedRule().padding(.top, 10)
-                appearance.padding(.top, 10)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                .fill(hovering ? Color.white.opacity(0.03) : .clear)
-        )
-        .machined(cornerRadius: Theme.radiusSm)
-        .onHover { hovering = $0 }
-    }
-
-    private var switches: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 11) {
-                Image(systemName: kind.glyph)
-                    .font(.system(size: 13))
-                    .foregroundStyle(armed ? Theme.orange : Theme.textMuted)
-                    .frame(width: 20)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(kind.title)
-                        .font(Theme.sans(13, .medium))
-                        .foregroundStyle(Theme.textPrimary)
-                    Text(kind.blurb)
-                        .font(Theme.mono(10))
-                        .foregroundStyle(Theme.textMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+        HStack(spacing: 6) {
+            Image(systemName: kind.glyph)
+                .font(.system(size: 13))
+                .foregroundStyle(armed ? Theme.orange : Theme.textMuted)
+                .frame(width: 20)
+            Text(kind.title)
+                .font(Theme.sans(13))
+                .foregroundStyle(Theme.textPrimary)
+                .help(kind.blurb)
             Spacer(minLength: 12)
 
-            Switch(on: armed) { widgets.setArmed(kind, $0) }
-            Switch(on: widgets.isInPanel(kind), enabled: armed) { widgets.setInPanel(kind, $0) }
-            if kind.isPinnable {
-                Switch(on: widgets.isPinned(kind), enabled: armed) { widgets.setPinned(kind, $0) }
-            } else {
-                // A five-row table has no one-line form, so there is nothing to
-                // put in the menu bar. Saying so beats a switch that does nothing.
-                Text("—")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.textMuted.opacity(0.6))
-                    .frame(width: 78)
-                    .help("A table has no one-line form for the menu bar")
+            Group {
+                if armed && pinned { styleKey }
             }
-        }
-    }
+            .frame(width: 96, alignment: .trailing)
 
-    /// What the standalone item looks like.
-    private var appearance: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("MENU BAR STYLE")
-                    .font(Theme.mono(9, .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(Theme.textMuted)
-                Text(widgets.mode(for: kind).detail)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 8)
-            Picker("", selection: Binding(get: { widgets.mode(for: kind) },
-                                          set: { widgets.setMode($0, for: kind) })) {
-                ForEach(MenuBarDisplayMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
+            Group {
+                if armed {
+                    OptionPill(title: "Panel", isOn: binding(widgets.isInPanel, widgets.setInPanel))
+                        .help("Show in the menu bar dropdown")
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(width: 214)
-        }
-    }
-}
-
-/// One column's switch, sized so the three columns line up whatever is in them.
-private struct Switch: View {
-    let on: Bool
-    var enabled: Bool = true
-    let change: (Bool) -> Void
-
-    var body: some View {
-        Toggle("", isOn: Binding(get: { on }, set: change))
-            .labelsHidden()
-            .toggleStyle(.industrial)
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.35)
             .frame(width: 78)
+
+            Group {
+                if armed && kind.isPinnable {
+                    OptionPill(title: "Menu bar", isOn: binding(widgets.isPinned, widgets.setPinned))
+                        .help("Give it a menu bar item of its own")
+                }
+            }
+            .frame(width: 100)
+
+            Toggle("", isOn: binding(widgets.isArmed, widgets.setArmed))
+                .labelsHidden()
+                .toggleStyle(.industrial)
+                .padding(.leading, 6)
+        }
+        .cardRow()
+        .animation(.easeOut(duration: 0.15), value: armed)
+    }
+
+    /// How the menu bar item draws itself.
+    private var styleKey: some View {
+        Menu {
+            ForEach(MenuBarDisplayMode.allCases) { mode in
+                Button(mode.label) { widgets.setMode(mode, for: kind) }
+            }
+        } label: {
+            MenuKeyLabel(title: widgets.mode(for: kind).label)
+        }
+        .compactMenuKey()
+        .help("Menu bar style")
+    }
+
+    private func binding(_ get: @escaping (WidgetKind) -> Bool,
+                         _ set: @escaping (WidgetKind, Bool) -> Void) -> Binding<Bool> {
+        Binding(get: { get(kind) }, set: { set(kind, $0) })
     }
 }

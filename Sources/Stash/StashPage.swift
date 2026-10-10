@@ -118,79 +118,6 @@ private struct StashSettings: View {
     }
 }
 
-/// One machined card holding several rows, so related settings read as a
-/// group instead of a column of identical boxes.
-private struct SettingsCard<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
-            .machined(cornerRadius: 10)
-    }
-}
-
-private struct CardDivider: View {
-    var body: some View {
-        Rectangle().fill(Theme.machinedBorder).frame(height: 1).padding(.leading, 12)
-    }
-}
-
-/// A title and its switch, sized to sit inside a card.
-private struct SwitchRow: View {
-    let title: String
-    @Binding var isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-            Spacer(minLength: 12)
-            Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.industrial)
-        }
-        .cardRow()
-    }
-}
-
-/// One way of opening a stash: a check and a label, lit when chosen.
-private struct OptionPill: View {
-    let title: String
-    @Binding var isOn: Bool
-    @State private var hovering = false
-
-    var body: some View {
-        Button { isOn.toggle() } label: {
-            HStack(spacing: 7) {
-                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isOn ? Theme.orange : Theme.textMuted)
-                Text(title)
-                    .font(Theme.sans(12))
-                    .foregroundStyle(isOn ? Theme.textPrimary : Theme.textSecondary)
-                    .lineLimit(1)
-                    .fixedSize()
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isOn ? Theme.orange.opacity(0.10)
-                               : Color.white.opacity(hovering ? 0.05 : 0.025))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(isOn ? Theme.orange.opacity(0.55) : Theme.borderStrong.opacity(0.5),
-                                  lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: isOn)
-        .animation(.easeOut(duration: 0.12), value: hovering)
-    }
-}
-
 /// Records the global shortcut that opens a stash. The modifier rule lives in
 /// the tooltip and the recording state in the key itself, so the row needs no
 /// second line.
@@ -262,12 +189,5 @@ private struct ExportFolderRow: View {
         panel.directoryURL = settings.exportDirectory
         guard panel.runModal() == .OK, let url = panel.url else { return }
         settings.exportPath = url.path
-    }
-}
-
-private extension View {
-    /// The padding every row inside a `SettingsCard` shares.
-    func cardRow() -> some View {
-        padding(.horizontal, 12).padding(.vertical, 10)
     }
 }

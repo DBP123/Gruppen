@@ -263,7 +263,7 @@ struct StashActionBar: View {
 /// button style — measured: a bare "Convert" key, indistinguishable from one
 /// that converts on the spot, to an unstated format. The chevron is what says
 /// "this opens a list".
-private struct MenuKeyLabel: View {
+struct MenuKeyLabel: View {
     let title: String
 
     var body: some View {
