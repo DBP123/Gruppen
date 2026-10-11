@@ -1,13 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The Script Builder: a library on the left, and one script on the right,
-/// read top to bottom as a sentence — *when* this happens, *do* that, *then*
-/// answer like so — with a run bar at the foot.
-///
-/// Same grammar as the Stash and Telemetry pages: cards of rows, a title and a
-/// control per row, and no line of grey under anything. What a choice means is
-/// its tooltip; the caveats that used to be paragraphs of footnote are too.
+/// The Script Builder: a library on the left, and one script on the right
+/// drawn as a flow — three connected blocks read left to right, *when* this
+/// happens → *do* that → *then* answer like so.
 struct ScriptBuilderView: View {
     @EnvironmentObject private var library: ScriptLibrary
 
@@ -85,7 +81,7 @@ private struct LibraryRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            LED(color: Theme.ambient, lit: script.isActive && script.isArmable, size: 6)
+            LED(color: Theme.ambient, lit: script.isArmable, size: 6)
             Text(script.name)
                 .font(Theme.sans(12, .medium))
                 .foregroundStyle(Theme.textPrimary)
@@ -105,6 +101,27 @@ private struct LibraryRow: View {
     }
 }
 
+private extension ScriptAction.Kind {
+    var glyph: String {
+        switch self {
+        case .shellCommand: return "terminal"
+        case .scriptCode: return "curlybraces"
+        case .webhook: return "network"
+        }
+    }
+}
+
+private extension ScriptFeedback {
+    var glyph: String {
+        switch self {
+        case .silent: return "speaker.slash"
+        case .banner: return "bell.badge"
+        case .audio: return "speaker.wave.2"
+        case .log: return "doc.text"
+        }
+    }
+}
+
 private extension ScriptTrigger.Kind {
     var glyph: String {
         switch self {
@@ -118,8 +135,12 @@ private extension ScriptTrigger.Kind {
     }
 }
 
+
 // MARK: - Detail
 
+/// One script as a flow: a header with its name and run controls, then the
+/// three blocks joined by arrows. The arrows light when the script is live —
+/// switched on with a complete trigger — so a glance says whether it will fire.
 private struct ScriptDetail: View {
     @EnvironmentObject private var library: ScriptLibrary
     @EnvironmentObject private var triggers: ScriptTriggerCoordinator
@@ -128,7 +149,6 @@ private struct ScriptDetail: View {
     let onDelete: () -> Void
     @State private var draft: Script
     @State private var showingSource = false
-    @State private var showingLog = false
     @State private var running = false
 
     init(script: Script, onDelete: @escaping () -> Void) {
@@ -137,150 +157,162 @@ private struct ScriptDetail: View {
         _draft = State(initialValue: script)
     }
 
+    private var isLive: Bool { draft.isArmable && draft.trigger.kind != .manual }
+
     var body: some View {
-        SettingsScroll {
-            header
-            LabeledSection(label: "WHEN") { SettingsCard { whenRows } }
-            LabeledSection(label: "DO") { SettingsCard { doRows } }
-            LabeledSection(label: "THEN") {
-                SettingsCard {
-                    MenuRow(title: "After it runs", value: draft.feedback.label, help: draft.feedback.detail) {
-                        ForEach(ScriptFeedback.allCases) { option in
-                            Button(option.label) { update { $0.feedback = option } }
-                        }
-                    }
-                }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                flow
+                if showingSource && draft.action.isProcess { sourceCard }
+                runs
             }
-            runBar
+            .padding(20)
+            .frame(maxWidth: 980, alignment: .leading)
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.panel.grain(0.26))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Header
 
-    /// The name, and whether it listens. A manual script has nothing to
-    /// listen for, so it gets no switch.
     private var header: some View {
-        SettingsCard {
-            HStack(spacing: 10) {
-                TextField("Script name", text: binding(\.name))
-                    .textFieldStyle(.plain)
-                    .font(Theme.sans(16, .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                Menu {
-                    Button("Duplicate") { library.duplicate(draft) }
-                    Button("Delete", action: onDelete)
-                } label: {
-                    Image(systemName: "ellipsis")
-                }
-                .menuKey()
-            }
-            .cardRow()
-
+        HStack(spacing: 10) {
+            LED(color: Theme.ambient, lit: isLive, size: 8)
+            TextField("Script name", text: binding(\.name))
+                .textFieldStyle(.plain)
+                .font(Theme.sans(18, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
             if draft.trigger.kind != .manual {
-                CardDivider()
-                HStack(spacing: 10) {
-                    Text("Run automatically").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    if draft.isActive && !draft.isArmable {
-                        Chip(text: "TRIGGER INCOMPLETE", tint: Theme.red, size: 9)
-                    }
-                    Spacer(minLength: 12)
-                    Toggle("", isOn: binding(\.isActive))
-                        .labelsHidden()
-                        .toggleStyle(.industrial)
-                }
-                .cardRow()
+                Text("Automatic").font(Theme.sans(12)).foregroundStyle(Theme.textSecondary)
+                Toggle("", isOn: binding(\.isActive))
+                    .labelsHidden()
+                    .toggleStyle(.industrial)
+                    .help(draft.isActive && !draft.isArmable
+                          ? "On, but the trigger is not finished"
+                          : "Run whenever the trigger fires")
             }
+            Button { runNow(paths: []) } label: {
+                Label(running ? "Running…" : "Run", systemImage: "play.fill")
+            }
+            .industrialButton(.primary)
+            .disabled(running)
+            Menu {
+                Button("Run on files…", action: chooseAndRun)
+                Divider()
+                Button("Duplicate") { library.duplicate(draft) }
+                Button("Delete", action: onDelete)
+            } label: {
+                Image(systemName: "ellipsis")
+            }
+            .menuKey()
         }
     }
 
-    // MARK: When
+    // MARK: Flow
 
-    @ViewBuilder private var whenRows: some View {
-        MenuRow(title: "Trigger", value: draft.trigger.kind.label, help: draft.trigger.kind.detail) {
+    /// Side by side when there is room, stacked when there is not.
+    private var flow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 0) { blocks(vertical: false) }
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) { blocks(vertical: true) }
+        }
+    }
+
+    @ViewBuilder private func blocks(vertical: Bool) -> some View {
+        whenBlock
+        FlowArrow(lit: isLive, vertical: vertical)
+        doBlock
+        FlowArrow(lit: isLive, vertical: vertical)
+        thenBlock
+    }
+
+    private var whenBlock: some View {
+        FlowBlock(step: "WHEN", tint: Theme.cyan, icon: draft.trigger.kind.glyph,
+                  title: draft.trigger.kind.label, help: draft.trigger.kind.detail,
+                  complete: draft.trigger.isConfigured) {
             ForEach(ScriptTrigger.Kind.allCases) { kind in
                 Button(kind.label) { update { $0.trigger.kind = kind } }
             }
+        } content: {
+            whenContent
         }
+    }
 
+    @ViewBuilder private var whenContent: some View {
         switch draft.trigger.kind {
         case .folderWatch:
-            CardDivider()
-            PickRow(title: "Folder", icon: "folder.fill",
+            PickKey(icon: "folder.fill",
                     value: draft.trigger.watchedFolder.isEmpty ? nil
                         : URL(fileURLWithPath: draft.trigger.watchedFolder).lastPathComponent,
+                    placeholder: "Choose a folder",
                     help: draft.trigger.watchedFolder.isEmpty
                         ? "Only new arrivals run the script; their paths are the arguments"
                         : draft.trigger.watchedFolder,
                     action: chooseFolder)
         case .hotkey:
-            CardDivider()
-            HStack(spacing: 8) {
-                Text("Shortcut").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                Spacer(minLength: 12)
-                ShortcutKeys(shortcut: draft.trigger.shortcut) { recorded in
-                    update { $0.trigger.shortcut = recorded }
-                }
+            ShortcutKeys(shortcut: draft.trigger.shortcut) { recorded in
+                update { $0.trigger.shortcut = recorded }
             }
-            .cardRow()
         case .appLifecycle:
-            CardDivider()
-            MenuRow(title: "Match", value: draft.trigger.appMatch.label, help: draft.trigger.appMatch.detail) {
-                ForEach(ScriptTrigger.AppMatch.allCases) { match in
-                    Button(match.label) { update { $0.trigger.appMatch = match } }
-                }
+            HStack(spacing: 6) {
+                Menu {
+                    ForEach(ScriptTrigger.AppMatch.allCases) { match in
+                        Button(match.label) { update { $0.trigger.appMatch = match } }
+                    }
+                } label: { MenuKeyLabel(title: draft.trigger.appMatch.label, compact: false) }
+                .menuKey()
+                .help(draft.trigger.appMatch.detail)
+                Menu {
+                    ForEach(ScriptTrigger.AppEvent.allCases) { event in
+                        Button(event.label) { update { $0.trigger.appEvent = event } }
+                    }
+                } label: { MenuKeyLabel(title: draft.trigger.appEvent.label, compact: false) }
+                .menuKey()
             }
-            CardDivider()
             if draft.trigger.appMatch == .bundleIdentifier {
-                PickRow(title: "App", icon: "app",
+                PickKey(icon: "app",
                         value: draft.trigger.appName.isEmpty
                             ? (draft.trigger.bundleIdentifier.isEmpty ? nil : draft.trigger.bundleIdentifier)
                             : draft.trigger.appName,
+                        placeholder: "Choose an app",
                         help: draft.trigger.bundleIdentifier,
                         action: chooseApp)
             } else {
-                FieldRow(title: "Process", text: binding(\.trigger.processName), placeholder: "java")
+                FlowField(text: binding(\.trigger.processName), placeholder: "Process name, e.g. java")
                     .help("macOS announces apps starting and stopping, not bare processes. A process name fires on quit, and on launch only for a real app bundle.")
             }
-            CardDivider()
-            MenuRow(title: "Fires when it", value: draft.trigger.appEvent.label) {
-                ForEach(ScriptTrigger.AppEvent.allCases) { event in
-                    Button(event.label) { update { $0.trigger.appEvent = event } }
-                }
-            }
         case .systemState:
-            CardDivider()
-            MenuRow(title: "Event", value: draft.trigger.systemEvent.label) {
+            Menu {
                 ForEach(ScriptTrigger.SystemEvent.allCases) { event in
                     Button(event.label) { update { $0.trigger.systemEvent = event } }
                 }
-            }
+            } label: { MenuKeyLabel(title: draft.trigger.systemEvent.label, compact: false) }
+            .menuKey()
             if draft.trigger.systemEvent.usesThreshold {
-                CardDivider()
-                HStack(spacing: 12) {
-                    Text("Below").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    Spacer(minLength: 12)
-                    Text("\(draft.trigger.threshold)%")
-                        .font(Theme.mono(11)).foregroundStyle(Theme.orange)
+                HStack(spacing: 10) {
                     IndustrialSlider(value: Binding(
                         get: { Double(draft.trigger.threshold) },
                         set: { newValue in update { $0.trigger.threshold = Int(newValue.rounded()) } }
                     ), range: 5...95, step: 5)
-                    .frame(width: 160)
+                    Text("\(draft.trigger.threshold)%")
+                        .font(Theme.mono(11)).foregroundStyle(Theme.orange)
+                        .frame(width: 34, alignment: .trailing)
                 }
-                .cardRow()
                 .help("Fires once, on the way down")
             }
         case .customNotification:
-            CardDivider()
-            MenuRow(title: "Scope", value: draft.trigger.notificationScope.label,
-                    help: draft.trigger.notificationScope.detail) {
+            Menu {
                 ForEach(ScriptTrigger.NotificationScope.allCases) { scope in
                     Button(scope.label) { update { $0.trigger.notificationScope = scope } }
                 }
-            }
-            CardDivider()
-            FieldRow(title: "Name", text: binding(\.trigger.notificationName),
-                     placeholder: "com.example.somethingHappened")
+            } label: { MenuKeyLabel(title: draft.trigger.notificationScope.label, compact: false) }
+            .menuKey()
+            .help(draft.trigger.notificationScope.detail)
+            FlowField(text: binding(\.trigger.notificationName), placeholder: "com.example.somethingHappened")
                 .help(draft.trigger.notificationScope == .darwin
                       ? "Test it from a terminal: notifyutil -p \(draft.trigger.notificationName.isEmpty ? "your.name.here" : draft.trigger.notificationName)"
                       : "Posted by other apps through NSDistributedNotificationCenter")
@@ -289,110 +321,105 @@ private struct ScriptDetail: View {
         }
     }
 
-    // MARK: Do
-
-    @ViewBuilder private var doRows: some View {
-        MenuRow(title: "Action", value: draft.action.kind.label, help: draft.action.kind.detail) {
+    private var doBlock: some View {
+        FlowBlock(step: "DO", tint: Theme.orange, icon: draft.action.kind.glyph,
+                  title: draft.action.kind.label, help: draft.action.kind.detail,
+                  complete: draft.action.isConfigured) {
             ForEach(ScriptAction.Kind.allCases) { kind in
                 Button(kind.label) { update { $0.action.kind = kind } }
             }
-        }
-
-        switch draft.action.kind {
-        case .shellCommand:
-            CardDivider()
-            FieldRow(title: "Command", text: binding(\.action.command), placeholder: "open -a Finder")
-        case .scriptCode:
-            CardDivider()
-            MenuRow(title: "Language", value: draft.action.interpreter.label,
-                    help: draft.action.interpreter.path,
-                    warning: ScriptExecutionEngine.interpreterExists(draft.action.interpreter)
-                        ? nil : "NOT INSTALLED") {
-                ForEach(ScriptAction.Interpreter.allCases) { interpreter in
-                    Button(interpreter.label) { update { $0.action.interpreter = interpreter } }
-                }
-            }
-        case .webhook:
-            CardDivider()
-            FieldRow(title: "URL", text: binding(\.action.webhookURL), placeholder: "https://example.com/hook")
-            CardDivider()
-            MenuRow(title: "Method", value: draft.action.httpMethod.label,
-                    help: draft.action.httpMethod == .post
-                        ? "Sends the incoming file paths as a JSON body"
-                        : "Sends the request with no body") {
-                ForEach(ScriptAction.HTTPMethod.allCases) { method in
-                    Button(method.label) { update { $0.action.httpMethod = method } }
-                }
-            }
-        }
-
-        if draft.action.isProcess {
-            CardDivider()
-            HStack(spacing: 8) {
-                Text("Source").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    .help("File paths arrive as arguments — $1, $2, \"$@\" — never inserted into the text")
-                if draft.action.isCustomised {
-                    Chip(text: "EDITED", tint: Theme.ambient, size: 9)
-                }
-                Spacer(minLength: 12)
-                if draft.action.isCustomised {
-                    Button("Revert") {
-                        update { $0.action.isCustomised = false; $0.action.source = "" }
+        } content: {
+            switch draft.action.kind {
+            case .shellCommand:
+                FlowField(text: binding(\.action.command), placeholder: "open -a Finder", multiline: true)
+            case .scriptCode:
+                Menu {
+                    ForEach(ScriptAction.Interpreter.allCases) { interpreter in
+                        Button(interpreter.label) { update { $0.action.interpreter = interpreter } }
                     }
-                    .industrialButton(.ghost)
-                    .help("Back to the source generated from the settings above")
-                }
-                Button(showingSource ? "Hide" : "Edit") {
-                    withAnimation(.easeOut(duration: 0.16)) { showingSource.toggle() }
-                }
-                .industrialButton(.secondary)
+                } label: { MenuKeyLabel(title: draft.action.interpreter.label, compact: false) }
+                .menuKey()
+                .help(ScriptExecutionEngine.interpreterExists(draft.action.interpreter)
+                      ? draft.action.interpreter.path
+                      : "Not installed at \(draft.action.interpreter.path)")
+            case .webhook:
+                FlowField(text: binding(\.action.webhookURL), placeholder: "https://example.com/hook")
+                Menu {
+                    ForEach(ScriptAction.HTTPMethod.allCases) { method in
+                        Button(method.label) { update { $0.action.httpMethod = method } }
+                    }
+                } label: { MenuKeyLabel(title: draft.action.httpMethod.label, compact: false) }
+                .menuKey()
+                .help(draft.action.httpMethod == .post
+                      ? "Sends the incoming file paths as a JSON body"
+                      : "Sends the request with no body")
             }
-            .cardRow()
-            if showingSource {
-                SourceInspector(text: Binding(
-                    get: { draft.action.effectiveSource },
-                    set: { newValue in update { $0.action.source = newValue; $0.action.isCustomised = true } }
-                ))
-                .padding([.horizontal, .bottom], 12)
+            if draft.action.isProcess {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { showingSource.toggle() }
+                } label: {
+                    Label(showingSource ? "Hide source" : "Edit source",
+                          systemImage: draft.action.isCustomised ? "pencil.circle.fill" : "chevron.left.forwardslash.chevron.right")
+                }
+                .industrialButton(.ghost)
             }
         }
     }
 
-    // MARK: Run
-
-    private var runBar: some View {
-        SettingsCard {
-            HStack(spacing: 8) {
-                Button {
-                    runNow(paths: [])
-                } label: {
-                    Label(running ? "Running…" : "Run", systemImage: "play.fill")
-                }
-                .industrialButton(.primary)
-                .disabled(running)
-                Button("Run on files…", action: chooseAndRun)
-                    .industrialButton(.secondary)
-                    .disabled(running)
-                    .help("The files arrive as $1, $2, \"$@\"")
-                Spacer(minLength: 12)
-                Button {
-                    withAnimation(.easeOut(duration: 0.16)) { showingLog.toggle() }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text("Log")
-                        Image(systemName: showingLog ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                }
-                .industrialButton(.ghost)
+    private var thenBlock: some View {
+        FlowBlock(step: "THEN", tint: Theme.purple, icon: draft.feedback.glyph,
+                  title: draft.feedback.label, help: draft.feedback.detail, complete: true) {
+            ForEach(ScriptFeedback.allCases) { option in
+                Button(option.label) { update { $0.feedback = option } }
             }
-            .cardRow()
+        } content: {
+            EmptyView()
+        }
+    }
 
-            if showingLog {
-                CardDivider()
-                LogList(entries: (library.logs[draft.id] ?? []).reversed()) {
-                    library.clearLog(for: draft.id)
+    // MARK: Source
+
+    private var sourceCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("SOURCE")
+                    .font(Theme.mono(10, .semibold)).tracking(1.1)
+                    .foregroundStyle(Theme.textMuted)
+                    .help("File paths arrive as arguments — $1, $2, \"$@\" — never inserted into the text")
+                if draft.action.isCustomised {
+                    Chip(text: "EDITED", tint: Theme.ambient, size: 9)
+                    Spacer()
+                    Button("Revert") {
+                        update { $0.action.isCustomised = false; $0.action.source = "" }
+                    }
+                    .industrialButton(.ghost, compact: true)
+                    .help("Back to the source generated from the blocks above")
                 }
+            }
+            SourceInspector(text: Binding(
+                get: { draft.action.effectiveSource },
+                set: { newValue in update { $0.action.source = newValue; $0.action.isCustomised = true } }
+            ))
+        }
+        .transition(.opacity)
+    }
+
+    // MARK: Runs
+
+    /// The last runs, newest first, once there are any.
+    @ViewBuilder private var runs: some View {
+        let entries = Array((library.logs[draft.id] ?? []).reversed())
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("RUNS")
+                        .font(Theme.mono(10, .semibold)).tracking(1.1)
+                        .foregroundStyle(Theme.textMuted)
+                    Spacer()
+                    Button("Clear") { library.clearLog(for: draft.id) }
+                        .industrialButton(.ghost, compact: true)
+                }
+                RunList(entries: entries)
             }
         }
     }
@@ -416,7 +443,6 @@ private struct ScriptDetail: View {
 
     private func runNow(paths: [URL]) {
         running = true
-        showingLog = true
         triggers.run(draft, paths: paths)
         // The run reports itself into the library log; this only clears the
         // button state.
@@ -468,74 +494,121 @@ private struct ScriptDetail: View {
     }
 }
 
-// MARK: - Rows
+// MARK: - Flow pieces
 
-/// A title, and a dropdown key showing the current choice. What the choice
-/// means is the key's tooltip.
-private struct MenuRow<Content: View>: View {
+/// One step of the flow: its colour and icon, the choice for this step as a
+/// dropdown title, and whatever that choice needs set underneath.
+///
+/// Its border takes the step's colour once the step is complete, so an
+/// unfinished trigger or action is the one block left unlit.
+private struct FlowBlock<Choices: View, Content: View>: View {
+    let step: String
+    let tint: Color
+    let icon: String
     let title: String
-    let value: String
-    var help: String? = nil
-    var warning: String? = nil
+    let help: String
+    let complete: Bool
+    @ViewBuilder let choices: Choices
     @ViewBuilder let content: Content
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-            if let warning { Chip(text: warning, tint: Theme.red, size: 9) }
-            Spacer(minLength: 12)
-            Menu { content } label: { MenuKeyLabel(title: value, compact: false) }
-                .menuKey()
-                .help(help ?? value)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 30, height: 30)
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(tint.opacity(0.14)))
+                Text(step)
+                    .font(Theme.mono(10, .semibold)).tracking(1.4)
+                    .foregroundStyle(tint)
+                Spacer(minLength: 0)
+            }
+
+            Menu { choices } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(title)
+                        .font(Theme.sans(15, .semibold))
+                        .foregroundStyle(Theme.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(hovering ? tint : Theme.textMuted)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .onHover { hovering = $0 }
+            .help(help)
+
+            content
+            Spacer(minLength: 0)
         }
-        .cardRow()
+        .padding(14)
+        .frame(minWidth: 210, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .machined(cornerRadius: 12, border: complete ? tint.opacity(0.55) : Theme.machinedBorder)
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
-/// A title, and a text field filling the rest of the row.
-private struct FieldRow: View {
-    let title: String
+/// The join between two blocks. Lit while the script is live.
+private struct FlowArrow: View {
+    let lit: Bool
+    let vertical: Bool
+
+    var body: some View {
+        Image(systemName: vertical ? "arrow.down" : "arrow.right")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(lit ? Theme.ambient : Theme.textMuted.opacity(0.6))
+            .shadow(color: lit ? Theme.ambient.opacity(0.7) : .clear, radius: 5)
+            .frame(width: vertical ? nil : 30, height: vertical ? 26 : nil)
+            .frame(maxHeight: vertical ? nil : .infinity)
+            .animation(.easeOut(duration: 0.2), value: lit)
+    }
+}
+
+/// A text field sized for a block.
+private struct FlowField: View {
     @Binding var text: String
     let placeholder: String
+    var multiline = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.plain)
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .machined()
-        }
-        .cardRow()
+        TextField(placeholder, text: $text, axis: multiline ? .vertical : .horizontal)
+            .lineLimit(multiline ? 1...4 : 1...1)
+            .textFieldStyle(.plain)
+            .font(Theme.mono(11))
+            .foregroundStyle(Theme.textPrimary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .machined()
     }
 }
 
-/// A title, and a key naming the chosen folder or app — "Choose…" until there
-/// is one. The full path is the tooltip.
-private struct PickRow: View {
-    let title: String
+/// A key naming the chosen folder or app, or asking for one. The full path
+/// is the tooltip.
+private struct PickKey: View {
     let icon: String
     let value: String?
+    let placeholder: String
     let help: String
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-            Spacer(minLength: 12)
-            Button(action: action) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon).font(.system(size: 11))
-                    Text(value ?? "Choose…").lineLimit(1).truncationMode(.middle)
-                }
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(value ?? placeholder).lineLimit(1).truncationMode(.middle)
             }
-            .industrialButton(.secondary)
-            .help(help)
         }
-        .cardRow()
+        .industrialButton(.secondary)
+        .help(help)
     }
 }
 
@@ -553,10 +626,9 @@ private struct SourceInspector: View {
     }
 }
 
-/// The runs, newest first, inside the run bar's card.
-private struct LogList: View {
+/// Each run: when, whether it worked, and what it said.
+private struct RunList: View {
     let entries: [ScriptLibrary.LogEntry]
-    let onClear: () -> Void
 
     private static let stamp: DateFormatter = {
         let formatter = DateFormatter()
@@ -565,35 +637,28 @@ private struct LogList: View {
     }()
 
     var body: some View {
-        if entries.isEmpty {
-            Text("Nothing has run yet")
-                .font(Theme.sans(12))
-                .foregroundStyle(Theme.textSecondary)
-                .cardRow()
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(entries) { entry in
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                Text(Self.stamp.string(from: entry.date))
-                                    .font(Theme.mono(9))
-                                    .foregroundStyle(Theme.textMuted)
-                                Text(entry.text)
-                                    .font(Theme.mono(10))
-                                    .foregroundStyle(entry.failed ? Theme.red : Theme.textSecondary)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(entries) { entry in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Circle()
+                            .fill(entry.failed ? Theme.red : Theme.green)
+                            .frame(width: 6, height: 6)
+                        Text(Self.stamp.string(from: entry.date))
+                            .font(Theme.mono(9))
+                            .foregroundStyle(Theme.textMuted)
+                        Text(entry.text)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(entry.failed ? Theme.red : Theme.textSecondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 200)
-                Button("Clear log", action: onClear)
-                    .industrialButton(.ghost)
             }
-            .cardRow()
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxHeight: 200)
+        .machined(cornerRadius: 10)
     }
 }
