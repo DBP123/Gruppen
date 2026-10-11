@@ -166,6 +166,78 @@ extension View {
     }
 }
 
+/// A menu key's title with its chevron, drawn as part of the label.
+///
+/// The system's own menu indicator is not drawn once a menu takes a custom
+/// button style — measured: a bare "Convert" key, indistinguishable from one
+/// that converts on the spot, to an unstated format. The chevron is what says
+/// "this opens a list".
+struct MenuKeyLabel: View {
+    let title: String
+    var compact = true
+
+    var body: some View {
+        HStack(spacing: compact ? 3 : 5) {
+            Text(title)
+            Image(systemName: "chevron.down").font(.system(size: compact ? 6.5 : 8, weight: .bold))
+        }
+    }
+}
+
+extension View {
+    /// A `Menu` drawn as one of the app's keys, so a key that opens a list
+    /// looks like the keys beside it. `compact` for the stash's half-size row.
+    ///
+    /// macOS 14 lets a menu take a button style; 13 does not, and gets the
+    /// plain borderless menu, which still reads as a key in a row of them. The
+    /// system indicator is hidden on both, since the label carries its own.
+    @ViewBuilder
+    func menuKey(compact: Bool = false) -> some View {
+        if #available(macOS 14.0, *) {
+            menuStyle(.button)
+                .buttonStyle(IndustrialButtonStyle(kind: .secondary, compact: compact))
+                .menuIndicator(.hidden)
+                .fixedSize()
+        } else {
+            menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+        }
+    }
+}
+
+/// The keys that record a global shortcut: the current one, a way to clear
+/// it, and Record / Change. Recording happens in the key itself and the
+/// modifier rule is its tooltip, so the row it sits in needs no second line.
+///
+/// Escape abandons, delete clears, and anything without ⌘/⌥/⌃ keeps listening
+/// rather than binding a bare key system-wide — see `KeyRecorder`.
+struct ShortcutKeys: View {
+    let shortcut: Shortcut?
+    let onRecord: (Shortcut?) -> Void
+    @StateObject private var recorder = KeyRecorder()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let shortcut, !recorder.isRecording {
+                KeyBadge(text: shortcut.display)
+                Button("Clear") { onRecord(nil) }
+                    .industrialButton(.ghost)
+            }
+            Button(recorder.isRecording ? "Press keys…" : (shortcut == nil ? "Record" : "Change")) {
+                if recorder.isRecording {
+                    recorder.stop()
+                } else {
+                    recorder.start(onRecord)
+                }
+            }
+            .industrialButton(recorder.isRecording ? .danger : .secondary)
+            .help(recorder.isRecording ? "Click to cancel" : "Use ⌘, ⌥ or ⌃ with a key")
+        }
+        .onDisappear { recorder.stop() }
+    }
+}
+
 struct RadioRow: View {
     let title: String
     let detail: String

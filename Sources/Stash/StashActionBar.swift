@@ -107,7 +107,7 @@ struct StashActionBar: View {
             } label: {
                 MenuKeyLabel(title: label)
             }
-            .compactMenuKey()
+            .menuKey(compact: true)
             .disabled(working)
             .help(locations.map { "Extract \(archives.count) — \($0)" } ?? "Extract \(archives.count)")
         } else {
@@ -128,7 +128,7 @@ struct StashActionBar: View {
         } label: {
             MenuKeyLabel(title: working ? "Converting…" : (hasSelection ? "Convert" : "Convert all"))
         }
-        .compactMenuKey()
+        .menuKey(compact: true)
         .disabled(working)
     }
 
@@ -253,45 +253,6 @@ struct StashActionBar: View {
             }
             GroupStore.log("STASH extract ×\(batch.count) [\(mode == .origin ? "origin" : "fallback")] — "
                            + report.summary)
-        }
-    }
-}
-
-/// A menu key's title with its chevron, drawn as part of the label.
-///
-/// The system's own menu indicator is not drawn once a menu takes a custom
-/// button style — measured: a bare "Convert" key, indistinguishable from one
-/// that converts on the spot, to an unstated format. The chevron is what says
-/// "this opens a list".
-struct MenuKeyLabel: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Text(title)
-            Image(systemName: "chevron.down").font(.system(size: 6.5, weight: .bold))
-        }
-    }
-}
-
-extension View {
-    /// A `Menu` drawn as one of the stash's compact keys, so a key that opens
-    /// a list looks like the keys beside it.
-    ///
-    /// macOS 14 lets a menu take a button style; 13 does not, and gets the
-    /// plain borderless menu, which still reads as a key in a row of them. The
-    /// system indicator is hidden on both, since the label carries its own.
-    @ViewBuilder
-    func compactMenuKey() -> some View {
-        if #available(macOS 14.0, *) {
-            menuStyle(.button)
-                .buttonStyle(IndustrialButtonStyle(kind: .secondary, compact: true))
-                .menuIndicator(.hidden)
-                .fixedSize()
-        } else {
-            menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
         }
     }
 }

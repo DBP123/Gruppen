@@ -113,7 +113,7 @@ struct ScriptTrigger: Codable, Hashable {
         var id: String { rawValue }
 
         var label: String {
-            self == .bundleIdentifier ? "Application" : "Process name"
+            self == .bundleIdentifier ? "An app" : "A process name"
         }
 
         var detail: String {
@@ -253,9 +253,9 @@ struct ScriptAction: Codable, Hashable {
 
         var label: String {
             switch self {
-            case .shellCommand: return "Shell Command"
-            case .scriptCode: return "Script Code"
-            case .webhook: return "Webhook"
+            case .shellCommand: return "Run a shell command"
+            case .scriptCode: return "Run a script"
+            case .webhook: return "Call a webhook"
             }
         }
 
@@ -389,10 +389,10 @@ enum ScriptFeedback: String, Codable, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .silent: return "None (Silent)"
-        case .banner: return "System Notification (Banner)"
-        case .audio: return "Audio Alert"
-        case .log: return "Debug Log"
+        case .silent: return "Nothing"
+        case .banner: return "Show a notification"
+        case .audio: return "Play a sound"
+        case .log: return "Keep a log"
         }
     }
 

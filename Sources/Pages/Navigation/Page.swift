@@ -52,7 +52,7 @@ enum Page: String, CaseIterable, Identifiable {
     /// title "STASH".
     var badge: String? {
         switch self {
-        case .telemetry: return "HARDWARE"
+        case .telemetry: return "WIDGETS"
         case .stash: return nil
         case .scripts: return "AUTOMATION"
         case .workspaces: return "SYSTEM OVERVIEW"
@@ -73,11 +73,10 @@ enum Page: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Label for the settings-pane chip, since "TOOL SETTINGS" undersells a page
-    /// that is really the telemetry cost model.
-    /// "TELEMETRY SETTINGS", "STASH SETTINGS" — the tool's own name, not a
-    /// generic "TOOL SETTINGS" that told you nothing about where you were.
-    var settingsPaneBadge: String { "\(shortTitle.uppercased()) SETTINGS" }
+    /// Label for the settings-pane chip. Just "SETTINGS": the tool's name is
+    /// already the title beside it, and "TELEMETRY  TELEMETRY SETTINGS" said
+    /// it twice.
+    var settingsPaneBadge: String { "SETTINGS" }
 
     var summary: String {
         switch self {

@@ -17,7 +17,9 @@ struct CPUDetail: View {
             // drawn in this frame — the timeline used to sit directly above the
             // per-core bars and the two read as one confused graph.
             Well {
-                HStack(alignment: .firstTextBaseline) {
+                // The caption is centred on the figure, not hung off its
+                // baseline, so it reads as the corner label of the box.
+                HStack(alignment: .center) {
                     Headline(value: String(format: "%.1f", reading.busy * 100), unit: "%")
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {

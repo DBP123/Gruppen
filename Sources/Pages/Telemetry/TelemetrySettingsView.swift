@@ -102,7 +102,7 @@ private struct ModuleRow: View {
         } label: {
             MenuKeyLabel(title: widgets.mode(for: kind).label)
         }
-        .compactMenuKey()
+        .menuKey(compact: true)
         .help("Menu bar style")
     }
 

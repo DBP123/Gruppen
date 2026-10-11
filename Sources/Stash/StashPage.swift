@@ -145,41 +145,22 @@ private struct StashSettings: View {
     }
 }
 
-/// Records one of the stash's global shortcuts. The modifier rule lives in
-/// the tooltip and the recording state in the key itself, so the row needs no
-/// second line.
+/// One of the stash's global shortcuts, re-registered the moment it changes.
 private struct ShortcutRow: View {
     let title: String
     @Binding var shortcut: Shortcut?
     @EnvironmentObject private var stash: StashCoordinator
-    @StateObject private var recorder = KeyRecorder()
 
     var body: some View {
         HStack(spacing: 8) {
             Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 12)
-            if let shortcut, !recorder.isRecording {
-                KeyBadge(text: shortcut.display)
-                Button("Clear") { set(nil) }
-                    .industrialButton(.ghost)
+            ShortcutKeys(shortcut: shortcut) { recorded in
+                shortcut = recorded
+                stash.applyShortcuts()
             }
-            Button(recorder.isRecording ? "Press keys…" : (shortcut == nil ? "Record" : "Change")) {
-                if recorder.isRecording {
-                    recorder.stop()
-                } else {
-                    recorder.start { set($0) }
-                }
-            }
-            .industrialButton(recorder.isRecording ? .danger : .secondary)
-            .help(recorder.isRecording ? "Click to cancel" : "Use ⌘, ⌥ or ⌃ with a key")
         }
         .cardRow()
-        .onDisappear { recorder.stop() }
-    }
-
-    private func set(_ value: Shortcut?) {
-        shortcut = value
-        stash.applyShortcuts()
     }
 }
 

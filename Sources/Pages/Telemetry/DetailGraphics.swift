@@ -14,7 +14,7 @@ struct SiliconDetail: View {
     var body: some View {
         if let reading = widget.reading {
             Well {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .center) {
                     Headline(value: String(format: "%.1f", reading.gpu * 100), unit: "%",
                              tint: Theme.purple)
                     Spacer()
@@ -53,9 +53,6 @@ struct SiliconDetail: View {
                 engine("NEURAL", reading.neuralEngine)
                 engine("VIDEO", reading.videoEngine)
                 engine("IMAGE", reading.imageEngine)
-                Text("power state, not utilisation — see the panel note")
-                    .font(Theme.mono(8.5))
-                    .foregroundStyle(Theme.textMuted.opacity(0.8))
             }
         } else {
             Waiting()
