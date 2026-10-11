@@ -1,59 +1,363 @@
 import AppKit
 import Foundation
 
-/// A script in the library.
+/// A script in the library: one trigger, then its steps in order, then how it
+/// reports.
 ///
 /// Standalone by construction: a script belongs to the library, not to a Gruppe
-/// or a shelf. What makes it run is its `trigger`, what it does is its `action`,
-/// and what happens afterwards is its `feedback` — three independent choices,
-/// none of which imply the others.
+/// or a shelf. Files flow down the steps — each one receives the current list
+/// and hands on a list of its own — so "zip what landed, then move the zip" is
+/// two steps rather than a shell script.
 struct Script: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
     var isActive: Bool
 
     var trigger: ScriptTrigger
-    var action: ScriptAction
-    var feedback: ScriptFeedback
+    var steps: [ScriptStep]
+    var output: ScriptOutput
+    /// Listed in the menu bar dropdown with a run key.
+    var pinnedToMenuBar: Bool
 
     init(id: UUID = UUID(),
          name: String = "New script",
          isActive: Bool = false,
          trigger: ScriptTrigger = .init(),
-         action: ScriptAction = .init(),
-         feedback: ScriptFeedback = .silent) {
+         steps: [ScriptStep] = [.make(.shell)],
+         output: ScriptOutput = .init(),
+         pinnedToMenuBar: Bool = false) {
         self.id = id
         self.name = name
         self.isActive = isActive
         self.trigger = trigger
-        self.action = action
-        self.feedback = feedback
+        self.steps = steps
+        self.output = output
+        self.pinnedToMenuBar = pinnedToMenuBar
     }
+
+    /// Every step is set up, so a run has a chance of doing what it says.
+    var isComplete: Bool { !steps.isEmpty && steps.allSatisfy(\.isConfigured) }
 
     /// Whether this is complete enough to arm. A trigger with nothing to watch
-    /// is not a trigger.
-    var isArmable: Bool {
-        isActive && trigger.isConfigured && !action.effectiveSource.isEmpty
-    }
+    /// is not a trigger, and a step with nothing to act on is not a step.
+    var isArmable: Bool { isActive && trigger.isConfigured && isComplete }
 
-    /// Decoded by hand for the reason `ScriptAction` already is, and which was
-    /// only half applied: synthesised decoding treats a missing key as an error
-    /// even when the property has a default, so every field added here would
-    /// otherwise invalidate every library in the field. A script that fails to
-    /// decode is a script that silently disappears.
+    /// Decoded by hand, leniently: synthesised decoding treats a missing key as
+    /// an error even when the property has a default, so every field added here
+    /// would otherwise invalidate every library in the field. A script that
+    /// fails to decode is a script that silently disappears.
+    ///
+    /// **Migration.** A library written before steps existed has one `action`
+    /// and one `feedback` instead. That action becomes step 01, unchanged — the
+    /// same `ScriptAction` runs it — and the feedback becomes the output.
     init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: CodingKeys.self)
         id = try box.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         name = try box.decodeIfPresent(String.self, forKey: .name) ?? "Untitled script"
         isActive = try box.decodeIfPresent(Bool.self, forKey: .isActive) ?? false
         trigger = try box.decodeIfPresent(ScriptTrigger.self, forKey: .trigger) ?? ScriptTrigger()
-        action = try box.decodeIfPresent(ScriptAction.self, forKey: .action) ?? ScriptAction()
-        feedback = try box.decodeIfPresent(ScriptFeedback.self, forKey: .feedback) ?? .silent
+        pinnedToMenuBar = try box.decodeIfPresent(Bool.self, forKey: .pinnedToMenuBar) ?? false
+
+        if let steps = try box.decodeIfPresent([ScriptStep].self, forKey: .steps) {
+            self.steps = steps
+            output = try box.decodeIfPresent(ScriptOutput.self, forKey: .output) ?? ScriptOutput()
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            let action = try legacy.decodeIfPresent(ScriptAction.self, forKey: .action) ?? ScriptAction()
+            steps = [ScriptStep(migrating: action)]
+            let feedback = (try? legacy.decodeIfPresent(String.self, forKey: .feedback)) ?? nil
+            output = ScriptOutput(legacyFeedback: feedback ?? "")
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, isActive, trigger, action, feedback
+        case id, name, isActive, trigger, steps, output, pinnedToMenuBar
     }
+
+    private enum LegacyKeys: String, CodingKey {
+        case action, feedback
+    }
+}
+
+// MARK: - Steps
+
+/// One thing a script does. Built-in steps cover the common jobs without a
+/// line of code; the code steps run through `ScriptExecutionEngine` exactly as
+/// a whole script used to.
+///
+/// One flat value rather than an enum with a payload per kind: each kind reads
+/// only the fields it needs, decoding stays lenient field by field, and a step
+/// switched from one kind to another keeps what you typed for the first.
+struct ScriptStep: Identifiable, Codable, Hashable {
+    enum Kind: String, Codable, CaseIterable, Identifiable {
+        case moveTo, copyTo, zip, convert, combinePDF, stash, reveal
+        case openApp, quitApp, hideApp, launchGruppe, activateWorkspace
+        case openURL, webhook
+        case shell, javascript, applescript
+        case wait
+
+        var id: String { rawValue }
+
+        var group: Group {
+            switch self {
+            case .moveTo, .copyTo, .zip, .convert, .combinePDF, .stash, .reveal: return .files
+            case .openApp, .quitApp, .hideApp, .launchGruppe, .activateWorkspace: return .apps
+            case .openURL, .webhook: return .web
+            case .shell, .javascript, .applescript: return .code
+            case .wait: return .flow
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .moveTo: return "Move to"
+            case .copyTo: return "Copy to"
+            case .zip: return "Zip"
+            case .convert: return "Convert"
+            case .combinePDF: return "Combine to PDF"
+            case .stash: return "Put on a stash"
+            case .reveal: return "Reveal in Finder"
+            case .openApp: return "Open app"
+            case .quitApp: return "Quit app"
+            case .hideApp: return "Hide app"
+            case .launchGruppe: return "Launch a Gruppe"
+            case .activateWorkspace: return "Activate a workspace"
+            case .openURL: return "Open URL"
+            case .webhook: return "Webhook"
+            case .shell: return "Shell"
+            case .javascript: return "JavaScript"
+            case .applescript: return "AppleScript"
+            case .wait: return "Wait"
+            }
+        }
+
+        var glyph: String {
+            switch self {
+            case .moveTo: return "arrow.right.square"
+            case .copyTo: return "doc.on.doc"
+            case .zip: return "doc.zipper"
+            case .convert: return "arrow.triangle.2.circlepath"
+            case .combinePDF: return "doc.richtext"
+            case .stash: return "tray.and.arrow.down"
+            case .reveal: return "magnifyingglass"
+            case .openApp: return "macwindow"
+            case .quitApp: return "power"
+            case .hideApp: return "eye.slash"
+            case .launchGruppe: return "square.grid.2x2"
+            case .activateWorkspace: return "rectangle.3.group"
+            case .openURL: return "link"
+            case .webhook: return "network"
+            case .shell: return "terminal"
+            case .javascript: return "curlybraces"
+            case .applescript: return "applescript"
+            case .wait: return "hourglass"
+            }
+        }
+
+        /// Whether the step works on the files coming down the bus. The others
+        /// pass them straight through.
+        var usesFiles: Bool {
+            switch self {
+            case .moveTo, .copyTo, .zip, .convert, .combinePDF, .stash, .reveal,
+                 .webhook, .shell, .javascript, .applescript: return true
+            case .openApp: return true   // opens them in the app, when there are any
+            default: return false
+            }
+        }
+    }
+
+    enum Group: String, CaseIterable, Identifiable {
+        case files, apps, web, code, flow
+        var id: String { rawValue }
+        var label: String { rawValue.capitalized }
+        var kinds: [Kind] { Kind.allCases.filter { $0.group == self } }
+    }
+
+    var id: UUID
+    var kind: Kind
+
+    /// `moveTo`, `copyTo`, `zip` (empty means the download folder).
+    var folder: String = ""
+    /// `convert`: the target extension — "pdf", "png".
+    var format: String = ""
+    /// `openApp`, `quitApp`, `hideApp`.
+    var appBundleID: String = ""
+    var appName: String = ""
+    /// `launchGruppe`, `activateWorkspace`: which one, and its name for display
+    /// should it since have been deleted.
+    var targetID: UUID?
+    var targetName: String = ""
+    /// `openURL`.
+    var url: String = ""
+    /// `wait`.
+    var seconds: Int = 2
+    /// `shell`, `javascript`, `applescript`, `webhook` — the same action type
+    /// a whole script used to be, so the engine that runs it is unchanged.
+    var code: ScriptAction = ScriptAction()
+
+    init(id: UUID = UUID(), kind: Kind) {
+        self.id = id
+        self.kind = kind
+        code = Self.code(for: kind, from: ScriptAction())
+    }
+
+    static func make(_ kind: Kind) -> ScriptStep { ScriptStep(kind: kind) }
+
+    /// A pre-steps action, as step 01. Shell commands, zsh and JXA code, and
+    /// webhooks all carry over with their source untouched.
+    init(migrating action: ScriptAction) {
+        id = UUID()
+        switch action.kind {
+        case .shellCommand: kind = .shell
+        case .webhook: kind = .webhook
+        case .scriptCode:
+            switch action.interpreter {
+            case .zsh: kind = .shell
+            case .jxa: kind = .javascript
+            case .applescript: kind = .applescript
+            }
+        }
+        code = action
+        if action.kind == .scriptCode, action.interpreter == .zsh {
+            // Zsh code is a shell step whose source has been written by hand.
+            code.kind = .shellCommand
+            code.source = action.effectiveSource
+            code.isCustomised = true
+        }
+    }
+
+    /// Changes what this step is, keeping every field so switching back loses
+    /// nothing.
+    mutating func setKind(_ newKind: Kind) {
+        kind = newKind
+        code = Self.code(for: newKind, from: code)
+    }
+
+    /// The action a code step runs: shell is a command line, JavaScript and
+    /// AppleScript are an editor's worth of source, a webhook is a request.
+    private static func code(for kind: Kind, from action: ScriptAction) -> ScriptAction {
+        var action = action
+        switch kind {
+        case .shell: action.kind = .shellCommand
+        case .javascript: action.kind = .scriptCode; action.interpreter = .jxa
+        case .applescript: action.kind = .scriptCode; action.interpreter = .applescript
+        case .webhook: action.kind = .webhook
+        default: break
+        }
+        return action
+    }
+
+    var isConfigured: Bool {
+        switch kind {
+        case .moveTo, .copyTo: return !folder.isEmpty
+        case .convert: return !format.isEmpty
+        case .zip, .combinePDF, .stash, .reveal: return true
+        case .openApp, .quitApp, .hideApp: return !appBundleID.isEmpty
+        case .launchGruppe, .activateWorkspace: return targetID != nil
+        case .openURL: return URL(string: url)?.scheme != nil
+        case .webhook, .shell, .javascript, .applescript: return code.isConfigured
+        case .wait: return seconds > 0
+        }
+    }
+
+    /// The one line a slot shows beside its kind.
+    var summary: String {
+        switch kind {
+        case .moveTo, .copyTo:
+            return folder.isEmpty ? "Choose a folder" : (folder as NSString).lastPathComponent
+        case .zip:
+            return folder.isEmpty ? "Into the download folder" : (folder as NSString).lastPathComponent
+        case .convert:
+            return format.isEmpty ? "Choose a format" : format.uppercased()
+        case .combinePDF: return "Every file into one PDF"
+        case .stash: return "Onto a new stash"
+        case .reveal: return "Selected in Finder"
+        case .openApp, .quitApp, .hideApp:
+            return appName.isEmpty ? (appBundleID.isEmpty ? "Choose an app" : appBundleID) : appName
+        case .launchGruppe, .activateWorkspace:
+            return targetName.isEmpty ? "Choose one" : targetName
+        case .openURL:
+            return url.isEmpty ? "No URL" : url
+        case .webhook:
+            let host = URL(string: code.webhookURL)?.host ?? "No URL"
+            return "\(code.httpMethod.label) \(host)"
+        case .shell:
+            if code.isCustomised {
+                return code.source.split(separator: "\n").first.map(String.init) ?? "Empty"
+            }
+            return code.command.isEmpty ? "No command" : code.command
+        case .javascript, .applescript:
+            let lines = code.effectiveSource.split(separator: "\n").count
+            return code.isCustomised ? "\(lines) lines" : "Template"
+        case .wait:
+            return "\(seconds)s"
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        id = try box.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        kind = ((try? box.decodeIfPresent(Kind.self, forKey: .kind)) ?? nil) ?? .shell
+        folder = try box.decodeIfPresent(String.self, forKey: .folder) ?? ""
+        format = try box.decodeIfPresent(String.self, forKey: .format) ?? ""
+        appBundleID = try box.decodeIfPresent(String.self, forKey: .appBundleID) ?? ""
+        appName = try box.decodeIfPresent(String.self, forKey: .appName) ?? ""
+        targetID = try box.decodeIfPresent(UUID.self, forKey: .targetID)
+        targetName = try box.decodeIfPresent(String.self, forKey: .targetName) ?? ""
+        url = try box.decodeIfPresent(String.self, forKey: .url) ?? ""
+        seconds = try box.decodeIfPresent(Int.self, forKey: .seconds) ?? 2
+        code = try box.decodeIfPresent(ScriptAction.self, forKey: .code) ?? ScriptAction()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, folder, format, appBundleID, appName, targetID, targetName, url, seconds, code
+    }
+}
+
+// MARK: - Output
+
+/// How a run reports itself, separately for success and failure. The run is
+/// always recorded in the history whatever is chosen here.
+struct ScriptOutput: Codable, Hashable {
+    enum Alert: String, Codable, CaseIterable, Identifiable {
+        case none, notification, sound
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .none: return "Nothing"
+            case .notification: return "Notification"
+            case .sound: return "Sound"
+            }
+        }
+    }
+
+    var onSuccess: Alert = .none
+    /// A notification by default: a failure nobody hears about is a script
+    /// that quietly stopped working.
+    var onFailure: Alert = .notification
+
+    init(onSuccess: Alert = .none, onFailure: Alert = .notification) {
+        self.onSuccess = onSuccess
+        self.onFailure = onFailure
+    }
+
+    /// The single feedback setting from before steps: it applied to success
+    /// and failure alike.
+    init(legacyFeedback raw: String) {
+        switch raw {
+        case "banner": self.init(onSuccess: .notification, onFailure: .notification)
+        case "audio": self.init(onSuccess: .sound, onFailure: .sound)
+        default: self.init(onSuccess: .none, onFailure: .none)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let box = try decoder.container(keyedBy: CodingKeys.self)
+        onSuccess = ((try? box.decodeIfPresent(Alert.self, forKey: .onSuccess)) ?? nil) ?? .none
+        onFailure = ((try? box.decodeIfPresent(Alert.self, forKey: .onFailure)) ?? nil) ?? .notification
+    }
+
+    private enum CodingKeys: String, CodingKey { case onSuccess, onFailure }
 }
 
 // MARK: - Trigger
@@ -104,6 +408,18 @@ struct ScriptTrigger: Codable, Hashable {
         /// Whether this trigger hands the script any file paths at all. Used to
         /// say so plainly in the UI instead of leaving it to be discovered.
         var providesFiles: Bool { self == .folderWatch }
+
+        /// One word, for the run history: what set this run off.
+        var shortLabel: String {
+            switch self {
+            case .folderWatch: return "Folder"
+            case .hotkey: return "Shortcut"
+            case .appLifecycle: return "App"
+            case .systemState: return "System"
+            case .customNotification: return "Notification"
+            case .manual: return "Manual"
+            }
+        }
     }
 
     /// How an app-lifecycle trigger identifies its target.
@@ -269,14 +585,26 @@ struct ScriptAction: Codable, Hashable {
     }
 
     enum Interpreter: String, Codable, CaseIterable, Identifiable {
-        case zsh, jxa
+        case zsh, jxa, applescript
         var id: String { rawValue }
 
-        var label: String { self == .zsh ? "Zsh" : "JavaScript (JXA)" }
+        var label: String {
+            switch self {
+            case .zsh: return "Zsh"
+            case .jxa: return "JavaScript"
+            case .applescript: return "AppleScript"
+            }
+        }
         var path: String { self == .zsh ? "/bin/zsh" : "/usr/bin/osascript" }
         /// JXA has to be told it is not AppleScript.
         var leadingArguments: [String] { self == .jxa ? ["-l", "JavaScript"] : [] }
-        var fileExtension: String { self == .zsh ? "zsh" : "js" }
+        var fileExtension: String {
+            switch self {
+            case .zsh: return "zsh"
+            case .jxa: return "js"
+            case .applescript: return "applescript"
+            }
+        }
     }
 
     enum HTTPMethod: String, Codable, CaseIterable, Identifiable {
@@ -350,6 +678,13 @@ struct ScriptAction: Codable, Hashable {
                   return paths.length ? paths.length + " item(s)" : "triggered"
                 }
                 """
+            case .applescript:
+                return """
+                -- Every path this trigger produced arrives in argv.
+                on run argv
+                  return (count of argv) as text & " item(s)"
+                end run
+                """
             }
         }
     }
@@ -373,42 +708,5 @@ struct ScriptAction: Codable, Hashable {
         httpMethod = ((try? container.decodeIfPresent(HTTPMethod.self, forKey: .httpMethod)) ?? nil) ?? .post
         source = try container.decodeIfPresent(String.self, forKey: .source) ?? ""
         isCustomised = try container.decodeIfPresent(Bool.self, forKey: .isCustomised) ?? false
-    }
-}
-
-// MARK: - Feedback
-
-/// What happens once a run finishes.
-enum ScriptFeedback: String, Codable, CaseIterable, Identifiable {
-    case silent
-    case banner
-    case audio
-    case log
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .silent: return "Nothing"
-        case .banner: return "Show a notification"
-        case .audio: return "Play a sound"
-        case .log: return "Keep a log"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .silent: return "Runs with no visible or audible result."
-        case .banner: return "Posts a notification carrying the first line of output."
-        case .audio: return "Plays a system sound on success, and a different one on failure."
-        case .log: return "Keeps the full transcript in the drawer below."
-        }
-    }
-
-    /// Anything unrecognised — including the deposit-on-shelf option an earlier
-    /// build wrote — reads back as silent rather than failing the whole library.
-    init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode(String.self)
-        self = ScriptFeedback(rawValue: raw) ?? .silent
     }
 }

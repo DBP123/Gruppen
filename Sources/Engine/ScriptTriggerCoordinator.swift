@@ -330,57 +330,80 @@ final class ScriptTriggerCoordinator: ObservableObject {
 
     // MARK: Running
 
-    /// Runs a script and applies its feedback. Called only from an event.
+    /// A run in flight: which step it is on, and how the ones before it went.
+    /// The page lights its slots from this.
+    struct Progress: Equatable {
+        var current: Int
+        var finished: [Bool] = []
+    }
+
+    @Published private(set) var progress: [UUID: Progress] = [:]
+
+    /// What the Gruppe and workspace steps call. Set by the app, which owns the
+    /// store and the workspace engine.
+    var hooks = ScriptRunner.Hooks()
+
+    /// Runs a script because its trigger fired.
     func fire(_ id: UUID, paths: [URL]) {
         guard let script = library.scripts.first(where: { $0.id == id }) else { return }
-        run(script, paths: paths)
+        run(script, paths: paths, source: script.trigger.kind.shortLabel)
     }
 
-    func run(_ script: Script, paths: [URL]) {
-        let action = script.action
-        let feedback = script.feedback
+    /// Runs `script`'s steps in order, handing each the files the last one
+    /// produced, and stops at the first that fails.
+    ///
+    /// A script already running is not started a second time — a folder that
+    /// fills faster than its script empties it would otherwise stack runs, and
+    /// a workspace whose script activates that workspace would never end.
+    @discardableResult
+    func run(_ script: Script, paths: [URL], source: String = "Manual") -> Bool {
         let id = script.id
-        let name = script.name
+        guard progress[id] == nil, !script.steps.isEmpty else { return false }
+        progress[id] = Progress(current: 0)
+        let hooks = hooks
+        let started = Date()
 
-        Task { [weak self] in
-            do {
-                let run = try await ScriptExecutionEngine.run(action, paths: paths)
-                await MainActor.run { self?.report(run, feedback: feedback, id: id, name: name) }
-            } catch {
-                await MainActor.run {
-                    self?.library.record(error.localizedDescription, failed: true, for: id)
-                    if feedback == .audio { NSSound(named: "Basso")?.play() }
-                    if feedback == .banner {
-                        Notifier.post(title: "\(name) failed", body: error.localizedDescription) { failure in
-                            guard let failure else { return }
-                            Task { @MainActor in self?.library.record("! \(failure)", failed: true, for: id) }
-                        }
-                    }
-                    GroupStore.log("SCRIPT \"\(name)\" failed — \(error.localizedDescription)")
+        Task { @MainActor [weak self] in
+            var files = paths
+            var outcomes: [ScriptRunRecord.StepOutcome] = []
+            for (index, step) in script.steps.enumerated() {
+                self?.progress[id]?.current = index
+                do {
+                    let outcome = try await ScriptRunner.perform(step, files: files, hooks: hooks)
+                    files = outcome.files
+                    outcomes.append(.init(stepID: step.id, label: step.kind.label, ok: true,
+                                          message: outcome.message))
+                    self?.progress[id]?.finished.append(true)
+                } catch {
+                    outcomes.append(.init(stepID: step.id, label: step.kind.label, ok: false,
+                                          message: error.localizedDescription))
+                    self?.progress[id]?.finished.append(false)
+                    break
                 }
             }
+            let record = ScriptRunRecord(date: started, source: source,
+                                         duration: Date().timeIntervalSince(started), steps: outcomes)
+            self?.finish(record, of: script)
         }
+        return true
     }
 
-    private func report(_ run: ScriptRun, feedback: ScriptFeedback, id: UUID, name: String) {
-        // The transcript is always kept: the log drawer is a view of it, not the
-        // only reason to have it.
-        library.record(run.transcript.isEmpty
-                       ? String(format: "exit 0 · %.2fs", run.duration)
-                       : run.transcript,
-                       failed: false, for: id)
-        GroupStore.log("SCRIPT \"\(name)\" — " + String(format: "%.2fs", run.duration))
+    private func finish(_ record: ScriptRunRecord, of script: Script) {
+        progress[script.id] = nil
+        library.record(record, for: script.id)
+        GroupStore.log("SCRIPT \"\(script.name)\" \(record.succeeded ? "ok" : "failed")"
+                       + String(format: " %.2fs — ", record.duration) + record.summary)
 
-        switch feedback {
-        case .silent, .log:
+        switch record.succeeded ? script.output.onSuccess : script.output.onFailure {
+        case .none:
             break
-        case .audio:
-            NSSound(named: "Glass")?.play()
-        case .banner:
-            let body = run.transcript.split(separator: "\n").first.map(String.init) ?? "Done"
-            Notifier.post(title: name, body: body) { [weak self] failure in
+        case .sound:
+            NSSound(named: record.succeeded ? "Glass" : "Basso")?.play()
+        case .notification:
+            let body = record.summary.split(separator: "\n").first.map(String.init) ?? "Done"
+            Notifier.post(title: record.succeeded ? script.name : "\(script.name) failed", body: body) { failure in
                 guard let failure else { return }
-                Task { @MainActor in self?.library.record("! \(failure)", failed: true, for: id) }
+                GroupStore.log("SCRIPT notification failed — \(failure)")
             }
         }
     }

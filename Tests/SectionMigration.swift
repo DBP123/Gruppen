@@ -20,6 +20,10 @@ func sectionMigration() {
             from: Data(#"{"kind":"manual"}"#.utf8))) != nil),
         ("ScriptAction", (try? JSONDecoder().decode(ScriptAction.self,
             from: Data(#"{"kind":"shellCommand"}"#.utf8))) != nil),
+        ("ScriptStep", (try? JSONDecoder().decode(ScriptStep.self,
+            from: Data(#"{"kind":"moveTo"}"#.utf8))) != nil),
+        ("ScriptOutput", (try? JSONDecoder().decode(ScriptOutput.self,
+            from: Data(#"{}"#.utf8))) != nil),
         ("SystemBuildInfo", (try? JSONDecoder().decode(SystemBuildInfo.self,
             from: Data(#"{"osVersion":"14.0"}"#.utf8))) != nil),
         ("MacHardwareProfile", (try? JSONDecoder().decode(MacHardwareProfile.self,
@@ -37,8 +41,8 @@ func sectionMigration() {
     let fromTheFuture = #"{"name":"x","trigger":{"kind":"quantumEntanglement"},"action":{"kind":"telepathy"},"feedback":"interpretiveDance"}"#
     if let script = try? JSONDecoder().decode(Script.self, from: Data(fromTheFuture.utf8)) {
         T.check("an unknown enum case degrades instead of throwing",
-                script.action.kind == .shellCommand && script.feedback == .silent,
-                "trigger \(script.trigger.kind), action \(script.action.kind), feedback \(script.feedback)")
+                script.steps.first?.kind == .shell && script.output == ScriptOutput(onSuccess: .none, onFailure: .none),
+                "trigger \(script.trigger.kind), steps \(script.steps.map(\.kind)), output \(script.output)")
     } else {
         T.check("an unknown enum case degrades instead of throwing", false, "decode threw")
     }

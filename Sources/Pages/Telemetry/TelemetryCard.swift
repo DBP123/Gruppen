@@ -311,7 +311,7 @@ struct TelemetryCard: View {
 /// so the whole 32pt is pressable. The visual can stay small — it sits in a
 /// dense header — but the target should not: 20pt chips with the hit region
 /// stopping at the ink is what made these so hard to hit.
-private struct CardButton: View {
+struct CardButton: View {
     let glyph: String
     var tint: Color = Theme.textSecondary
     let help: String
