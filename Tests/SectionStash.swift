@@ -217,6 +217,12 @@ func sectionStash() {
             StashDragOut.operations(for: outside, moving: true).contains(.copy))
     T.check("copy mode never offers a move — nothing may relocate the file",
             !StashDragOut.operations(for: outside, moving: false).contains(.move))
+    // Finder, offered both, took copy on a same-disk drop. Over Finder there
+    // is no choice to make.
+    T.equal("over Finder, move mode offers a move and nothing else",
+            StashDragOut.operations(for: outside, moving: true, overFinder: true), .move)
+    T.equal("copy mode over Finder is still a copy",
+            StashDragOut.operations(for: outside, moving: false, overFinder: true), .copy)
 
     // Whether the finished drag takes the item off the stash.
     // Any drop that landed takes the item off the stash, whatever the receiver

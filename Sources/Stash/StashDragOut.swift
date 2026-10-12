@@ -54,17 +54,47 @@ final class StashDragOut: NSObject, NSDraggingSource {
     ///   a copy.
     ///
     ///   With both on offer, each receiver takes the one that means something
-    ///   to it: Finder moves, a browser copies. The price is paid in one place,
-    ///   and it is Finder's own rule rather than anything Gruppen chose — given
-    ///   the choice, Finder moves within a disk and **copies between disks**,
-    ///   exactly as it does for a drag between two of its own windows, with ⌘
-    ///   to force the move.
+    ///   to it: a browser copies.
+    /// - **Over Finder, `move` alone.** Given the choice, Finder is free to
+    ///   take `copy`, and it does — measured: three files dragged from
+    ///   Downloads onto a Desktop folder, same disk, move mode on, logged
+    ///   "copied", the originals still in Downloads. So while the pointer is
+    ///   over a Finder window or the Desktop there is no choice to make: Finder
+    ///   moves, across disks too, with its own progress and its own undo.
+    ///   Everywhere else keeps both, which is what keeps uploads working.
     /// - **Only files can move.** Text and links have nothing on disk to
     ///   relocate, so they are always offered as copies.
     nonisolated static func operations(for context: NSDraggingContext,
-                                       moving: Bool) -> NSDragOperation {
+                                       moving: Bool,
+                                       overFinder: Bool = false) -> NSDragOperation {
         guard context == .outsideApplication, moving else { return .copy }
-        return [.move, .copy]
+        return overFinder ? .move : [.move, .copy]
+    }
+
+    /// Whether the window under `point` (AppKit screen coordinates) is
+    /// Finder's — a Finder window, or the Desktop, which Finder draws.
+    ///
+    /// The window list runs front to back. Gruppen's own windows are skipped,
+    /// and so is anything at menu-bar level and above, which is where the drag
+    /// image and the menu bar live. Owner process ids need no screen-recording
+    /// permission; only window titles would.
+    static func isFinder(at point: NSPoint) -> Bool {
+        guard let primary = NSScreen.screens.first?.frame.height,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+        else { return false }
+        let target = CGPoint(x: point.x, y: primary - point.y)
+        let ours = ProcessInfo.processInfo.processIdentifier
+        let menuLevel = Int(CGWindowLevelForKey(.mainMenuWindow))
+        for window in windows {
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, pid != ours,
+                  let layer = window[kCGWindowLayer as String] as? Int, layer < menuLevel,
+                  let box = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  CGRect(x: box["X"] ?? 0, y: box["Y"] ?? 0,
+                         width: box["Width"] ?? 0, height: box["Height"] ?? 0).contains(target)
+            else { continue }
+            return NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == "com.apple.finder"
+        }
+        return false
     }
 
     /// Whether a finished drag takes the item off the stash.
@@ -95,6 +125,9 @@ final class StashDragOut: NSObject, NSDraggingSource {
         let title: String
         let moving: Bool
         let onAccepted: () -> Void
+        /// The mask last handed out — what the receiver was actually allowed
+        /// at the moment it took the drop.
+        var offered: NSDragOperation = .copy
     }
 
     private override init() { super.init() }
@@ -158,7 +191,13 @@ final class StashDragOut: NSObject, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession,
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
-        Self.operations(for: context, moving: inFlight?.moving ?? false)
+        let moving = inFlight?.moving ?? false
+        // Asked again as the drag moves, so it follows the pointer from one
+        // app to the next. Only looked up when the answer depends on it.
+        let overFinder = moving && context == .outsideApplication && Self.isFinder(at: session.draggingLocation)
+        let mask = Self.operations(for: context, moving: moving, overFinder: overFinder)
+        inFlight?.offered = mask
+        return mask
     }
 
     func draggingSession(_ session: NSDraggingSession,
@@ -170,7 +209,7 @@ final class StashDragOut: NSObject, NSDraggingSource {
         // drop that was meant to move and was not is visible in the log
         // rather than a mystery.
         GroupStore.log("STASH drag-out \(drag.title) — \(Self.describe(operation)) "
-                       + "(offered \(drag.moving ? "move or copy" : "copy"))")
+                       + "(offered \(drag.offered == .move ? "move only" : drag.offered.contains(.move) ? "move or copy" : "copy"))")
         guard Self.consumes(operation) else { return }
         drag.onAccepted()
     }

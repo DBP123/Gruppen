@@ -238,6 +238,54 @@ struct ShortcutKeys: View {
     }
 }
 
+/// Two named behaviours, one of them lit — for a setting that chooses between
+/// two ways of doing something rather than turning one thing on or off.
+///
+/// A rocker said "on" or "off", and "Move files" switched off does not say
+/// what happens instead. Both answers are written on the control, and the lit
+/// one slides across when the other is picked.
+struct ChoiceSwitch: View {
+    let left: String
+    let right: String
+    @Binding var isRight: Bool
+    @Namespace private var lit
+
+    var body: some View {
+        HStack(spacing: 0) {
+            segment(left, selected: !isRight) { isRight = false }
+            segment(right, selected: isRight) { isRight = true }
+        }
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.input))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.machinedBorder, lineWidth: 1)
+        )
+        .animation(.spring(response: 0.26, dampingFraction: 0.78), value: isRight)
+    }
+
+    private func segment(_ title: String, selected: Bool, pick: @escaping () -> Void) -> some View {
+        Button(action: pick) {
+            Text(title)
+                .font(Theme.sans(12, selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.white : Theme.textSecondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Theme.orange)
+                            .shadow(color: Theme.orange.opacity(0.45), radius: 6)
+                            .matchedGeometryEffect(id: "lit", in: lit)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct RadioRow: View {
     let title: String
     let detail: String

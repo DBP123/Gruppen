@@ -125,13 +125,15 @@ private struct StashSettings: View {
             .animation(.easeOut(duration: 0.18), value: settings.stashEnabled)
 
             SettingsCard {
-                SwitchRow(title: "Move files when dragging out", isOn: $settings.stashMovesOnDragOut)
+                ChoiceSwitch(left: "Copy files with stash", right: "Move files with stash",
+                             isRight: $settings.stashMovesOnDragOut)
+                    .cardRow()
                 CardDivider()
-                SwitchRow(title: "Clear the notch stash on close", isOn: $settings.notchCloseClearsStash)
+                SwitchRow(title: "Clear notch stash on close", isOn: $settings.notchCloseClearsStash)
                 CardDivider()
                 ShortcutRow(title: "Shortcut to open a stash", shortcut: $settings.stashShortcut)
                 CardDivider()
-                ShortcutRow(title: "Shortcut to hide or show stashes", shortcut: $settings.stashToggleShortcut)
+                ShortcutRow(title: "Shortcut to toggle stash visibility", shortcut: $settings.stashToggleShortcut)
                 CardDivider()
                 ExportFolderRow()
             }
@@ -171,7 +173,7 @@ private struct ExportFolderRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("Save zips and extractions to").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Text("Change zips").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 12)
             Button(action: choose) {
                 HStack(spacing: 6) {
