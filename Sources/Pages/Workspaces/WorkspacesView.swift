@@ -1,12 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The Workspaces page: the Gruppen, the profiles they run in, and the two
-/// settings that decide how a Gruppe comes up and goes down.
-///
-/// The settings live here rather than behind a settings pane: there are two of
-/// them, and sending you to another page for two controls made them the hardest
-/// thing on it to find.
+/// The Workspaces page: the Gruppen, and the profiles they run in. Its
+/// settings are a pane of their own (`WorkspacesSettingsPane`) — this page is
+/// busy enough without them.
 struct WorkspacesView: View {
     @EnvironmentObject private var store: GroupStore
 
@@ -35,7 +32,6 @@ struct WorkspacesView: View {
                 // while one is typed.
                 if !searching {
                     WorkspaceProfileDeck()
-                    LabeledSection(label: "SETTINGS") { WorkspacesSettings() }
                 }
             }
             .padding(24)
@@ -84,48 +80,6 @@ struct WorkspacesView: View {
                         GruppeCard(group: group, onEdit: { editing = group })
                     }
                 }
-            }
-        }
-    }
-}
-
-/// How Gruppen come up and go down, and the way back to the Dock you had.
-private struct WorkspacesSettings: View {
-    @EnvironmentObject private var store: GroupStore
-    @EnvironmentObject private var settings: AppSettings
-
-    /// Seconds a quitting app gets before it is killed; 0 kills at once.
-    private static let grace: [TimeInterval] = [0, 3, 10]
-
-    var body: some View {
-        SettingsCard {
-            SwitchRow(title: "Bring apps forward when launching", isOn: $settings.activateOnLaunch)
-            CardDivider()
-            VStack(alignment: .leading, spacing: 9) {
-                Text("When a Gruppe closes")
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                SegmentedChoice(
-                    options: ["Force quit now", "Quit, force after 3s", "Quit, force after 10s"],
-                    selection: Binding(
-                        get: { Self.grace.firstIndex(of: store.gracePeriod) ?? 1 },
-                        set: { store.gracePeriod = Self.grace[$0] }
-                    ),
-                    help: ["Instant, but unsaved work in those apps is lost",
-                           "Asks each app to quit, and kills what is still open after 3 seconds",
-                           "Asks each app to quit, and kills what is still open after 10 seconds"])
-            }
-            .cardRow()
-            if DockManager.hasBackup {
-                CardDivider()
-                HStack(spacing: 12) {
-                    Text("Original Dock").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    Spacer(minLength: 12)
-                    Button("Restore") { _ = DockManager.restoreOriginal() }
-                        .industrialButton(.secondary)
-                        .help("Puts the Dock back to how it was before any profile changed it")
-                }
-                .cardRow()
             }
         }
     }
