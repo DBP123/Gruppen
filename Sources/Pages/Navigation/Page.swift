@@ -68,8 +68,8 @@ enum Page: String, CaseIterable, Identifiable {
     /// two different places.
     var hasSettingsPane: Bool {
         switch self {
-        case .telemetry, .workspaces: return true
-        case .stash, .scripts, .settings: return false
+        case .telemetry: return true
+        case .workspaces, .stash, .scripts, .settings: return false
         }
     }
 
@@ -85,7 +85,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .stash:
             return "A stash for files in transit. Drag to the notch or shake to open it."
         case .scripts:
-            return "Attach a script to a Gruppe. Dropping files on it runs the script with their paths."
+            return "Automations: a trigger, then steps, then a report."
         case .workspaces:
             return "Group applications, launch them together, close them together."
         case .settings:

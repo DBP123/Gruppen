@@ -225,13 +225,21 @@ extension View {
 /// rather than binding a bare key system-wide — see `KeyRecorder`.
 struct ShortcutKeys: View {
     let shortcut: Shortcut?
+    /// Red, and says why in its tooltip, when the system would not hand the
+    /// combination over.
+    var unavailable = false
+    /// Told when listening starts and stops — Gruppe and profile hotkeys are
+    /// released while recording, so pressing a bound combination records it
+    /// instead of firing it.
+    var onRecordingChange: (Bool) -> Void = { _ in }
     let onRecord: (Shortcut?) -> Void
     @StateObject private var recorder = KeyRecorder()
 
     var body: some View {
         HStack(spacing: 8) {
             if let shortcut, !recorder.isRecording {
-                KeyBadge(text: shortcut.display)
+                KeyBadge(text: shortcut.display, enabled: !unavailable)
+                    .help(unavailable ? "Claimed by macOS or another app" : "Works from anywhere")
                 Button("Clear") { onRecord(nil) }
                     .industrialButton(.ghost)
             }
@@ -245,26 +253,37 @@ struct ShortcutKeys: View {
             .industrialButton(recorder.isRecording ? .danger : .secondary)
             .help(recorder.isRecording ? "Click to cancel" : "Use ⌘, ⌥ or ⌃ with a key")
         }
-        .onDisappear { recorder.stop() }
+        // Follows the recorder rather than the buttons: escape, delete, a
+        // capture and a cancel all end recording, and every one of them has to
+        // hand the hotkeys back.
+        .onChange(of: recorder.isRecording) { onRecordingChange($0) }
+        .onDisappear {
+            if recorder.isRecording { onRecordingChange(false) }
+            recorder.stop()
+        }
     }
 }
 
-/// Two named behaviours, one of them lit — for a setting that chooses between
-/// two ways of doing something rather than turning one thing on or off.
+/// Named behaviours side by side, one of them lit — for a setting that
+/// chooses between ways of doing something rather than turning one thing on
+/// or off.
 ///
 /// A rocker said "on" or "off", and "Move files" switched off does not say
-/// what happens instead. Both answers are written on the control, and the lit
-/// one slides across when the other is picked.
-struct ChoiceSwitch: View {
-    let left: String
-    let right: String
-    @Binding var isRight: Bool
+/// what happens instead. Every answer is written on the control, and the lit
+/// one slides across when another is picked.
+struct SegmentedChoice: View {
+    let options: [String]
+    @Binding var selection: Int
+    /// What each option means, as its tooltip.
+    var help: [String] = []
     @Namespace private var lit
 
     var body: some View {
         HStack(spacing: 0) {
-            segment(left, selected: !isRight) { isRight = false }
-            segment(right, selected: isRight) { isRight = true }
+            ForEach(Array(options.enumerated()), id: \.offset) { index, title in
+                segment(title, selected: selection == index) { selection = index }
+                    .help(index < help.count ? help[index] : title)
+            }
         }
         .padding(3)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.input))
@@ -272,7 +291,7 @@ struct ChoiceSwitch: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Theme.machinedBorder, lineWidth: 1)
         )
-        .animation(.spring(response: 0.26, dampingFraction: 0.78), value: isRight)
+        .animation(.spring(response: 0.26, dampingFraction: 0.78), value: selection)
     }
 
     private func segment(_ title: String, selected: Bool, pick: @escaping () -> Void) -> some View {
@@ -281,8 +300,10 @@ struct ChoiceSwitch: View {
                 .font(Theme.sans(12, selected ? .semibold : .regular))
                 .foregroundStyle(selected ? Color.white : Theme.textSecondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
+                .padding(.horizontal, 6)
                 .background {
                     if selected {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -297,33 +318,32 @@ struct ChoiceSwitch: View {
     }
 }
 
-struct RadioRow: View {
-    let title: String
-    let detail: String
-    let selected: Bool
-    let action: () -> Void
+/// The two-way case of `SegmentedChoice`, bound straight to a `Bool`.
+struct ChoiceSwitch: View {
+    let left: String
+    let right: String
+    @Binding var isRight: Bool
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(selected ? Theme.orange : Theme.borderStrong, lineWidth: 1)
-                        .frame(width: 14, height: 14)
-                    if selected { Circle().fill(Theme.orange).frame(width: 6, height: 6) }
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
-            }
-            .panelRow(accent: selected ? Theme.orange.opacity(0.5) : nil)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        SegmentedChoice(options: [left, right],
+                        selection: Binding(get: { isRight ? 1 : 0 }, set: { isRight = $0 == 1 }))
     }
 }
+
+/// Explanatory line under a group of controls.
+struct FootNote: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(Theme.mono(10))
+            .foregroundStyle(Theme.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 
 /// Fixed-width key with selectable value — the About tab's build details.
 struct KeyValue: View {
@@ -348,20 +368,6 @@ struct KeyValue: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-    }
-}
-
-/// Explanatory line under a group of controls.
-struct FootNote: View {
-    let text: String
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(Theme.mono(10))
-            .foregroundStyle(Theme.textMuted)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

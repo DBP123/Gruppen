@@ -10,7 +10,6 @@ final class GroupStore: ObservableObject {
             guard !isLoading else { return }
             save()
             syncHotkeys()
-            updateSuggestions()
             updateCounters()
         }
     }
@@ -40,27 +39,6 @@ final class GroupStore: ObservableObject {
     /// by macOS or another app). The badge renders these as unavailable.
     @Published private(set) var unavailableShortcuts: Set<UUID> = []
 
-    /// Preset rules that match what is installed. Computed once at launch and
-    /// again only when the user asks for a rescan — never polled.
-    @Published private(set) var suggestions: [Presets.Match] = []
-
-    /// Result of the last application index pass, shown in Konfiguration.
-    @Published private(set) var indexReport: IndexReport?
-
-    struct IndexReport: Equatable {
-        var appCount: Int
-        var repairedPaths: Int
-        var scannedAt: Date
-
-        var summary: String {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss"
-            var text = "Indexed \(appCount) apps • Last scanned \(formatter.string(from: scannedAt))"
-            if repairedPaths > 0 { text += " • \(repairedPaths) path(s) repaired" }
-            return text
-        }
-    }
-
     /// Reads the saved grace period, pulling it across from the app's former
     /// bundle identifier the first time.
     static var storedGracePeriod: TimeInterval {
@@ -85,9 +63,6 @@ final class GroupStore: ObservableObject {
     /// In-flight sequenced launch/termination, one per Gruppe. Cancelled when
     /// the opposite action is requested so the two can never interleave.
     private var sequenceTasks: [UUID: Task<Void, Never>] = [:]
-    /// Preset rules resolved against the disk. Refreshed at launch and on an
-    /// explicit rescan only.
-    private var cachedMatches: [Presets.Match] = []
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
     /// Running state comes from here now — no timer, no process-list walk on a
     /// schedule. See `RunningAppTracker` for why and for the one caveat.
@@ -119,8 +94,10 @@ final class GroupStore: ObservableObject {
         Self.log("STORE INIT — \(groups.count) group(s), active: \(groups.filter(\.isActive).map(\.name))")
         refreshRunning()
         syncHotkeys()
-        cachedMatches = Presets.matches()
-        updateSuggestions()
+        // An app updated or moved since last launch is found again by its
+        // bundle identifier. Only missing paths are looked up, so a library
+        // where nothing moved costs one existence check per app.
+        repairAppPaths()
 
         // The tracker publishes on system events; mirror it into runningIDs.
         observers.append(NotificationCenter.default.addObserver(
@@ -582,45 +559,11 @@ final class GroupStore: ObservableObject {
         return group
     }
 
-    @discardableResult
-    func createGroup(from match: Presets.Match) -> AppGroup {
-        createGroup(named: match.name,
-                    apps: match.urls.compactMap(AppEntry.init(url:)),
-                    colorHex: match.colorHex)
-    }
-
-    // MARK: - Application index
-
-    /// Filters the cached preset matches against the Gruppen that already
-    /// exist. Pure in-memory work — safe to run on every `groups` change.
-    private func updateSuggestions() {
-        let taken = Set(groups.map { $0.name.lowercased() })
-        let filtered = cachedMatches.filter { !taken.contains($0.name.lowercased()) }
-        if filtered.map(\.id) != suggestions.map(\.id) {
-            suggestions = filtered
-        }
-    }
-
-    /// Re-reads the disk. The directory walk runs off the main actor; the
-    /// LaunchServices lookups that repair moved bundles stay on it.
-    func rescanApplications() async {
-        let scanned: (matches: [Presets.Match], count: Int) = await Task.detached(priority: .utility) {
-            (Presets.matchesOnDisk(), Presets.indexedApplicationCount())
-        }.value
-
-        IconCache.shared.clear()
-        let repaired = repairAppPaths()
-        cachedMatches = scanned.matches
-        updateSuggestions()
-        refreshRunning()
-        indexReport = IndexReport(appCount: scanned.count,
-                                  repairedPaths: repaired,
-                                  scannedAt: Date())
-        Self.log("RESCAN — \(scanned.count) apps, \(scanned.matches.count) preset match(es), \(repaired) path(s) repaired")
-    }
+    // MARK: - Moved apps
 
     /// Points entries whose bundle has moved at wherever LaunchServices says
     /// that bundle identifier lives now.
+    @discardableResult
     private func repairAppPaths() -> Int {
         var updated = groups
         var repaired = 0

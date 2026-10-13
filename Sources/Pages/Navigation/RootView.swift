@@ -59,7 +59,7 @@ struct ToolHost: View {
         case .scripts:
             ScriptBuilderView()
         case .workspaces:
-            if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
+            WorkspacesView()
         case .settings:
             GeneralSettingsPane()
         }

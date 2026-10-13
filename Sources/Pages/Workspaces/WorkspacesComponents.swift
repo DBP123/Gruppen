@@ -136,10 +136,9 @@ struct GruppeCard: View {
     private var bottom: some View {
         VStack(spacing: 12) {
             Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+            // No count here: the icons above already say how many, and the
+            // line it took is what squeezed "Launch Rest" into "Launch Re…".
             HStack {
-                Text("\(live.apps.count) Applikationen")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.textMuted)
                 Spacer()
                 HStack(spacing: 6) {
                     Button("Edit", action: onEdit).industrialButton(.secondary)
@@ -231,71 +230,5 @@ struct NoResults: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 60)
-    }
-}
-
-
-// MARK: - Suggested Gruppen
-
-/// Deterministic preset matches. Nothing is inferred from behaviour — a chip
-/// appears only because at least two of a rule's apps are installed.
-struct SuggestionStrip: View {
-    @EnvironmentObject private var store: GroupStore
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("SUGGESTED GRUPPEN")
-                .font(Theme.mono(10, .semibold))
-                .tracking(1.1)
-                .foregroundStyle(Theme.textMuted)
-
-            HStack(spacing: 8) {
-                ForEach(store.suggestions) { match in
-                    SuggestionChip(match: match) { store.createGroup(from: match) }
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-}
-
-struct SuggestionChip: View {
-    let match: Presets.Match
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    private var accent: Color { Color(hex: match.colorHex) }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                LED(color: accent, lit: hovering, size: 8)
-                Text(match.name)
-                    .font(Theme.sans(12, .medium))
-                    .foregroundStyle(Theme.textPrimary)
-                Text("\(match.count)")
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textMuted)
-                Image(systemName: "plus")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(hovering ? accent : Theme.textMuted)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                    .fill(hovering ? Theme.surfaceHover : Theme.surface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
-                    .strokeBorder(hovering ? accent.opacity(0.5) : Theme.borderSubtle, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.12), value: hovering)
-        .onHover { hovering = $0 }
-        .help("Create \"\(match.name)\" from \(match.count) installed app(s)")
     }
 }

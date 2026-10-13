@@ -38,15 +38,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// Show the "Suggested Gruppen" chips on the overview. Some people know
-    /// exactly what they want and would rather not be offered anything.
-    @Published var showSuggestions: Bool {
-        didSet {
-            guard showSuggestions != oldValue else { return }
-            defaults.set(showSuggestions, forKey: Keys.showSuggestions)
-        }
-    }
-
     /// Bring a Gruppe's windows forward when it is launched. Off by default so
     /// activating a workspace never yanks focus mid-task.
     @Published var activateOnLaunch: Bool {
@@ -153,7 +144,6 @@ final class AppSettings: ObservableObject {
         static let showMenuBar = "showMenuBar"
         static let showDockIcon = "showDockIcon"
         static let activateOnLaunch = "activateOnLaunch"
-        static let showSuggestions = "showSuggestions"
         static let stashEnabled = "stashEnabled"
         static let stashNotch = "stashNotchEnabled"
         static let stashEdge = "stashEdgeEnabled"
@@ -175,7 +165,6 @@ final class AppSettings: ObservableObject {
             Keys.showMenuBar: true,
             Keys.showDockIcon: true,
             Keys.activateOnLaunch: false,
-            Keys.showSuggestions: true,
             Keys.stashEnabled: true,
             Keys.stashNotch: true,
             Keys.stashEdge: true,
@@ -187,7 +176,6 @@ final class AppSettings: ObservableObject {
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
         showDockIcon = defaults.bool(forKey: Keys.showDockIcon)
         activateOnLaunch = defaults.bool(forKey: Keys.activateOnLaunch)
-        showSuggestions = defaults.bool(forKey: Keys.showSuggestions)
         stashEnabled = defaults.bool(forKey: Keys.stashEnabled)
         stashNotchEnabled = defaults.bool(forKey: Keys.stashNotch)
         stashEdgeEnabled = defaults.bool(forKey: Keys.stashEdge)

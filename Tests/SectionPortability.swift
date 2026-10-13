@@ -90,24 +90,6 @@ func sectionPortability() {
                 "decode threw — the cache is discarded and re-probed")
     }
 
-    T.begin("G. Portability — presets and search paths")
-
-    var ids = Set<String>()
-    var duplicates: [String] = []
-    for rule in Presets.rules where !ids.insert(rule.id).inserted { duplicates.append(rule.id) }
-    T.check("no two preset rules share an id", duplicates.isEmpty, "\(Presets.rules.count) rules")
-    T.check("every rule has candidates",
-            Presets.rules.allSatisfy { !$0.bundleNames.isEmpty && !$0.bundleIDs.isEmpty })
-    T.check("every rule colour parses",
-            Presets.rules.allSatisfy { $0.colorHex.hasPrefix("#") && $0.colorHex.count == 7 })
-    T.check("the search paths include a per-user Applications folder",
-            Presets.searchDirectories.contains { $0.path.hasSuffix("/Applications")
-                && $0.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path) },
-            "a per-user install must be found")
-    T.check("matching runs without a subprocess and returns something sane",
-            Presets.matches(minimum: 1).allSatisfy { $0.count >= 1 },
-            "\(Presets.matches(minimum: 2).count) rules match on this Mac")
-
     T.begin("G. Portability — external tools the app shells out to")
 
     // Each of these is spawned by a feature. If one is absent the feature is
