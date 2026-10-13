@@ -8,6 +8,7 @@ struct Suite {
         await sectionScripts()
         await sectionScriptSteps()
         await sectionScriptTransfer()
+        await sectionAutomationEngine()
         sectionTelemetry()
         await MainActor.run { sectionStash() }
         await sectionWorkspaces()

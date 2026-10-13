@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.50"
+VERSION="1.51"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 
@@ -148,6 +148,12 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 
     <key>NSSupportsSuddenTermination</key>
     <false/>
+
+    <key>NSLocationUsageDescription</key>
+    <string>Gruppen reads the name of the Wi-Fi network you join, for automations that run on a network. macOS only shares it with Location Services on.</string>
+
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Gruppen asks System Events and Finder to switch Dark Mode or empty the Trash when an automation of yours does that.</string>
 </dict>
 </plist>
 PLIST

@@ -256,7 +256,7 @@ enum StashBatchDispatcher {
     /// Archive Utility's behaviour, and for its reason: `report.zip` extracted
     /// beside an existing `report/` would merge into it, and a batch that
     /// quietly overwrites someone's folder is not recoverable.
-    private nonisolated static func extract(_ archive: URL, into directory: URL) async throws -> URL {
+    nonisolated static func extract(_ archive: URL, into directory: URL) async throws -> URL {
         let base = archive.deletingPathExtension().lastPathComponent
         let folder = uniqueFolder(in: directory, named: base.isEmpty ? "Extracted" : base)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

@@ -376,9 +376,15 @@ final class GroupStore: ObservableObject {
     ///
     /// When the Gruppe is sequenced, apps start in list order with the
     /// configured pause between them; otherwise they all go at once.
+    /// Posted with the Gruppe's id as the object, for automations that run
+    /// when a Gruppe launches or closes.
+    static let didLaunch = Notification.Name("GruppenGroupDidLaunch")
+    static let didClose = Notification.Name("GruppenGroupDidClose")
+
     func launchGroup(_ group: AppGroup) {
         guard let index = index(of: group) else { return }
         groups[index].isActive = true
+        NotificationCenter.default.post(name: Self.didLaunch, object: group.id)
         cancelSequence(for: group.id)
         if pendingKills.removeValue(forKey: group.id) != nil {
             Self.log("cancelled pending force quit for \"\(groups[index].name)\"")
@@ -434,6 +440,7 @@ final class GroupStore: ObservableObject {
     func terminateGroup(_ group: AppGroup) {
         guard let index = index(of: group) else { return }
         groups[index].isActive = false
+        NotificationCenter.default.post(name: Self.didClose, object: group.id)
         cancelSequence(for: group.id)
 
         let live = groups[index]

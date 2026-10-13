@@ -90,20 +90,25 @@ struct Script: Identifiable, Codable, Hashable {
 /// switched from one kind to another keeps what you typed for the first.
 struct ScriptStep: Identifiable, Codable, Hashable {
     enum Kind: String, Codable, CaseIterable, Identifiable {
-        case moveTo, copyTo, zip, convert, combinePDF, stash, reveal
-        case openApp, quitApp, hideApp, launchGruppe, activateWorkspace
-        case openURL, webhook
-        case shell, javascript, applescript
+        case moveTo, copyTo, rename, zip, unzip, convert, compress, combinePDF, tag, stash, reveal, open, trash
+        case openApp, openFolder, openURL, quitApp, hideApp
+        case darkMode, mute, keepAwake, lockScreen, emptyTrash, ejectDisks
+        case launchGruppe, activateWorkspace, openStash, toggleStashes
+        case cleanText, cleanLink, changeCase, saveClipboardImage, snippet
+        case runShortcut, shell, javascript, applescript, webhook
         case wait
 
         var id: String { rawValue }
 
         var group: Group {
             switch self {
-            case .moveTo, .copyTo, .zip, .convert, .combinePDF, .stash, .reveal: return .files
-            case .openApp, .quitApp, .hideApp, .launchGruppe, .activateWorkspace: return .apps
-            case .openURL, .webhook: return .web
-            case .shell, .javascript, .applescript: return .code
+            case .moveTo, .copyTo, .rename, .zip, .unzip, .convert, .compress, .combinePDF,
+                 .tag, .stash, .reveal, .open, .trash: return .files
+            case .openApp, .openFolder, .openURL, .quitApp, .hideApp: return .apps
+            case .darkMode, .mute, .keepAwake, .lockScreen, .emptyTrash, .ejectDisks: return .system
+            case .launchGruppe, .activateWorkspace, .openStash, .toggleStashes: return .gruppen
+            case .cleanText, .cleanLink, .changeCase, .saveClipboardImage, .snippet: return .clipboard
+            case .runShortcut, .shell, .javascript, .applescript, .webhook: return .code
             case .wait: return .flow
             }
         }
@@ -112,21 +117,42 @@ struct ScriptStep: Identifiable, Codable, Hashable {
             switch self {
             case .moveTo: return "Move to"
             case .copyTo: return "Copy to"
+            case .rename: return "Rename"
             case .zip: return "Zip"
+            case .unzip: return "Unzip"
             case .convert: return "Convert"
+            case .compress: return "Compress images"
             case .combinePDF: return "Combine to PDF"
+            case .tag: return "Add a tag"
             case .stash: return "Put on a stash"
             case .reveal: return "Reveal in Finder"
+            case .open: return "Open"
+            case .trash: return "Move to Trash"
             case .openApp: return "Open app"
+            case .openFolder: return "Open folder"
+            case .openURL: return "Open URL"
             case .quitApp: return "Quit app"
             case .hideApp: return "Hide app"
+            case .darkMode: return "Toggle Dark Mode"
+            case .mute: return "Toggle mute"
+            case .keepAwake: return "Keep awake"
+            case .lockScreen: return "Lock screen"
+            case .emptyTrash: return "Empty Trash"
+            case .ejectDisks: return "Eject disks"
             case .launchGruppe: return "Launch a Gruppe"
             case .activateWorkspace: return "Activate a workspace"
-            case .openURL: return "Open URL"
-            case .webhook: return "Webhook"
+            case .openStash: return "Open a stash"
+            case .toggleStashes: return "Hide or show stashes"
+            case .cleanText: return "Clean copied text"
+            case .cleanLink: return "Clean copied link"
+            case .changeCase: return "Change case"
+            case .saveClipboardImage: return "Save copied image"
+            case .snippet: return "Paste a snippet"
+            case .runShortcut: return "Run a Shortcut"
             case .shell: return "Shell"
             case .javascript: return "JavaScript"
             case .applescript: return "AppleScript"
+            case .webhook: return "Webhook"
             case .wait: return "Wait"
             }
         }
@@ -135,49 +161,97 @@ struct ScriptStep: Identifiable, Codable, Hashable {
             switch self {
             case .moveTo: return "arrow.right.square"
             case .copyTo: return "doc.on.doc"
+            case .rename: return "character.cursor.ibeam"
             case .zip: return "doc.zipper"
+            case .unzip: return "archivebox"
             case .convert: return "arrow.triangle.2.circlepath"
+            case .compress: return "arrow.down.right.and.arrow.up.left"
             case .combinePDF: return "doc.richtext"
+            case .tag: return "tag"
             case .stash: return "tray.and.arrow.down"
             case .reveal: return "magnifyingglass"
+            case .open: return "arrow.up.forward.app"
+            case .trash: return "trash"
             case .openApp: return "macwindow"
+            case .openFolder: return "folder"
+            case .openURL: return "link"
             case .quitApp: return "power"
             case .hideApp: return "eye.slash"
+            case .darkMode: return "circle.lefthalf.filled"
+            case .mute: return "speaker.slash"
+            case .keepAwake: return "cup.and.saucer"
+            case .lockScreen: return "lock"
+            case .emptyTrash: return "trash.slash"
+            case .ejectDisks: return "eject"
             case .launchGruppe: return "square.grid.2x2"
             case .activateWorkspace: return "rectangle.3.group"
-            case .openURL: return "link"
-            case .webhook: return "network"
+            case .openStash: return "tray"
+            case .toggleStashes: return "tray.2"
+            case .cleanText: return "text.badge.checkmark"
+            case .cleanLink: return "link.badge.plus"
+            case .changeCase: return "textformat"
+            case .saveClipboardImage: return "photo.on.rectangle"
+            case .snippet: return "text.quote"
+            case .runShortcut: return "square.stack.3d.up"
             case .shell: return "terminal"
             case .javascript: return "curlybraces"
             case .applescript: return "applescript"
+            case .webhook: return "network"
             case .wait: return "hourglass"
             }
         }
 
         /// Whether the step works on the files coming down the bus. The others
         /// pass them straight through.
-        var usesFiles: Bool {
-            switch self {
-            case .moveTo, .copyTo, .zip, .convert, .combinePDF, .stash, .reveal,
-                 .webhook, .shell, .javascript, .applescript: return true
-            case .openApp: return true   // opens them in the app, when there are any
-            default: return false
-            }
-        }
+        var usesFiles: Bool { group == .files || self == .openApp || group == .code }
     }
 
     enum Group: String, CaseIterable, Identifiable {
-        case files, apps, web, code, flow
+        case files, apps, system, gruppen, clipboard, code, flow
         var id: String { rawValue }
-        var label: String { rawValue.capitalized }
+        var label: String {
+            switch self {
+            case .files: return "Files"
+            case .apps: return "Open & apps"
+            case .system: return "System"
+            case .gruppen: return "Gruppen"
+            case .clipboard: return "Clipboard"
+            case .code: return "Shortcuts & code"
+            case .flow: return "Flow"
+            }
+        }
         var kinds: [Kind] { Kind.allCases.filter { $0.group == self } }
+    }
+
+    /// Where a move or copy puts each file inside its folder.
+    enum Subfolder: String, Codable, CaseIterable, Identifiable {
+        case none, month, site
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .none: return "Straight in"
+            case .month: return "By month"
+            case .site: return "By site downloaded from"
+            }
+        }
     }
 
     var id: UUID
     var kind: Kind
 
-    /// `moveTo`, `copyTo`, `zip` (empty means the download folder).
+    /// `moveTo`, `copyTo`, `zip`, `openFolder`, `saveClipboardImage` (empty
+    /// means the download folder where that makes sense).
     var folder: String = ""
+    /// `moveTo`, `copyTo`.
+    var subfolder: Subfolder = .none
+    /// `rename`.
+    var renameStyle: RenameStyle = .datePrefix
+    /// `changeCase`.
+    var caseStyle: CaseStyle = .sentence
+    /// `rename` prefix, `tag` name, `snippet` text, `runShortcut` name.
+    var text: String = ""
+    /// `keepAwake`.
+    var hours: Int = 1
     /// `convert`: the target extension — "pdf", "png".
     var format: String = ""
     /// `openApp`, `quitApp`, `hideApp`.
@@ -249,35 +323,63 @@ struct ScriptStep: Identifiable, Codable, Hashable {
 
     var isConfigured: Bool {
         switch kind {
-        case .moveTo, .copyTo: return !folder.isEmpty
+        case .moveTo, .copyTo, .openFolder: return !folder.isEmpty
         case .convert: return !format.isEmpty
-        case .zip, .combinePDF, .stash, .reveal: return true
+        case .rename: return renameStyle != .textPrefix || !text.trimmingCharacters(in: .whitespaces).isEmpty
+        case .tag, .snippet, .runShortcut: return !text.trimmingCharacters(in: .whitespaces).isEmpty
         case .openApp, .quitApp, .hideApp: return !appBundleID.isEmpty
         case .launchGruppe, .activateWorkspace: return targetID != nil
         case .openURL: return URL(string: url)?.scheme != nil
         case .webhook, .shell, .javascript, .applescript: return code.isConfigured
         case .wait: return seconds > 0
+        case .keepAwake: return hours > 0
+        case .zip, .unzip, .compress, .combinePDF, .stash, .reveal, .open, .trash,
+             .darkMode, .mute, .lockScreen, .emptyTrash, .ejectDisks, .openStash, .toggleStashes,
+             .cleanText, .cleanLink, .changeCase, .saveClipboardImage:
+            return true
         }
     }
 
-    /// The one line a slot shows beside its kind.
+    /// The one line a card or slot shows for this step.
     var summary: String {
+        func name(_ path: String, or empty: String) -> String {
+            path.isEmpty ? empty : (path as NSString).lastPathComponent
+        }
         switch kind {
         case .moveTo, .copyTo:
-            return folder.isEmpty ? "Choose a folder" : (folder as NSString).lastPathComponent
-        case .zip:
-            return folder.isEmpty ? "Into the download folder" : (folder as NSString).lastPathComponent
-        case .convert:
-            return format.isEmpty ? "Choose a format" : format.uppercased()
+            let into = name(folder, or: "Choose a folder")
+            return subfolder == .none ? into : "\(into), \(subfolder.label.lowercased())"
+        case .zip: return name(folder, or: "Into the download folder")
+        case .rename:
+            return renameStyle == .textPrefix ? "Prefix “\(text)”" : renameStyle.label
+        case .unzip: return "Beside the archive, then bins it"
+        case .convert: return format.isEmpty ? "Choose a format" : "To \(format.uppercased())"
+        case .compress: return "JPEG, 75% quality"
         case .combinePDF: return "Every file into one PDF"
+        case .tag: return text.isEmpty ? "Name a tag" : text
         case .stash: return "Onto a new stash"
         case .reveal: return "Selected in Finder"
+        case .open: return "In their default apps"
+        case .trash: return "Recoverable from the Trash"
         case .openApp, .quitApp, .hideApp:
             return appName.isEmpty ? (appBundleID.isEmpty ? "Choose an app" : appBundleID) : appName
-        case .launchGruppe, .activateWorkspace:
-            return targetName.isEmpty ? "Choose one" : targetName
-        case .openURL:
-            return url.isEmpty ? "No URL" : url
+        case .openFolder: return name(folder, or: "Choose a folder")
+        case .launchGruppe, .activateWorkspace: return targetName.isEmpty ? "Choose one" : targetName
+        case .openURL: return url.isEmpty ? "No URL" : url
+        case .darkMode: return "Light ↔ dark"
+        case .mute: return "Sound on ↔ off"
+        case .keepAwake: return "For \(hours) hour\(hours == 1 ? "" : "s")"
+        case .lockScreen: return "Asks for your password"
+        case .emptyTrash: return "Deletes for good"
+        case .ejectDisks: return "Every removable disk"
+        case .openStash: return "Under the pointer"
+        case .toggleStashes: return "Every floating stash"
+        case .cleanText: return "Plain text, tidy spacing"
+        case .cleanLink: return "Strips tracking"
+        case .changeCase: return caseStyle.label
+        case .saveClipboardImage: return name(folder, or: "Into the download folder")
+        case .snippet: return text.isEmpty ? "Write the snippet" : text.replacingOccurrences(of: "\n", with: " ")
+        case .runShortcut: return text.isEmpty ? "Name a Shortcut" : text
         case .webhook:
             let host = URL(string: code.webhookURL)?.host ?? "No URL"
             return "\(code.httpMethod.label) \(host)"
@@ -299,6 +401,11 @@ struct ScriptStep: Identifiable, Codable, Hashable {
         id = try box.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         kind = ((try? box.decodeIfPresent(Kind.self, forKey: .kind)) ?? nil) ?? .shell
         folder = try box.decodeIfPresent(String.self, forKey: .folder) ?? ""
+        subfolder = ((try? box.decodeIfPresent(Subfolder.self, forKey: .subfolder)) ?? nil) ?? .none
+        renameStyle = ((try? box.decodeIfPresent(RenameStyle.self, forKey: .renameStyle)) ?? nil) ?? .datePrefix
+        caseStyle = ((try? box.decodeIfPresent(CaseStyle.self, forKey: .caseStyle)) ?? nil) ?? .sentence
+        text = try box.decodeIfPresent(String.self, forKey: .text) ?? ""
+        hours = try box.decodeIfPresent(Int.self, forKey: .hours) ?? 1
         format = try box.decodeIfPresent(String.self, forKey: .format) ?? ""
         appBundleID = try box.decodeIfPresent(String.self, forKey: .appBundleID) ?? ""
         appName = try box.decodeIfPresent(String.self, forKey: .appName) ?? ""
@@ -310,7 +417,8 @@ struct ScriptStep: Identifiable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, kind, folder, format, appBundleID, appName, targetID, targetName, url, seconds, code
+        case id, kind, folder, subfolder, renameStyle, caseStyle, text, hours
+        case format, appBundleID, appName, targetID, targetName, url, seconds, code
     }
 }
 
@@ -372,7 +480,12 @@ struct ScriptTrigger: Codable, Hashable {
         case appLifecycle
         case systemState
         case customNotification
-        /// Only ever run by hand from the builder.
+        case display
+        case wifi
+        case audioDevice
+        case schedule
+        case gruppe
+        /// Only ever run by hand — its key, the palette or the menu bar.
         case manual
 
         var id: String { rawValue }
@@ -384,6 +497,11 @@ struct ScriptTrigger: Codable, Hashable {
             case .appLifecycle: return "An app or process starts or stops"
             case .systemState: return "The Mac's state changes"
             case .customNotification: return "A named system notification"
+            case .display: return "A display is plugged in or out"
+            case .wifi: return "I join a Wi-Fi network"
+            case .audioDevice: return "Headphones or speakers connect"
+            case .schedule: return "At a time of day"
+            case .gruppe: return "A Gruppe launches or closes"
             case .manual: return "Only when I press Run"
             }
         }
@@ -400,6 +518,16 @@ struct ScriptTrigger: Codable, Hashable {
                 return "Sleep, wake, power connected, or a battery threshold"
             case .customNotification:
                 return "Any Darwin or distributed notification name you know of"
+            case .display:
+                return "An external display connecting or disconnecting"
+            case .wifi:
+                return "Joining a named network. macOS only tells apps the network name with Location Services on"
+            case .audioDevice:
+                return "The sound output switching to a device whose name contains what you type"
+            case .schedule:
+                return "One wake-up at the next matching time — nothing runs in between"
+            case .gruppe:
+                return "One of your Gruppen launching or closing"
             case .manual:
                 return "Nothing arms it; you run it from this page"
             }
@@ -409,6 +537,22 @@ struct ScriptTrigger: Codable, Hashable {
         /// say so plainly in the UI instead of leaving it to be discovered.
         var providesFiles: Bool { self == .folderWatch }
 
+        var glyph: String {
+            switch self {
+            case .folderWatch: return "folder"
+            case .hotkey: return "command"
+            case .appLifecycle: return "app.badge"
+            case .systemState: return "bolt"
+            case .customNotification: return "bell"
+            case .display: return "display"
+            case .wifi: return "wifi"
+            case .audioDevice: return "headphones"
+            case .schedule: return "clock"
+            case .gruppe: return "square.grid.2x2"
+            case .manual: return "hand.tap"
+            }
+        }
+
         /// One word, for the run history: what set this run off.
         var shortLabel: String {
             switch self {
@@ -417,6 +561,11 @@ struct ScriptTrigger: Codable, Hashable {
             case .appLifecycle: return "App"
             case .systemState: return "System"
             case .customNotification: return "Notification"
+            case .display: return "Display"
+            case .wifi: return "Wi-Fi"
+            case .audioDevice: return "Audio"
+            case .schedule: return "Schedule"
+            case .gruppe: return "Gruppe"
             case .manual: return "Manual"
             }
         }
@@ -476,6 +625,11 @@ struct ScriptTrigger: Codable, Hashable {
         var usesThreshold: Bool { self == .batteryBelow }
     }
 
+    enum Edge: String, Codable, CaseIterable, Identifiable {
+        case on, off
+        var id: String { rawValue }
+    }
+
     var kind: Kind = .manual
 
     /// `folderWatch`
@@ -495,6 +649,22 @@ struct ScriptTrigger: Codable, Hashable {
     /// `customNotification`
     var notificationScope: NotificationScope = .darwin
     var notificationName: String = ""
+    /// `folderWatch`: only files passing these run the steps — all of them,
+    /// or any one, per `matchAll`. None means every new file.
+    var conditions: [RuleCondition] = []
+    var matchAll: Bool = true
+    /// `display` (connected / disconnected), `audioDevice` (connected only is
+    /// offered), `gruppe` (launched / closed).
+    var edge: Edge = .on
+    /// `wifi`: network name. `audioDevice`: part of the device's name.
+    var match: String = ""
+    /// `schedule`: minutes after midnight, and the weekdays it runs on —
+    /// 1 Sunday … 7 Saturday, `Calendar`'s numbering.
+    var minuteOfDay: Int = 8 * 60 + 30
+    var weekdays: Set<Int> = [2, 3, 4, 5, 6]
+    /// `gruppe`.
+    var gruppeID: UUID?
+    var gruppeName: String = ""
 
     var isConfigured: Bool {
         switch kind {
@@ -503,8 +673,35 @@ struct ScriptTrigger: Codable, Hashable {
         case .appLifecycle:
             return appMatch == .bundleIdentifier ? !bundleIdentifier.isEmpty : !processName.isEmpty
         case .customNotification: return !notificationName.isEmpty
-        case .systemState, .manual: return true
+        case .wifi, .audioDevice: return !match.trimmingCharacters(in: .whitespaces).isEmpty
+        case .schedule: return !weekdays.isEmpty
+        case .gruppe: return gruppeID != nil
+        case .systemState, .display, .manual: return true
         }
+    }
+
+    /// Whether `url` passes the rule's conditions.
+    func admits(_ url: URL, now: Date = Date()) -> Bool {
+        guard !conditions.isEmpty else { return true }
+        return matchAll ? conditions.allSatisfy { $0.matches(url, now: now) }
+                        : conditions.contains { $0.matches(url, now: now) }
+    }
+
+    /// A rule with an age condition also applies to files already sitting in
+    /// the folder — "older than 7 days" is never true of something arriving.
+    var sweepsExisting: Bool { conditions.contains { $0.kind == .olderThan } }
+
+    /// The next time a schedule trigger is due after `date`.
+    func nextOccurrence(after date: Date, calendar: Calendar = .current) -> Date? {
+        guard kind == .schedule, !weekdays.isEmpty else { return nil }
+        var components = DateComponents()
+        components.hour = minuteOfDay / 60
+        components.minute = minuteOfDay % 60
+        return weekdays.compactMap { weekday -> Date? in
+            var wanted = components
+            wanted.weekday = weekday
+            return calendar.nextDate(after: date, matching: wanted, matchingPolicy: .nextTime)
+        }.min()
     }
 
     init() {}
@@ -529,11 +726,28 @@ struct ScriptTrigger: Codable, Hashable {
         threshold = try box.decodeIfPresent(Int.self, forKey: .threshold) ?? 20
         notificationScope = ((try? box.decodeIfPresent(NotificationScope.self, forKey: .notificationScope)) ?? nil) ?? .darwin
         notificationName = try box.decodeIfPresent(String.self, forKey: .notificationName) ?? ""
+        conditions = try box.decodeIfPresent([RuleCondition].self, forKey: .conditions) ?? []
+        matchAll = try box.decodeIfPresent(Bool.self, forKey: .matchAll) ?? true
+        edge = ((try? box.decodeIfPresent(Edge.self, forKey: .edge)) ?? nil) ?? .on
+        match = try box.decodeIfPresent(String.self, forKey: .match) ?? ""
+        minuteOfDay = try box.decodeIfPresent(Int.self, forKey: .minuteOfDay) ?? 8 * 60 + 30
+        weekdays = try box.decodeIfPresent(Set<Int>.self, forKey: .weekdays) ?? [2, 3, 4, 5, 6]
+        gruppeID = try box.decodeIfPresent(UUID.self, forKey: .gruppeID)
+        gruppeName = try box.decodeIfPresent(String.self, forKey: .gruppeName) ?? ""
     }
 
     private enum CodingKeys: String, CodingKey {
         case kind, watchedFolder, shortcut, appMatch, bundleIdentifier, appName
         case processName, appEvent, systemEvent, threshold, notificationScope, notificationName
+        case conditions, matchAll, edge, match, minuteOfDay, weekdays, gruppeID, gruppeName
+    }
+
+    var weekdaySummary: String {
+        if weekdays == [2, 3, 4, 5, 6] { return "Weekdays" }
+        if weekdays.count == 7 { return "Every day" }
+        if weekdays == [1, 7] { return "Weekends" }
+        let symbols = Calendar.current.shortWeekdaySymbols
+        return weekdays.sorted().map { symbols[$0 - 1] }.joined(separator: " ")
     }
 
     var summary: String {
@@ -553,6 +767,17 @@ struct ScriptTrigger: Codable, Hashable {
             return systemEvent.usesThreshold ? "Battery below \(threshold)%" : systemEvent.label
         case .customNotification:
             return notificationName.isEmpty ? "No name given" : notificationName
+        case .display:
+            return edge == .on ? "A display connects" : "A display disconnects"
+        case .wifi:
+            return match.isEmpty ? "Name a network" : "Joining \(match)"
+        case .audioDevice:
+            return match.isEmpty ? "Name a device" : "\(match) connects"
+        case .schedule:
+            return String(format: "%02d:%02d", minuteOfDay / 60, minuteOfDay % 60) + " · " + weekdaySummary
+        case .gruppe:
+            let name = gruppeName.isEmpty ? "A Gruppe" : gruppeName
+            return edge == .on ? "\(name) launches" : "\(name) closes"
         case .manual:
             return "Run from here only"
         }

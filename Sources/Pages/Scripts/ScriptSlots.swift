@@ -288,6 +288,8 @@ struct TriggerEditor: View {
             }
         case .manual:
             EmptyView()
+        default:
+            EmptyView()
         }
     }
 }
@@ -400,7 +402,7 @@ struct StepEditor: View {
                     .font(Theme.mono(10.5).monospacedDigit())
                     .foregroundStyle(Theme.orange)
             }
-        case .combinePDF, .stash, .reveal:
+        default:
             EmptyView()
         }
     }

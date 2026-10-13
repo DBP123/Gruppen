@@ -169,16 +169,3 @@ struct ScriptLamp: View {
         return "Armed — listening for its trigger"
     }
 }
-
-extension ScriptTrigger.Kind {
-    var glyph: String {
-        switch self {
-        case .folderWatch: return "folder"
-        case .hotkey: return "command"
-        case .appLifecycle: return "app.badge"
-        case .systemState: return "bolt"
-        case .customNotification: return "bell"
-        case .manual: return "hand.tap"
-        }
-    }
-}

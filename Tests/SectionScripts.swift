@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 func sectionScripts() async {
@@ -368,5 +369,158 @@ func sectionScriptTransfer() async {
         try? "hello".write(to: junk, atomically: true, encoding: .utf8)
         let refused = await MainActor.run { (try? library.importScript(from: junk)) == nil }
         T.check("a file that is not a script is refused", refused)
+    }
+}
+
+func sectionAutomationEngine() async {
+    T.begin("C. Automations — rule conditions")
+
+    await withTempDirAsync { dir -> Void in
+        let pdf = dir.appendingPathComponent("ENGR 133 Lab Report.pdf")
+        try? Data(repeating: 1, count: 2_000_000).write(to: pdf)
+        // What Safari and Chrome write as they save a download.
+        let froms = try! PropertyListSerialization.data(
+            fromPropertyList: ["https://purdue.instructure.com/files/1/download", "https://purdue.instructure.com/courses/1"],
+            format: .binary, options: 0)
+        _ = froms.withUnsafeBytes {
+            setxattr(pdf.path, "com.apple.metadata:kMDItemWhereFroms", $0.baseAddress, froms.count, 0, 0)
+        }
+
+        T.check("kind is PDF", RuleCondition(.family, family: .pdf).matches(pdf))
+        T.check("kind is not image", !RuleCondition(.family, family: .image).matches(pdf))
+        T.check("extension, with or without the dot", RuleCondition(.ext, text: ".PDF").matches(pdf))
+        T.check("name contains, any case", RuleCondition(.nameContains, text: "engr 133").matches(pdf))
+        T.check("name starts with", RuleCondition(.nameStartsWith, text: "ENGR").matches(pdf))
+        T.check("downloaded from reads the browser's record",
+                RuleCondition(.downloadedFrom, text: "instructure").matches(pdf),
+                FileFacts.whereFroms(pdf).first ?? "none")
+        T.check("an empty condition matches nothing", !RuleCondition(.nameContains, text: " ").matches(pdf))
+        T.check("not older than 7 days today", !RuleCondition(.olderThan, number: 7).matches(pdf))
+        T.check("older than 7 days a fortnight from now",
+                RuleCondition(.olderThan, number: 7).matches(pdf, now: Date().addingTimeInterval(14 * 86_400)))
+        T.check("larger than 1 MB", RuleCondition(.largerThan, number: 1).matches(pdf))
+
+        var trigger = ScriptTrigger()
+        trigger.kind = .folderWatch
+        trigger.conditions = [RuleCondition(.family, family: .pdf), RuleCondition(.nameContains, text: "chem")]
+        T.check("all conditions: one fails, no match", !trigger.admits(pdf))
+        trigger.matchAll = false
+        T.check("any condition: one passes, match", trigger.admits(pdf))
+        T.check("an age condition makes a rule sweep its folder",
+                { var t = trigger; t.conditions.append(RuleCondition(.olderThan)); return t.sweepsExisting }())
+    }
+
+    T.begin("C. Automations — text tools and renaming")
+
+    T.equal("smart quotes and spacing come out plain",
+            TextTools.clean("“Hello”  — it’s\u{00A0}done   \n\n\n\nnext"), "\"Hello\" - it's done\n\nnext")
+    T.equal("tracking is stripped from links, real parameters kept",
+            TextTools.cleanLinks("see https://example.com/page?id=7&utm_source=x&fbclid=abc now"),
+            "see https://example.com/page?id=7 now")
+    T.equal("a link left with no parameters loses its ?",
+            TextTools.cleanLinks("https://example.com/a?utm_medium=email"), "https://example.com/a")
+    T.equal("sentence case", TextTools.change("HELLO THERE. HOW ARE YOU?", to: .sentence), "Hello there. How are you?")
+    T.equal("title case", TextTools.change("lab report two", to: .title), "Lab Report Two")
+
+    var october = DateComponents()
+    october.year = 2026; october.month = 10; october.day = 12
+    let date = Calendar.current.date(from: october)!
+    T.equal("date prefix", RenameStyle.datePrefix.apply(to: "Lab.pdf", date: date), "2026-10-12 Lab.pdf")
+    T.equal("text prefix", RenameStyle.textPrefix.apply(to: "Lab.pdf", prefix: "ENGR133"), "ENGR133 Lab.pdf")
+    T.equal("clean drops a browser's duplicate marker", RenameStyle.clean.apply(to: "Lab report (1).pdf"), "Lab report.pdf")
+    T.equal("clean collapses underscores and spaces", RenameStyle.clean.apply(to: "my__file   name.txt"), "my file name.txt")
+
+    var schedule = ScriptTrigger()
+    schedule.kind = .schedule
+    schedule.minuteOfDay = 8 * 60 + 30
+    schedule.weekdays = [2]   // Monday
+    var sunday = DateComponents()
+    sunday.year = 2026; sunday.month = 10; sunday.day = 11; sunday.hour = 12
+    let next = schedule.nextOccurrence(after: Calendar.current.date(from: sunday)!)
+    let parts = next.map { Calendar.current.dateComponents([.weekday, .hour, .minute, .day], from: $0) }
+    T.check("a Monday 8:30 schedule next falls on Monday the 12th at 8:30",
+            parts?.weekday == 2 && parts?.hour == 8 && parts?.minute == 30 && parts?.day == 12,
+            next.map { "\($0)" } ?? "none")
+
+    T.begin("C. Automations — new file actions")
+
+    await withTempDirAsync { dir -> Void in
+        let file = dir.appendingPathComponent("Notes (1).txt")
+        try? "notes".write(to: file, atomically: true, encoding: .utf8)
+
+        var rename = ScriptStep.make(.rename)
+        rename.renameStyle = .clean
+        do {
+            let out = try await ScriptRunner.perform(rename, files: [file], hooks: .init()).files
+            T.equal("rename cleans the name on disk", out.first?.lastPathComponent, "Notes.txt")
+        } catch { T.check("rename runs", false, "\(error)") }
+
+        let cleaned = dir.appendingPathComponent("Notes.txt")
+        var tag = ScriptStep.make(.tag)
+        tag.text = "School"
+        do {
+            _ = try await ScriptRunner.perform(tag, files: [cleaned], hooks: .init())
+            let tags = (try? cleaned.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
+            T.check("a tag is added", tags.contains("School"), tags.description)
+        } catch { T.check("tag runs", false, "\(error)") }
+
+        let out = dir.appendingPathComponent("out", isDirectory: true)
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        var copy = ScriptStep.make(.copyTo)
+        copy.folder = out.path
+        copy.subfolder = .month
+        do {
+            let placed = try await ScriptRunner.perform(copy, files: [cleaned], hooks: .init()).files
+            let month = placed.first?.deletingLastPathComponent().lastPathComponent ?? ""
+            T.check("a copy by month lands in a yyyy-MM folder",
+                    month.range(of: #"^\d{4}-\d{2}$"#, options: .regularExpression) != nil, month)
+        } catch { T.check("copy by month runs", false, "\(error)") }
+
+        // A JPEG compresses in place, so nothing goes to the Trash.
+        let jpeg = dir.appendingPathComponent("photo.jpg")
+        if let context = CGContext(data: nil, width: 400, height: 300, bitsPerComponent: 8, bytesPerRow: 0,
+                                   space: CGColorSpaceCreateDeviceRGB(),
+                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+           let image = { context.setFillColor(CGColor(red: 0.3, green: 0.6, blue: 0.9, alpha: 1))
+                         context.fill(CGRect(x: 0, y: 0, width: 400, height: 300)); return context.makeImage() }(),
+           let destination = CGImageDestinationCreateWithURL(jpeg as CFURL, "public.jpeg" as CFString, 1, nil) {
+            CGImageDestinationAddImage(destination, image, [kCGImageDestinationLossyCompressionQuality: 1.0] as CFDictionary)
+            CGImageDestinationFinalize(destination)
+        }
+        do {
+            let result = try await ScriptRunner.perform(ScriptStep.make(.compress), files: [jpeg], hooks: .init()).files
+            T.check("a JPEG is compressed in its place", result.first?.path == jpeg.path
+                    && FileManager.default.fileExists(atPath: jpeg.path))
+        } catch { T.check("compress runs", false, "\(error)") }
+    }
+
+    T.begin("C. Automations — a rule never loops on its own output")
+
+    await withTempDirAsync { dir -> Void in
+        let (library, coordinator) = await MainActor.run { () -> (ScriptLibrary, ScriptTriggerCoordinator) in
+            let library = ScriptLibrary(fileURL: dir.appendingPathComponent("scripts.json"))
+            return (library, ScriptTriggerCoordinator(library: library))
+        }
+        let inbox = dir.appendingPathComponent("inbox", isDirectory: true)
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let rule: Script = {
+            var script = Script(name: "Date stamp", isActive: true)
+            script.trigger.kind = .folderWatch
+            script.trigger.watchedFolder = inbox.path
+            var step = ScriptStep.make(.rename)
+            step.renameStyle = .datePrefix
+            script.steps = [step]
+            return script
+        }()
+        await MainActor.run { library.scripts = [rule] }   // rearms through onChange
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        try? "x".write(to: inbox.appendingPathComponent("arrival.txt"), atomically: true, encoding: .utf8)
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: inbox.path)) ?? []
+        T.equal("one file, renamed once", names.count, 1)
+        T.check("with exactly one date in front",
+                names.first.map { $0.range(of: #"^\d{4}-\d{2}-\d{2} arrival\.txt$"#, options: .regularExpression) != nil } ?? false,
+                names.first ?? "none")
+        await MainActor.run { coordinator.disarm() }
     }
 }
