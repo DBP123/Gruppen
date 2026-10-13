@@ -110,7 +110,7 @@ struct PowerDetail: View {
             // The one below ranks processes by a unitless impact score. They are
             // not two attempts at the same number: one is a share of a measured
             // quantity, the other is a heuristic for ordering.
-            Fold(title: "POWER BY APPLICATION", expanded: $showingAppPower) {
+            Fold(title: "POWER BY APPLIKATION", expanded: $showingAppPower) {
                 AppPowerBreakdownView()
             }
 

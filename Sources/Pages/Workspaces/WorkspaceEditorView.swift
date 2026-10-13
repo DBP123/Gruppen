@@ -36,7 +36,7 @@ struct WorkspaceProfileDeck: View {
     }
 
     private var empty: some View {
-        Text("KEINE PROFILE")
+        Text("NO PROFILES")
             .font(Theme.mono(11, .semibold)).tracking(1.2)
             .foregroundStyle(Theme.textMuted)
             .frame(maxWidth: .infinity)
@@ -94,7 +94,7 @@ private struct ProfileCard: View {
                         .help(stage.help)
                 }
                 if profile.isEmpty {
-                    Text("NICHTS KONFIGURIERT")
+                    Text("NOTHING SET UP")
                         .font(Theme.mono(10))
                         .foregroundStyle(Theme.textMuted)
                         .frame(height: 32)
@@ -223,7 +223,7 @@ struct WorkspaceEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let profile {
-                SheetHeader(title: "PROFIL", badge: "KONFIGURATION", tint: profile.color)
+                SheetHeader(title: "PROFILE", badge: "KONFIGURATION", tint: profile.color)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Identity(profile: profile)
@@ -564,7 +564,7 @@ struct AppList<Extra: View>: View {
                 }
             }
             HStack(spacing: 6) {
-                Button { choose() } label: { Label("Add Apps…", systemImage: "plus") }
+                Button { choose() } label: { Label("Add Applikationen…", systemImage: "plus") }
                     .industrialButton(.ghost)
                 extra
             }

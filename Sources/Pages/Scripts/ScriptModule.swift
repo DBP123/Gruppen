@@ -101,10 +101,10 @@ struct ScriptModule: View {
     /// with something not set up. Nothing when it is simply off.
     private var status: (text: String, tint: Color)? {
         if let progress {
-            return ("LÄUFT \(progress.current + 1)/\(draft.steps.count)", Theme.orange)
+            return ("RUNNING \(progress.current + 1)/\(draft.steps.count)", Theme.orange)
         }
         if draft.isActive && draft.trigger.kind != .manual {
-            return draft.isArmable ? ("BEREIT", Theme.green) : ("UNVOLLSTÄNDIG", Theme.amber)
+            return draft.isArmable ? ("READY", Theme.green) : ("INCOMPLETE", Theme.amber)
         }
         return nil
     }
@@ -233,7 +233,7 @@ struct ScriptModule: View {
 
     @ViewBuilder private var readout: some View {
         if progress != nil {
-            EmptyView()     // the plate's LÄUFT chip says it
+            EmptyView()     // the plate's RUNNING chip says it
         } else if let last = runs.last {
             Button {
                 withAnimation(.easeOut(duration: 0.16)) { showingHistory.toggle() }

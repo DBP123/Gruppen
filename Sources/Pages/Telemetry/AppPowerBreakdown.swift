@@ -42,7 +42,7 @@ struct AppPowerTable: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            TableHeader(columns: [("APPLICATION", .leading, nil),
+            TableHeader(columns: [("APPLIKATION", .leading, nil),
                                   ("CPU", .trailing, 44),
                                   ("WATTS", .trailing, 52)])
 

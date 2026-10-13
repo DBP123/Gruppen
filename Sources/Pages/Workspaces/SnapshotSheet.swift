@@ -31,7 +31,7 @@ struct SnapshotSheet: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
-                            SectionLabel("GERADE OFFEN")
+                            SectionLabel("OPEN NOW")
                             Chip(text: "\(selected.count)/\(candidates.count)", tint: Theme.textSecondary, size: 9)
                             Spacer()
                             if !candidates.isEmpty {
@@ -62,7 +62,7 @@ struct SnapshotSheet: View {
             }
             .scrollContentBackground(.hidden)
             SheetFooter {
-                Button { addOffline() } label: { Label("Add an App…", systemImage: "plus") }
+                Button { addOffline() } label: { Label("Add Applikation…", systemImage: "plus") }
                     .industrialButton(.secondary)
                     .help("Include an app that isn't running")
                 Spacer()

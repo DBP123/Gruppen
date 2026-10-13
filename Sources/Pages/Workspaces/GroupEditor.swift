@@ -20,7 +20,7 @@ struct GroupEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         identity(group)
-                        LabeledSection(label: "AUSFÜHRUNG") { execution(group) }
+                        LabeledSection(label: "EXECUTION") { execution(group) }
                         LabeledSection(label: "APPLIKATIONEN — \(group.apps.count)") { apps(group) }
                     }
                     .padding(20)
@@ -206,7 +206,7 @@ private struct AppRow: View {
                 .help(app.bundleID.isEmpty ? app.path : app.bundleID)
             Spacer()
             if running {
-                Chip(text: "LÄUFT", tint: Theme.green, size: 8.5)
+                Chip(text: "RUNNING", tint: Theme.green, size: 8.5)
             }
             Button(action: onRemove) {
                 Image(systemName: "minus").font(.system(size: 10, weight: .bold))

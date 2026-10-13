@@ -32,7 +32,7 @@ private struct HiddenStashes: View {
                         .font(Theme.mono(10, .semibold))
                         .tracking(1.1)
                         .foregroundStyle(Theme.textMuted)
-                    Chip(text: "\(hidden.count) VERSTECKT", tint: Theme.textSecondary, size: 9)
+                    Chip(text: "\(hidden.count)", tint: Theme.textSecondary, size: 9)
                     Spacer()
                     if hidden.count > 1 {
                         Button("Reopen all") { manager.reopenAll() }

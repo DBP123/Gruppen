@@ -188,7 +188,7 @@ struct PowerFlow: Equatable {
         case .adapterAssist: return "PACK SUPPLEMENTING CHARGER"
         case .acPassthrough: return "FULLY CHARGED"
         case .optimizedHold: return "PAUSED AT \(percent)%"
-        case .lowPowerMode: return "THROTTLE ACTIVE"
+        case .lowPowerMode: return "THROTTLE AKTIV"
         case .discharging:
             if percent < 20 { return "ON BATTERY • CRITICAL" }
             if percent < 50 { return "ON BATTERY • DRAINING" }

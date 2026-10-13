@@ -197,7 +197,7 @@ struct EmptyState: View {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 30, weight: .light))
                 .foregroundStyle(Theme.textMuted)
-            Text("KEINE GRUPPEN")
+            Text("NO GRUPPEN")
                 .font(Theme.mono(12, .semibold))
                 .tracking(1.2)
                 .foregroundStyle(Theme.textSecondary)
