@@ -77,6 +77,7 @@ struct GruppenApp: App {
                         coordinator?.run(script, paths: [], source: "Workspace")
                         return true
                     }
+                    QuickPalette.shared.attach(library: scripts, triggers: triggers)
                     // The Gruppe and workspace steps reach the two objects
                     // that own those, through here rather than a singleton.
                     triggers.hooks = ScriptRunner.Hooks(

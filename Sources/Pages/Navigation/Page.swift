@@ -20,7 +20,7 @@ enum WindowID {
 enum Page: String, CaseIterable, Identifiable {
     case telemetry = "Telemetry"
     case stash = "Stash"
-    case scripts = "Script Builder"
+    case scripts = "Automations"
     case workspaces = "Workspaces"
     case settings = "Settings"
 
@@ -30,7 +30,7 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .telemetry: return "gauge.open.with.lines.needle.33percent"
         case .stash: return "tray.2.fill"
-        case .scripts: return "chevron.left.forwardslash.chevron.right"
+        case .scripts: return "wand.and.rays"
         case .workspaces: return "square.grid.2x2.fill"
         case .settings: return "gearshape.fill"
         }
@@ -41,7 +41,7 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .telemetry: return "Telemetry"
         case .stash: return "Stash"
-        case .scripts: return "Scripts"
+        case .scripts: return "Automations"
         case .workspaces: return "Workspaces"
         case .settings: return "Settings"
         }
@@ -54,7 +54,7 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .telemetry: return "WIDGETS"
         case .stash: return nil
-        case .scripts: return "AUTOMATION"
+        case .scripts: return nil
         case .workspaces: return "SYSTEM OVERVIEW"
         case .settings: return "KONFIGURATION"
         }
@@ -85,7 +85,7 @@ enum Page: String, CaseIterable, Identifiable {
         case .stash:
             return "A stash for files in transit. Drag to the notch or shake to open it."
         case .scripts:
-            return "Automations: a trigger, then steps, then a report."
+            return "Rules for your files, actions on a hotkey, and things that happen on their own."
         case .workspaces:
             return "Group applications, launch them together, close them together."
         case .settings:

@@ -57,7 +57,7 @@ struct ToolHost: View {
         case .stash:
             StashPage()
         case .scripts:
-            ScriptBuilderView()
+            AutomationsView()
         case .workspaces:
             if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
         case .settings:
