@@ -222,11 +222,15 @@ final class NetworkTalkers {
     func stop() {
         guard started else { return }
         started = false
-        if let manager { destroyManager(manager) }
-        manager = nil
-        lock.lock()
-        flows.removeAll()
-        lock.unlock()
+        // On `queue`, for the same reason the queries are: nothing may be
+        // asking a source while the manager that owns it is torn down.
+        queue.sync {
+            if let manager { destroyManager(manager) }
+            manager = nil
+            lock.lock()
+            flows.removeAll()
+            lock.unlock()
+        }
     }
 
     /// Takes either a description or a counts dictionary — they share the byte
@@ -257,17 +261,14 @@ final class NetworkTalkers {
     /// which at 2 Hz is half a second and is invisible next to the fact that
     /// these are averages over the interval anyway.
     func sample() -> [Talker] {
-        guard started, let manager else { return [] }
+        guard started else { return [] }
 
         // Fold the live flows up by process. The rates are already computed
         // per flow, so this is a sum, not a difference — nothing here depends
         // on when the sampler happens to tick.
         lock.lock()
         var folded: [pid_t: Talker] = [:]
-        var liveSources: [UnsafeMutableRawPointer] = []
-        liveSources.reserveCapacity(flows.count)
         for flow in flows.values {
-            liveSources.append(flow.source)
             // A flow that has not reported in a while is not moving data; hold
             // it in the list at zero rather than showing a stale rate.
             var talker = folded[flow.pid] ?? Talker(pid: flow.pid, name: flow.name,
@@ -281,9 +282,24 @@ final class NetworkTalkers {
         lock.unlock()
 
         // Ask every live flow for its current counters, and refresh the
-        // descriptions so newly opened flows get named. Both land on `queue`.
-        for source in liveSources { querySourceCounts(source) }
-        queryAll(manager) {}
+        // descriptions so newly opened flows get named.
+        //
+        // **On `queue`, never from here.** A source pointer is only valid until
+        // its removed block has run, and that block runs on `queue`. Asked from
+        // the sampling queue, a flow could close between reading the list and
+        // asking it, and the pointer asked was freed memory — measured: a crash
+        // on wake, when connections close by the dozen, as
+        // `doesNotRecognizeSelector` sent to whatever object had taken the
+        // address. On `queue` the removal and the query cannot interleave: a
+        // flow is either still in the list and still alive, or already gone.
+        queue.async { [weak self] in
+            guard let self, let manager = self.manager else { return }
+            self.lock.lock()
+            let sources = self.flows.values.map(\.source)
+            self.lock.unlock()
+            for source in sources { self.querySourceCounts(source) }
+            self.queryAll(manager) {}
+        }
 
         var talkers = Array(folded.values)
         talkers.sort { $0.total > $1.total }

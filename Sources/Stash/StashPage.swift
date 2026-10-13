@@ -173,7 +173,7 @@ private struct ExportFolderRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("Change zips").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Text("Change zip folder").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
             Spacer(minLength: 12)
             Button(action: choose) {
                 HStack(spacing: 6) {
