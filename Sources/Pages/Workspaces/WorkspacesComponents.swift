@@ -52,8 +52,6 @@ struct GruppeCard: View {
     let group: AppGroup
     let onEdit: () -> Void
 
-    @State private var hovering = false
-
     private var live: AppGroup { store.groups.first { $0.id == group.id } ?? group }
     private var running: Int { store.runningCount(in: live) }
     private var action: GroupStore.PrimaryAction { store.primaryAction(for: live) }
@@ -78,41 +76,7 @@ struct GruppeCard: View {
         }
         .padding(18)
         .frame(minHeight: 176, alignment: .top)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: hovering
-                            ? [Theme.surfaceHover, Theme.surface]
-                            : [Theme.surfaceTop, Theme.surface],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                )
-                .grain(0.17, cornerRadius: Theme.radiusMd)
-                // Gradient + tiled grain + shadow is the most expensive static
-                // stack in the app; rasterise it once instead of recompositing
-                // it on every pass.
-                .drawingGroup()
-                .shadow(color: .black.opacity(0.45), radius: 9, x: 0, y: 3)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .strokeBorder(hovering ? Theme.borderStrong : Theme.borderSubtle, lineWidth: 1)
-        )
-        .bezel()
-        // Active rail, clipped to the card's rounded corners.
-        .overlay(alignment: .leading) {
-            if live.isActive {
-                Rectangle()
-                    .fill(live.color)
-                    .frame(width: 3)
-                    .shadow(color: live.color.opacity(0.55), radius: 5, x: 2)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous))
-        .animation(.easeOut(duration: 0.15), value: hovering)
-        .animation(.easeOut(duration: 0.2), value: live.isActive)
-        .onHover { hovering = $0 }
+        .raisedPanel(rail: live.isActive ? live.color : nil)
         .contextMenu {
             Button(action.label) { store.toggle(live) }
             Button("Edit…", action: onEdit)

@@ -61,11 +61,7 @@ struct ScriptModule: View {
             footer
         }
         .padding(14)
-        .machined(cornerRadius: Theme.radiusMd, fill: Theme.housing)
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-        }
+        .raisedPanel(rail: isLive || progress != nil ? Theme.ambient : nil)
     }
 
     // MARK: Plate
@@ -78,6 +74,7 @@ struct ScriptModule: View {
                 .font(Theme.mono(12, .semibold))
                 .tracking(1)
                 .foregroundStyle(Theme.textPrimary)
+            if let status { Chip(text: status.text, tint: status.tint, size: 9) }
             Spacer(minLength: 8)
             HStack(spacing: 0) {
                 CardButton(glyph: draft.pinnedToMenuBar ? "pin.fill" : "pin",
@@ -98,6 +95,18 @@ struct ScriptModule: View {
                     .toggleStyle(.industrial)
             }
         }
+    }
+
+    /// The one-word state beside the name: running, armed, or switched on
+    /// with something not set up. Nothing when it is simply off.
+    private var status: (text: String, tint: Color)? {
+        if let progress {
+            return ("LÄUFT \(progress.current + 1)/\(draft.steps.count)", Theme.orange)
+        }
+        if draft.isActive && draft.trigger.kind != .manual {
+            return draft.isArmable ? ("BEREIT", Theme.green) : ("UNVOLLSTÄNDIG", Theme.amber)
+        }
+        return nil
     }
 
     // MARK: Bus
@@ -223,10 +232,8 @@ struct ScriptModule: View {
     }
 
     @ViewBuilder private var readout: some View {
-        if let progress {
-            Text("RUNNING \(String(format: "%02d", progress.current + 1))/\(String(format: "%02d", draft.steps.count))")
-                .font(Theme.mono(9, .semibold)).tracking(1)
-                .foregroundStyle(Theme.orange)
+        if progress != nil {
+            EmptyView()     // the plate's LÄUFT chip says it
         } else if let last = runs.last {
             Button {
                 withAnimation(.easeOut(duration: 0.16)) { showingHistory.toggle() }
@@ -424,11 +431,7 @@ struct ScriptHistory: View {
             }
         }
         .padding(14)
-        .machined(cornerRadius: Theme.radiusMd, fill: Theme.housing)
-        .overlay {
-            RoundedRectangle(cornerRadius: Theme.radiusMd, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.07), lineWidth: 1)
-        }
+        .raisedPanel()
     }
 
     private func figure(_ label: String, _ value: String) -> some View {

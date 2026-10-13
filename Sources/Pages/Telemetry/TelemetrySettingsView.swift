@@ -17,12 +17,17 @@ import SwiftUI
 /// is the title's tooltip rather than a line of grey under it.
 struct TelemetrySettingsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var widgets = WidgetManager.shared
+
+    private var armedCount: Int { WidgetKind.configurable.filter(widgets.isArmed).count }
 
     var body: some View {
         SettingsScroll {
             VStack(alignment: .leading, spacing: 10) {
-                SettingsCard {
-                    SwitchRow(title: "Enable telemetry", isOn: $settings.showPerformanceMonitor)
+                SettingsCard(rail: settings.showPerformanceMonitor ? Theme.orange : nil) {
+                    SwitchRow(title: "Enable telemetry",
+                              badge: "\(armedCount)/\(WidgetKind.configurable.count) AKTIV",
+                              isOn: $settings.showPerformanceMonitor)
                 }
                 if settings.showPerformanceMonitor {
                     SettingsCard {

@@ -32,6 +32,7 @@ private struct HiddenStashes: View {
                         .font(Theme.mono(10, .semibold))
                         .tracking(1.1)
                         .foregroundStyle(Theme.textMuted)
+                    Chip(text: "\(hidden.count) VERSTECKT", tint: Theme.textSecondary, size: 9)
                     Spacer()
                     if hidden.count > 1 {
                         Button("Reopen all") { manager.reopenAll() }
@@ -91,7 +92,7 @@ private struct HiddenStashCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .machined(cornerRadius: 10)
+        .raisedPanel()
         .help(shelf.items.map(\.title).joined(separator: "\n"))
     }
 }
@@ -110,8 +111,8 @@ private struct StashSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SettingsCard {
-                SwitchRow(title: "Enable stashes", isOn: $settings.stashEnabled)
+            SettingsCard(rail: settings.stashEnabled ? Theme.orange : nil) {
+                SwitchRow(title: "Enable stashes", badge: "\(triggerCount)/3 AKTIV", isOn: $settings.stashEnabled)
                 if settings.stashEnabled {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 6) { triggers }
@@ -138,6 +139,10 @@ private struct StashSettings: View {
                 ExportFolderRow()
             }
         }
+    }
+
+    private var triggerCount: Int {
+        [settings.stashNotchEnabled, settings.stashEdgeEnabled, settings.stashShakeEnabled].filter { $0 }.count
     }
 
     @ViewBuilder private var triggers: some View {

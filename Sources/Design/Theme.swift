@@ -808,6 +808,58 @@ extension View {
     }
 }
 
+/// The raised panel everything in Gruppen is built on: lit from the top,
+/// grained, lipped with a bezel highlight, and — when what it holds is live —
+/// a glowing rail down its leading edge in that thing's colour.
+///
+/// Lifted from the Gruppe card, which is where the look was first worked out,
+/// so every page's cards are the same physical object. Contents sit in it as
+/// recesses (`machined`, `recessed`), which is what makes the difference
+/// between a panel of hardware and a list on a background.
+struct RaisedPanel: ViewModifier {
+    var rail: Color?
+    var cornerRadius: CGFloat = Theme.radiusMd
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return content
+            .background(
+                shape
+                    .fill(LinearGradient(colors: hovering ? [Theme.surfaceHover, Theme.surface]
+                                                          : [Theme.surfaceTop, Theme.surface],
+                                         startPoint: .top, endPoint: .bottom))
+                    .grain(0.17, cornerRadius: cornerRadius)
+                    // Gradient + tiled grain + shadow is the most expensive
+                    // static stack in the app; rasterise it once instead of
+                    // recompositing it on every pass.
+                    .drawingGroup()
+                    .shadow(color: .black.opacity(0.45), radius: 9, x: 0, y: 3)
+            )
+            .overlay(shape.strokeBorder(hovering ? Theme.borderStrong : Theme.borderSubtle, lineWidth: 1))
+            .bezel(cornerRadius: cornerRadius)
+            .overlay(alignment: .leading) {
+                if let rail {
+                    Rectangle()
+                        .fill(rail)
+                        .frame(width: 3)
+                        .shadow(color: rail.opacity(0.55), radius: 5, x: 2)
+                        .transition(.opacity)
+                }
+            }
+            .clipShape(shape)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .animation(.easeOut(duration: 0.2), value: rail != nil)
+    }
+}
+
+extension View {
+    func raisedPanel(rail: Color? = nil, cornerRadius: CGFloat = Theme.radiusMd) -> some View {
+        modifier(RaisedPanel(rail: rail, cornerRadius: cornerRadius))
+    }
+}
+
 /// Mono uppercase chip — AKTIV, SYSTEM OVERVIEW, and friends.
 struct Chip: View {
     let text: String

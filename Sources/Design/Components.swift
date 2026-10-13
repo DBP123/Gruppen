@@ -82,31 +82,42 @@ struct SettingToggle: View {
     }
 }
 
-/// One machined card holding several rows, so related settings read as a
-/// group instead of a column of identical boxes.
+/// One raised panel holding several rows, so related settings read as one
+/// piece of hardware instead of a column of identical boxes. `rail` lights its
+/// leading edge while what it controls is live.
 struct SettingsCard<Content: View>: View {
+    var rail: Color? = nil
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
-            .machined(cornerRadius: 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .raisedPanel(rail: rail)
     }
 }
 
 struct CardDivider: View {
     var body: some View {
-        Rectangle().fill(Theme.machinedBorder).frame(height: 1).padding(.leading, 12)
+        Rectangle().fill(Theme.borderSubtle).frame(height: 1).padding(.leading, 12)
     }
 }
 
-/// A title and its switch, sized to sit inside a card.
+/// A title and its switch, sized to sit inside a card. `badge` is a short
+/// status chip beside the title — AKTIV, 6/8 AKTIV.
 struct SwitchRow: View {
     let title: String
+    var badge: String? = nil
     @Binding var isOn: Bool
 
     var body: some View {
-        HStack(spacing: 12) {
-            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+        HStack(spacing: 10) {
+            Text(title)
+                .font(Theme.sans(13, badge == nil ? .regular : .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            if let badge, isOn {
+                Chip(text: badge, tint: Theme.green, size: 9)
+                    .transition(.opacity)
+            }
             Spacer(minLength: 12)
             Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.industrial)
         }
