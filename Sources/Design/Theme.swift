@@ -227,7 +227,10 @@ enum Theme {
 // MARK: - Buttons
 
 struct IndustrialButtonStyle: ButtonStyle {
-    enum Kind { case secondary, primary, danger, ghost }
+    /// `quiet` is a key of the same size as `secondary` that steps back: an
+    /// outline with no fill and softer text — for the lesser of two actions
+    /// side by side, where a borderless ghost read as a gap in the row.
+    enum Kind { case secondary, primary, danger, ghost, quiet }
 
     var kind: Kind = .secondary
     /// Half the size, in mono: for a stash, where the whole window is 300pt
@@ -284,7 +287,7 @@ struct IndustrialButtonStyle: ButtonStyle {
             case .primary: return Theme.onAccent
             case .danger: return hovering ? Theme.textPrimary : Theme.red
             case .secondary: return Theme.textPrimary
-            case .ghost: return hovering ? Theme.textPrimary : Theme.textSecondary
+            case .ghost, .quiet: return hovering ? Theme.textPrimary : Theme.textSecondary
             }
         }
 
@@ -296,7 +299,7 @@ struct IndustrialButtonStyle: ButtonStyle {
                 return hovering ? Theme.red.opacity(0.16) : Theme.surfaceHover
             case .secondary:
                 return pressed ? Theme.surfacePressed : (hovering ? Theme.surfacePressed : Theme.surfaceHover)
-            case .ghost:
+            case .ghost, .quiet:
                 return hovering ? Theme.surfaceHover : .clear
             }
         }
@@ -307,6 +310,7 @@ struct IndustrialButtonStyle: ButtonStyle {
             case .danger: return hovering ? Theme.red.opacity(0.55) : Theme.borderSubtle
             case .secondary: return hovering ? Theme.borderStrong : Theme.borderSubtle
             case .ghost: return hovering ? Theme.borderSubtle : .clear
+            case .quiet: return hovering ? Theme.borderStrong : Theme.borderStrong.opacity(0.7)
             }
         }
     }

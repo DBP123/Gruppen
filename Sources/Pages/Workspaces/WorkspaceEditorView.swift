@@ -223,7 +223,7 @@ struct WorkspaceEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let profile {
-                SheetHeader(title: "PROFILE", badge: "KONFIGURATION", tint: profile.color)
+                SheetHeader(title: "PROFIL", badge: "KONFIGURATION", tint: profile.color)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         Identity(profile: profile)
@@ -661,11 +661,14 @@ struct SwatchRow: View {
                 .buttonStyle(.plain)
                 .help(preset.name)
             }
+            // At its own size: squeezed into a fixed frame, the system well
+            // kept drawing at full width and sat over the last swatch.
             ColorPicker("", selection: Binding(get: { Color(hex: hex) },
                                                set: { pick($0.hexString) }),
                         supportsOpacity: false)
                 .labelsHidden()
-                .frame(width: 30)
+                .fixedSize()
+                .padding(.leading, 4)
                 .help("Any other colour")
         }
     }

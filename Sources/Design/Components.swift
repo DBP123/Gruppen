@@ -241,7 +241,7 @@ struct ShortcutKeys: View {
                 KeyBadge(text: shortcut.display, enabled: !unavailable)
                     .help(unavailable ? "Claimed by macOS or another app" : "Works from anywhere")
                 Button("Clear") { onRecord(nil) }
-                    .industrialButton(.ghost)
+                    .industrialButton(.quiet)
             }
             Button(recorder.isRecording ? "Press keys…" : (shortcut == nil ? "Record" : "Change")) {
                 if recorder.isRecording {
