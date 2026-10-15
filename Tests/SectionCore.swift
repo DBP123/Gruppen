@@ -27,7 +27,6 @@ func sectionCore() {
     group.shortcut = valid
     group.isSequenced = true
     group.sequenceDelay = 1.25
-    group.fillsWhenPartial = false
     group.isActive = true
     do {
         let data = try JSONEncoder().encode([group])
@@ -35,7 +34,7 @@ func sectionCore() {
         T.check("round trip preserves every field",
                 back.name == group.name && back.colorHex == group.colorHex
                 && back.shortcut == group.shortcut && back.isSequenced
-                && back.sequenceDelay == 1.25 && back.fillsWhenPartial == false
+                && back.sequenceDelay == 1.25
                 && back.isActive && back.id == group.id)
     } catch { T.check("round trip preserves every field", false, "\(error)") }
 
@@ -62,11 +61,20 @@ func sectionCore() {
         T.check("legacy bare-letter shortcut migrates to ⌥⌘", false, "decode threw")
     }
 
+    // Builds before 1.57 wrote what a partly running Gruppe should do; that
+    // choice is gone, and a file carrying it still loads.
+    let withPartial = #"[{"name":"Old","fillsWhenPartial":false,"isSequenced":true}]"#.data(using: .utf8)!
+    if let decoded = try? JSONDecoder().decode([AppGroup].self, from: withPartial) {
+        T.check("a Gruppe saved with the old partial-launch choice still loads", decoded[0].isSequenced)
+    } else {
+        T.check("a Gruppe saved with the old partial-launch choice still loads", false, "decode threw")
+    }
+
     // The minimum a decoder must tolerate: a name and nothing else.
     let bare = #"[{"name":"Bare"}]"#.data(using: .utf8)!
     if let decoded = try? JSONDecoder().decode([AppGroup].self, from: bare) {
         T.check("a group with only a name decodes with defaults",
-                decoded[0].apps.isEmpty && decoded[0].fillsWhenPartial
+                decoded[0].apps.isEmpty
                 && decoded[0].colorHex == Theme.defaultGroupHex)
     } else {
         T.check("a group with only a name decodes with defaults", false, "decode threw")

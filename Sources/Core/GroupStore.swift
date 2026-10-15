@@ -341,38 +341,29 @@ final class GroupStore: ObservableObject {
 
     /// What the one big button does right now.
     enum PrimaryAction {
-        case launch          // nothing is up
-        case terminate       // everything (or the running remainder) comes down
-        case fillRemaining   // partly up, and this Gruppe prefers to finish
+        case launch
+        case terminate
 
         var label: String {
             switch self {
             case .launch: return "Launch"
             case .terminate: return "Terminate"
-            case .fillRemaining: return "Launch Rest"
             }
         }
     }
 
-    /// A Gruppe that is partly running is genuinely ambiguous — the group's own
-    /// `fillsWhenPartial` decides, rather than guessing from `isActive`.
+    /// Follows the Gruppe, not a count of its apps: launched, it terminates;
+    /// otherwise it launches. Apps that happen to be running already — some
+    /// or all of them — change nothing, since launching leaves them alone.
     func primaryAction(for group: AppGroup) -> PrimaryAction {
-        let running = runningCount(in: group)
-        if running == 0 { return .launch }
-        if running >= group.apps.count { return .terminate }
-        return group.fillsWhenPartial ? .fillRemaining : .terminate
+        group.isActive ? .terminate : .launch
     }
 
     func toggle(_ group: AppGroup) {
         switch primaryAction(for: group) {
-        case .launch, .fillRemaining: launchGroup(group)
+        case .launch: launchGroup(group)
         case .terminate: terminateGroup(group)
         }
-    }
-
-    func setFillsWhenPartial(_ fills: Bool, for group: AppGroup) {
-        guard let index = index(of: group) else { return }
-        groups[index].fillsWhenPartial = fills
     }
 
     /// Launches the Gruppe. Apps already running are left alone rather than

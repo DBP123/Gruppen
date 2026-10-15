@@ -106,9 +106,6 @@ struct AppGroup: Identifiable, Codable, Hashable {
     var colorHex: String = Theme.defaultGroupHex
     /// Global key combination that toggles this Gruppe, or nil for none.
     var shortcut: Shortcut?
-    /// What the primary action does when a Gruppe is *partly* running.
-    /// `true` finishes the launch, `false` closes whatever is up.
-    var fillsWhenPartial: Bool = true
     /// Launch in list order and terminate in reverse, pausing between steps.
     var isSequenced: Bool = false
     /// Seconds between steps of a sequenced launch or termination.
@@ -141,7 +138,6 @@ struct AppGroup: Identifiable, Codable, Hashable {
         } else {
             colorHex = Theme.defaultGroupHex
         }
-        fillsWhenPartial = try container.decodeIfPresent(Bool.self, forKey: .fillsWhenPartial) ?? true
         isSequenced = try container.decodeIfPresent(Bool.self, forKey: .isSequenced) ?? false
         sequenceDelay = try container.decodeIfPresent(TimeInterval.self, forKey: .sequenceDelay) ?? 0.5
 
@@ -156,7 +152,7 @@ struct AppGroup: Identifiable, Codable, Hashable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, apps, isActive, colorHex, shortcut, fillsWhenPartial
+        case id, name, apps, isActive, colorHex, shortcut
         case isSequenced, sequenceDelay
         /// Read-only: written by builds before the shortcut recorder.
         case shortcutKey
@@ -170,7 +166,6 @@ struct AppGroup: Identifiable, Codable, Hashable {
         try container.encode(isActive, forKey: .isActive)
         try container.encode(colorHex, forKey: .colorHex)
         try container.encodeIfPresent(shortcut, forKey: .shortcut)
-        try container.encode(fillsWhenPartial, forKey: .fillsWhenPartial)
         try container.encode(isSequenced, forKey: .isSequenced)
         try container.encode(sequenceDelay, forKey: .sequenceDelay)
     }

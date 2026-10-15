@@ -69,7 +69,7 @@ struct GroupEditorView: View {
 
     private func execution(_ group: AppGroup) -> some View {
         SettingsCard {
-            SwitchRow(title: "Launch in order", isOn: Binding(
+            SwitchRow(title: "Launch sequence", isOn: Binding(
                 get: { group.isSequenced },
                 set: { store.setSequenced($0, for: group) }
             ))
@@ -90,16 +90,6 @@ struct GroupEditorView: View {
                 }
                 .cardRow()
             }
-            CardDivider()
-            VStack(alignment: .leading, spacing: 9) {
-                Text("When only some apps are running")
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                ChoiceSwitch(left: "Launch the rest", right: "Quit what's running",
-                             isRight: Binding(get: { !group.fillsWhenPartial },
-                                              set: { store.setFillsWhenPartial(!$0, for: group) }))
-            }
-            .cardRow()
         }
     }
 

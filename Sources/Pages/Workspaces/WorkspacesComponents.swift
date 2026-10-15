@@ -59,11 +59,7 @@ struct GruppeCard: View {
     private var actionHelp: String {
         switch action {
         case .launch: return "Launch every app in this Gruppe"
-        case .terminate:
-            return running < live.apps.count
-                ? "Force close the \(running) running app(s) in this Gruppe"
-                : "Force close every app in this Gruppe"
-        case .fillRemaining: return "Launch the \(live.apps.count - running) app(s) that aren't running yet"
+        case .terminate: return "Close every app in this Gruppe"
         }
     }
 
@@ -136,8 +132,7 @@ struct GruppeCard: View {
     private var bottom: some View {
         VStack(spacing: 12) {
             Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-            // No count here: the icons above already say how many, and the
-            // line it took is what squeezed "Launch Rest" into "Launch Re…".
+            // No count here: the icons above already say how many.
             HStack {
                 Spacer()
                 HStack(spacing: 6) {
