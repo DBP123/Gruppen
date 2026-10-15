@@ -227,33 +227,43 @@ enum Theme {
 // MARK: - Buttons
 
 struct IndustrialButtonStyle: ButtonStyle {
-    enum Kind { case secondary, primary, danger, ghost }
+    /// `quiet` is a key of the same size as `secondary` that steps back: an
+    /// outline with no fill and softer text — for the lesser of two actions
+    /// side by side, where a borderless ghost read as a gap in the row.
+    enum Kind { case secondary, primary, danger, ghost, quiet }
 
     var kind: Kind = .secondary
+    /// Half the size, in mono: for a stash, where the whole window is 300pt
+    /// wide and a row of full-size buttons is most of it.
+    var compact = false
 
     func makeBody(configuration: Configuration) -> some View {
-        StyleBody(configuration: configuration, kind: kind)
+        StyleBody(configuration: configuration, kind: kind, compact: compact)
     }
 
     private struct StyleBody: View {
         let configuration: ButtonStyleConfiguration
         let kind: Kind
+        let compact: Bool
         @State private var hovering = false
         @Environment(\.isEnabled) private var isEnabled
 
+        private var radius: CGFloat { compact ? 4 : Theme.radiusSm }
+
         var body: some View {
             configuration.label
-                .font(Theme.sans(12, .medium))
+                .font(compact ? Theme.mono(9, .semibold) : Theme.sans(12, .medium))
+                .lineLimit(1)
                 .foregroundStyle(foreground)
-                .padding(.horizontal, kind == .ghost ? 8 : 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, compact ? 6 : (kind == .ghost ? 8 : 12))
+                .padding(.vertical, compact ? 3 : 6)
                 .background(
-                    RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(background(pressed: configuration.isPressed))
                         .overlay(
                             // Lit cap: brighter along the top, like the
                             // illuminated rocker on the panel.
-                            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                            RoundedRectangle(cornerRadius: radius, style: .continuous)
                                 .fill(
                                     LinearGradient(colors: [.white.opacity(kind == .primary ? 0.22 : 0.06), .clear],
                                                    startPoint: .top, endPoint: .center)
@@ -261,7 +271,7 @@ struct IndustrialButtonStyle: ButtonStyle {
                         )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .strokeBorder(border, lineWidth: 1)
                 )
                 .opacity(isEnabled ? 1 : 0.35)
@@ -277,7 +287,7 @@ struct IndustrialButtonStyle: ButtonStyle {
             case .primary: return Theme.onAccent
             case .danger: return hovering ? Theme.textPrimary : Theme.red
             case .secondary: return Theme.textPrimary
-            case .ghost: return hovering ? Theme.textPrimary : Theme.textSecondary
+            case .ghost, .quiet: return hovering ? Theme.textPrimary : Theme.textSecondary
             }
         }
 
@@ -289,7 +299,7 @@ struct IndustrialButtonStyle: ButtonStyle {
                 return hovering ? Theme.red.opacity(0.16) : Theme.surfaceHover
             case .secondary:
                 return pressed ? Theme.surfacePressed : (hovering ? Theme.surfacePressed : Theme.surfaceHover)
-            case .ghost:
+            case .ghost, .quiet:
                 return hovering ? Theme.surfaceHover : .clear
             }
         }
@@ -300,14 +310,16 @@ struct IndustrialButtonStyle: ButtonStyle {
             case .danger: return hovering ? Theme.red.opacity(0.55) : Theme.borderSubtle
             case .secondary: return hovering ? Theme.borderStrong : Theme.borderSubtle
             case .ghost: return hovering ? Theme.borderSubtle : .clear
+            case .quiet: return hovering ? Theme.borderStrong : Theme.borderStrong.opacity(0.7)
             }
         }
     }
 }
 
 extension View {
-    func industrialButton(_ kind: IndustrialButtonStyle.Kind = .secondary) -> some View {
-        buttonStyle(IndustrialButtonStyle(kind: kind))
+    func industrialButton(_ kind: IndustrialButtonStyle.Kind = .secondary,
+                          compact: Bool = false) -> some View {
+        buttonStyle(IndustrialButtonStyle(kind: kind, compact: compact))
     }
 
     /// The keys on a stash: zip, close.
@@ -693,6 +705,27 @@ extension View {
                radius: active ? 25 : 8,
                y: active ? 20 : 4)
     }
+
+    /// The same warmth, sized to fade out completely within `margin`.
+    ///
+    /// For a view whose window is only `margin` larger than it. A glow still
+    /// lit at the window's edge is cut off there, and the cut shows as a hard
+    /// rectangle of light around a window that is supposed to be invisible.
+    /// Measured at a 20pt margin, on the alpha of the window's outermost row:
+    ///
+    /// ```
+    ///   blur 25, drop 20   7.1%   the visible box
+    ///   blur 10, drop 3    2.0%   still a line
+    ///   blur  7, drop 2    <1/255 nothing on screen
+    /// ```
+    ///
+    /// So the blur scales with the margin it has to end inside, and the colour
+    /// is brighter to carry the same warmth over the shorter distance.
+    func ambientGlow(_ active: Bool, within margin: CGFloat) -> some View {
+        shadow(color: active ? Theme.ambient.opacity(0.5) : .black.opacity(0.45),
+               radius: margin * 0.35,
+               y: margin * 0.1)
+    }
 }
 
 /// An indicator lamp, borrowed from the switch panel in the app icon: a lens
@@ -776,6 +809,58 @@ struct BezelHighlight: ViewModifier {
 extension View {
     func bezel(cornerRadius: CGFloat = Theme.radiusMd) -> some View {
         modifier(BezelHighlight(cornerRadius: cornerRadius))
+    }
+}
+
+/// The raised panel everything in Gruppen is built on: lit from the top,
+/// grained, lipped with a bezel highlight, and — when what it holds is live —
+/// a glowing rail down its leading edge in that thing's colour.
+///
+/// Lifted from the Gruppe card, which is where the look was first worked out,
+/// so every page's cards are the same physical object. Contents sit in it as
+/// recesses (`machined`, `recessed`), which is what makes the difference
+/// between a panel of hardware and a list on a background.
+struct RaisedPanel: ViewModifier {
+    var rail: Color?
+    var cornerRadius: CGFloat = Theme.radiusMd
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        return content
+            .background(
+                shape
+                    .fill(LinearGradient(colors: hovering ? [Theme.surfaceHover, Theme.surface]
+                                                          : [Theme.surfaceTop, Theme.surface],
+                                         startPoint: .top, endPoint: .bottom))
+                    .grain(0.17, cornerRadius: cornerRadius)
+                    // Gradient + tiled grain + shadow is the most expensive
+                    // static stack in the app; rasterise it once instead of
+                    // recompositing it on every pass.
+                    .drawingGroup()
+                    .shadow(color: .black.opacity(0.45), radius: 9, x: 0, y: 3)
+            )
+            .overlay(shape.strokeBorder(hovering ? Theme.borderStrong : Theme.borderSubtle, lineWidth: 1))
+            .bezel(cornerRadius: cornerRadius)
+            .overlay(alignment: .leading) {
+                if let rail {
+                    Rectangle()
+                        .fill(rail)
+                        .frame(width: 3)
+                        .shadow(color: rail.opacity(0.55), radius: 5, x: 2)
+                        .transition(.opacity)
+                }
+            }
+            .clipShape(shape)
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.15), value: hovering)
+            .animation(.easeOut(duration: 0.2), value: rail != nil)
+    }
+}
+
+extension View {
+    func raisedPanel(rail: Color? = nil, cornerRadius: CGFloat = Theme.radiusMd) -> some View {
+        modifier(RaisedPanel(rail: rail, cornerRadius: cornerRadius))
     }
 }
 

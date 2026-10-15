@@ -42,7 +42,7 @@ struct AppPowerTable: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            TableHeader(columns: [("APPLICATION", .leading, nil),
+            TableHeader(columns: [("APPLIKATION", .leading, nil),
                                   ("CPU", .trailing, 44),
                                   ("WATTS", .trailing, 52)])
 
@@ -55,7 +55,8 @@ struct AppPowerTable: View {
                         .foregroundStyle(Theme.textMuted)
                         .padding(.vertical, 3)
                 } else {
-                    ForEach(reading.rows) { row in
+                    // Taller rows than the other tables: each carries its bar.
+                    ScrollingRows(items: reading.rows, rowHeight: 19) { row in
                         AppPowerRowView(row: row, peak: reading.rows[0].watts)
                     }
                 }

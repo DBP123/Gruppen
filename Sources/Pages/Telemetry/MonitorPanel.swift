@@ -16,12 +16,14 @@ struct MonitorPanel: View {
     @EnvironmentObject private var store: GroupStore
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var navigation: NavigationModel
+    @EnvironmentObject private var scripts: ScriptLibrary
     @ObservedObject private var manager = WidgetManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             gruppen
+            pinnedScripts
             if !manager.panelOrder.isEmpty {
                 VStack(spacing: 7) {
                     ForEach(manager.panelOrder) { kind in
@@ -74,6 +76,25 @@ struct MonitorPanel: View {
             VStack(spacing: 3) {
                 ForEach(store.groups) { group in
                     GruppeRow(group: group)
+                }
+            }
+        }
+    }
+
+    /// Scripts pinned from the Scripts page, each with its run key. Nothing at
+    /// all until one is pinned.
+    @ViewBuilder
+    private var pinnedScripts: some View {
+        let pinned = scripts.scripts.filter(\.pinnedToMenuBar)
+        if !pinned.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("SCRIPTS")
+                    .font(Theme.mono(8.5, .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Theme.textMuted)
+                    .padding(.leading, 8)
+                ForEach(pinned) { script in
+                    ScriptRow(script: script)
                 }
             }
         }
@@ -165,6 +186,52 @@ private struct GruppeRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .onHover { hovering = $0 }
+    }
+}
+
+/// A pinned script: its lamp, its name, and RUN — then RUNNING, then the last
+/// run's result. The panel stays open so you can watch it finish.
+private struct ScriptRow: View {
+    let script: Script
+    @EnvironmentObject private var scripts: ScriptLibrary
+    @EnvironmentObject private var triggers: ScriptTriggerCoordinator
+    @State private var hovering = false
+
+    private var running: Bool { triggers.progress[script.id] != nil }
+    private var last: ScriptRunRecord? { scripts.runs[script.id]?.last }
+
+    var body: some View {
+        Button {
+            triggers.run(script, paths: [], source: "Menu bar")
+        } label: {
+            HStack(spacing: 8) {
+                ScriptLamp(script: script, size: 7)
+                Text(script.name)
+                    .font(Theme.sans(12, .medium))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if let last, !running, !hovering {
+                    Circle().fill(last.succeeded ? Theme.green : Theme.red).frame(width: 5, height: 5)
+                        .help(last.summary)
+                }
+                Text(running ? "RUNNING" : "RUN")
+                    .font(Theme.mono(8.5, .semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(running || hovering ? Theme.orange : Theme.textMuted)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(hovering ? Color.white.opacity(0.06) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(running || script.steps.isEmpty)
         .onHover { hovering = $0 }
     }
 }

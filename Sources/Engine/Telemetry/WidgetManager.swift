@@ -261,14 +261,16 @@ final class WidgetManager: ObservableObject {
 
     /// How a pinned module draws its menu bar item.
     func mode(for kind: WidgetKind) -> MenuBarDisplayMode {
-        menuBarModes[kind] ?? kind.defaultMenuBarMode
+        // A stored choice from before the style became fixed is ignored.
+        guard kind.hasMenuBarStyles else { return kind.defaultMenuBarMode }
+        return menuBarModes[kind] ?? kind.defaultMenuBarMode
     }
 
     /// Changing this rebuilds the item's contents and its fixed width, and
     /// nothing else — the module underneath is untouched, still sampling at the
     /// same rate it was.
     func setMode(_ newMode: MenuBarDisplayMode, for kind: WidgetKind) {
-        guard kind.isPinnable, mode(for: kind) != newMode else { return }
+        guard kind.isPinnable, kind.hasMenuBarStyles, mode(for: kind) != newMode else { return }
         var result = menuBarModes
         result[kind] = newMode
         menuBarModes = result

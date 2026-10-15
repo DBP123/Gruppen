@@ -107,7 +107,7 @@ final class NotchSentinelPanel: SentinelPanel {
         let full = screen.frame
 
         var width: CGFloat = 420
-        if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+        if let (left, right) = screen.notchFlanks {
             width = max((right.minX - left.maxX) + sideReach * 2, 380)
         }
 

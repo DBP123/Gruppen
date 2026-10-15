@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Configuration sheet for a single Gruppe.
+/// Configuration sheet for a single Gruppe: who it is, how it runs, and its
+/// apps — three cards, in that order.
 struct GroupEditorView: View {
     @EnvironmentObject private var store: GroupStore
     @Environment(\.dismiss) private var dismiss
@@ -9,168 +10,156 @@ struct GroupEditorView: View {
     let groupID: UUID
 
     @State private var name = ""
-    @State private var dropTargeted = false
 
     private var group: AppGroup? { store.groups.first { $0.id == groupID } }
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            SheetHeader(title: "GRUPPE", badge: "KONFIGURATION", tint: group?.color ?? Theme.orange)
             if let group {
-                content(group)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        identity(group)
+                        LabeledSection(label: "EXECUTION") { execution(group) }
+                        LabeledSection(label: "APPLIKATIONEN — \(group.apps.count)") { apps(group) }
+                    }
+                    .padding(20)
+                }
+                .scrollContentBackground(.hidden)
                 footer(group)
             }
         }
-        .frame(width: 560, height: 580)
-        .background(Theme.panel)
+        .frame(width: 580, height: 640)
+        .background(Theme.panel.grain(0.26))
         .onAppear { name = group?.name ?? "" }
     }
 
-    // MARK: Header
+    // MARK: Identity
 
-    private var header: some View {
-        HStack {
+    private func identity(_ group: AppGroup) -> some View {
+        SettingsCard(rail: group.color) {
+            TextField("Gruppe name", text: $name)
+                .textFieldStyle(.plain)
+                .font(Theme.sans(15, .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .onSubmit(commit)
+                .cardRow()
+            CardDivider()
+            HStack(spacing: 12) {
+                Text("Colour").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 12)
+                SwatchRow(hex: group.colorHex) { store.setColor($0, for: group) }
+            }
+            .cardRow()
+            CardDivider()
             HStack(spacing: 8) {
-                Text("GRUPPE")
-                    .font(Theme.mono(11, .medium))
-                    .tracking(1.3)
-                    .foregroundStyle(Theme.textSecondary)
-                Chip(text: "KONFIGURATION", tint: Theme.orange, size: 9)
+                Text("Shortcut").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                    .help("Toggles this Gruppe from anywhere")
+                Spacer(minLength: 12)
+                ShortcutKeys(shortcut: group.shortcut,
+                             unavailable: store.unavailableShortcuts.contains(group.id),
+                             onRecordingChange: { $0 ? store.suspendHotkeys() : store.resumeHotkeys() },
+                             onRecord: { store.setShortcut($0, for: group) })
             }
-            Spacer()
-            Button { commit(); dismiss() } label: {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-            }
-            .industrialButton(.ghost)
-        }
-        .padding(.horizontal, 20)
-        .frame(height: 48)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.borderSubtle).frame(height: 1) }
-    }
-
-    // MARK: Content
-
-    private func content(_ group: AppGroup) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                LabeledSection(label: "NAME") {
-                    TextField("Gruppe name", text: $name)
-                        .textFieldStyle(.plain)
-                        .font(Theme.sans(14, .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: Theme.radiusSm).fill(Theme.input))
-                        .overlay(RoundedRectangle(cornerRadius: Theme.radiusSm)
-                            .strokeBorder(Theme.borderSubtle, lineWidth: 1))
-                        .onSubmit(commit)
-                }
-
-                LabeledSection(label: "FARBE") {
-                    ColorSelector(group: group)
-                }
-
-                LabeledSection(label: "GLOBAL SHORTCUT") {
-                    ShortcutRecorderRow(group: group)
-                }
-
-                LabeledSection(label: "EXECUTION") {
-                    SequenceControls(group: group)
-                }
-
-                LabeledSection(label: "WHEN PARTLY RUNNING") {
-                    PartialBehaviourRow(group: group)
-                }
-
-                LabeledSection(label: "APPLIKATIONEN — \(group.apps.count)") {
-                    appList(group)
-                }
-            }
-            .padding(20)
+            .cardRow()
         }
     }
 
-    private func appList(_ group: AppGroup) -> some View {
-        VStack(spacing: 0) {
-            if group.apps.isEmpty {
-                VStack(spacing: 10) {
-                    Text("Drag applications here, or add them manually")
-                        .font(Theme.sans(12))
-                        .foregroundStyle(Theme.textMuted)
-                    Button("+ Add Applikationen") { addApps(group) }.industrialButton(.secondary)
+    // MARK: Execution
+
+    private func execution(_ group: AppGroup) -> some View {
+        SettingsCard {
+            SwitchRow(title: "Launch in order", isOn: Binding(
+                get: { group.isSequenced },
+                set: { store.setSequenced($0, for: group) }
+            ))
+            .help("Launches top to bottom and quits bottom to top. Drag the apps below to set the order")
+            if group.isSequenced {
+                HStack(spacing: 12) {
+                    Text("Pause between apps").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                        .help("Some apps refuse to come up cleanly while the one before them is still starting")
+                    Spacer(minLength: 12)
+                    IndustrialSlider(value: Binding(get: { group.sequenceDelay },
+                                                    set: { store.setSequenceDelay($0, for: group) }),
+                                     range: 0...3, step: 0.1)
+                        .frame(width: 160)
+                    Text(String(format: "%.1fs", group.sequenceDelay))
+                        .font(Theme.mono(11).monospacedDigit())
+                        .foregroundStyle(Theme.orange)
+                        .frame(width: 34, alignment: .trailing)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 36)
-            } else if group.isSequenced {
+                .cardRow()
+            }
+            CardDivider()
+            VStack(alignment: .leading, spacing: 9) {
+                Text("When only some apps are running")
+                    .font(Theme.sans(13))
+                    .foregroundStyle(Theme.textPrimary)
+                ChoiceSwitch(left: "Launch the rest", right: "Quit what's running",
+                             isRight: Binding(get: { !group.fillsWhenPartial },
+                                              set: { store.setFillsWhenPartial(!$0, for: group) }))
+            }
+            .cardRow()
+        }
+    }
+
+    // MARK: Apps
+
+    private func apps(_ group: AppGroup) -> some View {
+        SettingsCard {
+            if group.isSequenced {
                 // A List is what gives `.onMove` real drag-reordering on macOS.
                 List {
                     ForEach(Array(group.apps.enumerated()), id: \.element.id) { position, app in
-                        AppRow(app: app,
-                               running: store.isRunning(app),
-                               step: position + 1,
-                               accent: group.color) {
+                        AppRow(app: app, running: store.isRunning(app), step: position + 1, accent: group.color) {
                             store.remove([app.id], from: group)
                         }
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }
-                    .onMove { source, destination in
-                        store.moveApps(in: group, from: source, to: destination)
-                    }
+                    .onMove { store.moveApps(in: group, from: $0, to: $1) }
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(true)
-                .frame(height: CGFloat(group.apps.count) * 48 + 8)
+                .frame(height: CGFloat(group.apps.count) * 42 + 4)
             } else {
                 ForEach(group.apps) { app in
                     AppRow(app: app, running: store.isRunning(app)) {
                         store.remove([app.id], from: group)
                     }
-                    if app.id != group.apps.last?.id {
-                        Rectangle().fill(Theme.borderSubtle).frame(height: 1)
-                    }
                 }
             }
+            if !group.apps.isEmpty { CardDivider() }
+            HStack {
+                Button { addApps(group) } label: { Label("Add Applikationen…", systemImage: "plus") }
+                    .industrialButton(.ghost)
+                Spacer()
+            }
+            .padding(8)
         }
-        .background(RoundedRectangle(cornerRadius: Theme.radiusMd).fill(Theme.surface))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.radiusMd)
-                .strokeBorder(dropTargeted ? Theme.orange : Theme.borderSubtle,
-                              style: StrokeStyle(lineWidth: dropTargeted ? 2 : 1,
-                                                 dash: group.apps.isEmpty ? [4, 4] : []))
-        )
         .dropDestination(for: URL.self) { urls, _ in
             store.add(urls: urls, to: group)
             return true
-        } isTargeted: { dropTargeted = $0 }
-        .animation(.easeOut(duration: 0.12), value: dropTargeted)
+        }
+        .help(group.apps.isEmpty ? "Drop applications here" : "")
     }
 
     // MARK: Footer
 
     private func footer(_ group: AppGroup) -> some View {
-        HStack {
+        SheetFooter {
             Button("Delete Gruppe") {
                 dismiss()
                 store.delete(group)
             }
             .industrialButton(.danger)
-
             Spacer()
-
-            if !group.apps.isEmpty {
-                Button("+ Add Applikationen") { addApps(group) }.industrialButton(.secondary)
-            }
             Button("Done") { commit(); dismiss() }
                 .industrialButton(.primary)
                 .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 20)
-        .frame(height: 56)
-        .background(Theme.panel)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.borderSubtle).frame(height: 1) }
     }
 
     private func commit() {
@@ -179,136 +168,14 @@ struct GroupEditorView: View {
     }
 
     private func addApps(_ group: AppGroup) {
-        let panel = NSOpenPanel()
-        panel.title = "Add Applikationen"
-        panel.prompt = "Add"
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK else { return }
-        store.add(urls: panel.urls, to: group)
+        let urls = Pickers.apps()
+        guard !urls.isEmpty else { return }
+        store.add(urls: urls, to: group)
     }
 }
 
-/// Click to arm, then press the combination you want. Escape abandons,
-/// Delete clears. Existing hotkeys are released while listening so pressing an
-/// already-bound combination records it instead of firing it.
-private struct ShortcutRecorderRow: View {
-    @EnvironmentObject private var store: GroupStore
-    @StateObject private var recorder = KeyRecorder()
-    @State private var hovering = false
-
-    let group: AppGroup
-
-    private var live: AppGroup { store.groups.first { $0.id == group.id } ?? group }
-    private var unavailable: Bool { store.unavailableShortcuts.contains(live.id) }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Button(action: toggleRecording) {
-                HStack(spacing: 6) {
-                    if recorder.isRecording {
-                        Circle().fill(Theme.orange).frame(width: 6, height: 6)
-                        Text("PRESS KEYS…")
-                    } else if let display = live.shortcutDisplay {
-                        Text(display)
-                    } else {
-                        Text("Not bound")
-                    }
-                }
-                .font(Theme.mono(12))
-                .foregroundStyle(labelColor)
-                .frame(minWidth: 130)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: Theme.radiusSm).fill(Theme.input))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.radiusSm)
-                        .strokeBorder(borderColor, lineWidth: recorder.isRecording ? 2 : 1)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { hovering = $0 }
-
-            if live.shortcut != nil && !recorder.isRecording {
-                Button {
-                    store.setShortcut(nil, for: live)
-                } label: {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                }
-                .industrialButton(.ghost)
-                .help("Clear shortcut")
-            }
-
-            Text(hint)
-                .font(Theme.mono(10))
-                .foregroundStyle(unavailable ? Theme.red : Theme.textMuted)
-
-            Spacer()
-        }
-        .animation(.easeOut(duration: 0.12), value: recorder.isRecording)
-        .onDisappear {
-            if recorder.isRecording { store.resumeHotkeys() }
-            recorder.stop()
-        }
-    }
-
-    private var labelColor: Color {
-        if recorder.isRecording { return Theme.orange }
-        if live.shortcut == nil { return Theme.textMuted }
-        return unavailable ? Theme.red : Theme.textPrimary
-    }
-
-    private var borderColor: Color {
-        if recorder.isRecording { return Theme.orange }
-        if unavailable { return Theme.red.opacity(0.5) }
-        return hovering ? Theme.borderStrong : Theme.borderSubtle
-    }
-
-    private var hint: String {
-        if recorder.isRecording { return "⎋ cancel · ⌫ clear · needs ⌘, ⌥ or ⌃" }
-        if unavailable { return "UNAVAILABLE — claimed by another app" }
-        return live.shortcut == nil ? "Click to record" : "Toggles from anywhere"
-    }
-
-    private func toggleRecording() {
-        if recorder.isRecording {
-            recorder.stop()
-            store.resumeHotkeys()
-            return
-        }
-        store.suspendHotkeys()
-        recorder.start { captured in
-            store.setShortcut(captured, for: live)
-            store.resumeHotkeys()
-        }
-    }
-}
-
-/// Some apps up, some down, is the one genuinely ambiguous state — this picks
-/// what the Gruppe's button does about it.
-private struct PartialBehaviourRow: View {
-    @EnvironmentObject private var store: GroupStore
-    let group: AppGroup
-
-    private var live: AppGroup { store.groups.first { $0.id == group.id } ?? group }
-
-    var body: some View {
-        SettingToggle(
-            title: live.fillsWhenPartial ? "Launch the remaining apps" : "Terminate the running apps",
-            detail: live.fillsWhenPartial
-                ? "Fills the Gruppe in — button reads LAUNCH REST"
-                : "Closes what is up — button reads TERMINATE",
-            isOn: Binding(
-                get: { live.fillsWhenPartial },
-                set: { store.setFillsWhenPartial($0, for: live) }
-            )
-        )
-    }
-}
-
+/// One app in a Gruppe: its step when the Gruppe runs in order, its icon and
+/// name, whether it is up, and a remove key on hover.
 private struct AppRow: View {
     let app: AppEntry
     let running: Bool
@@ -327,38 +194,24 @@ private struct AppRow: View {
                 .resizable()
                 .interpolation(.high)
                 .frame(width: 22, height: 22)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(app.name)
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(app.bundleID.isEmpty ? app.path : app.bundleID)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
+            Text(app.name)
+                .font(Theme.sans(13))
+                .foregroundStyle(Theme.textPrimary)
+                .help(app.bundleID.isEmpty ? app.path : app.bundleID)
             Spacer()
-
             if running {
-                Circle().fill(Theme.green).frame(width: 6, height: 6)
-                Text("RUNNING")
-                    .font(Theme.mono(9, .semibold))
-                    .tracking(0.5)
-                    .foregroundStyle(Theme.green)
+                Chip(text: "RUNNING", tint: Theme.green, size: 8.5)
             }
-
             Button(action: onRemove) {
                 Image(systemName: "minus").font(.system(size: 10, weight: .bold))
             }
             .industrialButton(.ghost)
             .opacity(hovering ? 1 : 0)
-            .help("Remove from Gruppe")
+            .help("Remove from the Gruppe")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(hovering ? Theme.surfaceHover : Color.clear)
+        .frame(height: 42)
+        .background(hovering ? Color.white.opacity(0.03) : Color.clear)
         .animation(.easeOut(duration: 0.1), value: hovering)
         .onHover { hovering = $0 }
     }
@@ -385,128 +238,5 @@ private struct StepBadge: View {
                     .strokeBorder(lit ? accent.opacity(0.55) : Theme.borderSubtle, lineWidth: 1)
             )
             .shadow(color: lit ? accent.opacity(0.45) : .clear, radius: 4)
-    }
-}
-
-/// Quick-select swatches plus a native picker for any other hex.
-private struct ColorSelector: View {
-    @EnvironmentObject private var store: GroupStore
-    let group: AppGroup
-
-    private var live: AppGroup { store.groups.first { $0.id == group.id } ?? group }
-
-    private var customBinding: Binding<Color> {
-        Binding(
-            get: { live.color },
-            set: { newValue in
-                let hex = newValue.hexString
-                if hex != live.colorHex { store.setColor(hex, for: live) }
-            }
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(Theme.presetColors) { preset in
-                Swatch(hex: preset.hex,
-                       selected: live.colorHex.caseInsensitiveCompare(preset.hex) == .orderedSame) {
-                    store.setColor(preset.hex, for: live)
-                }
-                .help(preset.name)
-            }
-
-            Rectangle()
-                .fill(Theme.borderSubtle)
-                .frame(width: 1, height: 20)
-
-            ColorPicker("", selection: customBinding, supportsOpacity: false)
-                .labelsHidden()
-                .help("Custom colour")
-
-            Text(live.colorHex.uppercased())
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.textMuted)
-
-            Spacer()
-        }
-    }
-}
-
-/// Strict execution sequence: order matters, and so does the pause between
-/// steps — some apps refuse to come up cleanly if their dependency is still
-/// starting.
-private struct SequenceControls: View {
-    @EnvironmentObject private var store: GroupStore
-    let group: AppGroup
-
-    private var live: AppGroup { store.groups.first { $0.id == group.id } ?? group }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SettingToggle(
-                title: "Strict Execution Sequence",
-                detail: "Launch 1→N in order, terminate N→1 in reverse",
-                isOn: Binding(
-                    get: { live.isSequenced },
-                    set: { store.setSequenced($0, for: live) }
-                )
-            )
-
-            if live.isSequenced {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("STEP DELAY")
-                            .font(Theme.mono(10, .semibold))
-                            .tracking(1.1)
-                            .foregroundStyle(Theme.textMuted)
-                        Spacer()
-                        Text(String(format: "%.1fs", live.sequenceDelay))
-                            .font(Theme.mono(11))
-                            .foregroundStyle(Theme.orange)
-                    }
-                    IndustrialSlider(
-                        value: Binding(
-                            get: { live.sequenceDelay },
-                            set: { store.setSequenceDelay($0, for: live) }
-                        ),
-                        range: 0...3,
-                        step: 0.1
-                    )
-                    Text("Drag rows below to set the order.")
-                        .font(Theme.mono(10))
-                        .foregroundStyle(Theme.textMuted)
-                }
-                .panelRow()
-            }
-        }
-    }
-}
-
-private struct Swatch: View {
-    let hex: String
-    let selected: Bool
-    let action: () -> Void
-
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Circle()
-                .fill(Color(hex: hex))
-                .frame(width: 20, height: 20)
-                .overlay(
-                    Circle().strokeBorder(Theme.panel, lineWidth: selected ? 2 : 0)
-                )
-                .overlay(
-                    Circle()
-                        .strokeBorder(selected ? Color(hex: hex) : .clear, lineWidth: 1.5)
-                        .padding(-3)
-                )
-                .shadow(color: selected ? Color(hex: hex).opacity(0.6) : .clear, radius: 5)
-                .scaleEffect(hovering ? 1.12 : 1)
-                .animation(.easeOut(duration: 0.12), value: hovering)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }

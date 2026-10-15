@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 @MainActor
-func sectionStash() {
+func sectionStash() async {
     T.begin("D. Stash — item classification")
 
     let zip = StashItem.file(URL(fileURLWithPath: "/tmp/a/report.zip"))
@@ -80,6 +80,14 @@ func sectionStash() {
     tray.clear()
     T.equal("clearing a loaded tray closes it", emptied, 2)
 
+    // A file deleted with its own remove key never closes the stash, even the
+    // last one; the tray stays open, empty, until it is closed on purpose.
+    tray.add([three[0], three[1]])
+    tray.remove(three[0], keepingOpen: true)
+    tray.remove(three[1], keepingOpen: true)
+    T.check("deleting the last file by hand leaves the stash open",
+            emptied == 2 && tray.isEmpty, "emptied \(emptied) time(s), \(tray.items.count) left")
+
     T.begin("D. Stash — batch extraction planning")
 
     withTempDir { dir in
@@ -139,12 +147,12 @@ func sectionStash() {
 
     T.begin("D. Stash — export naming")
 
-    withTempDir { dir in
+    await withTempDirAsync { dir in
         let a = dir.appendingPathComponent("one.txt")
         try? Data("a".utf8).write(to: a)
         do {
-            let first = try StashExporter.export(items: [("one.txt", a, nil)], to: dir)
-            let second = try StashExporter.export(items: [("one.txt", a, nil)], to: dir)
+            let first = try await StashExporter.export(items: [("one.txt", a, nil)], to: dir)
+            let second = try await StashExporter.export(items: [("one.txt", a, nil)], to: dir)
             T.check("two exports do not overwrite each other",
                     first != second, "\(first.lastPathComponent) then \(second.lastPathComponent)")
             T.check("the archive exists and is not empty",
@@ -152,24 +160,24 @@ func sectionStash() {
         } catch { T.check("exporting a file works", false, "\(error)") }
 
         do {
-            _ = try StashExporter.export(items: [], to: dir)
+            _ = try await StashExporter.export(items: [], to: dir)
             T.check("an empty export is refused", false, "it produced an archive")
         } catch { T.check("an empty export is refused", true, "\(error.localizedDescription)") }
 
         // The failures the shelf has to put into words, read back the way the
         // shelf reads them.
-        func failure(_ destination: URL) -> String? {
-            do { _ = try StashExporter.export(items: [("one.txt", a, nil)], to: destination); return nil }
+        func failure(_ destination: URL) async -> String? {
+            do { _ = try await StashExporter.export(items: [("one.txt", a, nil)], to: destination); return nil }
             catch { return (error as? StashExporter.ExportError)?.errorDescription }
         }
         let missing = dir.appendingPathComponent("Nowhere", isDirectory: true)
         T.equal("a missing folder is named, not left to zip's stderr",
-                failure(missing), "Nowhere folder not found")
+                await failure(missing), "Nowhere folder not found")
 
         let locked = dir.appendingPathComponent("Locked", isDirectory: true)
         try? FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
         try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
-        T.equal("a read-only folder says so", failure(locked), "Can't write to Locked")
+        T.equal("a read-only folder says so", await failure(locked), "Can't write to Locked")
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
 
         let messages = [StashExporter.ExportError.nothingToExport, .folderMissing("Downloads"),
@@ -209,6 +217,12 @@ func sectionStash() {
             StashDragOut.operations(for: outside, moving: true).contains(.copy))
     T.check("copy mode never offers a move — nothing may relocate the file",
             !StashDragOut.operations(for: outside, moving: false).contains(.move))
+    // Finder, offered both, took copy on a same-disk drop. Over Finder there
+    // is no choice to make.
+    T.equal("over Finder, move mode offers a move and nothing else",
+            StashDragOut.operations(for: outside, moving: true, overFinder: true), .move)
+    T.equal("copy mode over Finder is still a copy",
+            StashDragOut.operations(for: outside, moving: false, overFinder: true), .copy)
 
     // Whether the finished drag takes the item off the stash.
     // Any drop that landed takes the item off the stash, whatever the receiver
@@ -263,4 +277,15 @@ func sectionStash() {
     T.check("and survives a relaunch", AppSettings().stashMovesOnDragOut)
     if let saved { defaults.set(saved, forKey: "stashMovesOnDragOut") }
     else { defaults.removeObject(forKey: "stashMovesOnDragOut") }
+
+    // The notch close key's setting: keeping is what closing has always done.
+    let savedClose = defaults.object(forKey: "notchCloseClearsStash")
+    defaults.removeObject(forKey: "notchCloseClearsStash")
+    T.check("closing the notch stash keeps its files by default",
+            AppSettings().notchCloseClearsStash == false)
+    let closeSettings = AppSettings()
+    closeSettings.notchCloseClearsStash = true
+    T.check("choosing to clear on close survives a relaunch", AppSettings().notchCloseClearsStash)
+    if let savedClose { defaults.set(savedClose, forKey: "notchCloseClearsStash") }
+    else { defaults.removeObject(forKey: "notchCloseClearsStash") }
 }

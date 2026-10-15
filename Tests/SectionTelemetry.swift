@@ -161,7 +161,50 @@ func sectionTelemetry() {
             reopened.map { String(format: "%.2f W", $0.flow.systemLoad) } ?? "nil")
     onQueue { power2.teardown() }
 
+    T.begin("E. Telemetry — the battery node, whatever macOS calls things")
+
+    // macOS 26: the raw figures sit at the top of the node.
+    let macOS26 = BatteryRegistry(fields: [
+        "Voltage": 12_400, "Amperage": -1_500, "AppleRawCurrentCapacity": 4_700, "AppleRawMaxCapacity": 6_200,
+        "CurrentCapacity": 76, "MaxCapacity": 100, "ExternalConnected": 0, "IsCharging": 0,
+        "DesignCapacity": 6_250, "CycleCount": 31, "Temperature": 3_050,
+    ])
+    // macOS 27: the raw figures moved into BatteryData; Temperature is gone.
+    let macOS27 = BatteryRegistry(fields: [
+        "Voltage": 12_379, "Amperage": 0, "CurrentCapacity": 80, "MaxCapacity": 100,
+        "ExternalConnected": 1, "IsCharging": 0, "CycleCount": 31,
+        "BatteryData": ["RemainingCapacity": 4_731, "FullChargeCapacity": 6_204, "DesignCapacity": 6_249],
+    ])
+    for (name, battery, percent, capacity) in [("macOS 26", macOS26, 76, 6_200.0), ("macOS 27", macOS27, 80, 6_204.0)] {
+        let flow = PowerFlow.flow(from: battery, liveDraw: 9)
+        T.equal("\(name): the percentage is the one macOS shows", flow?.percent, percent)
+        T.equal("\(name): capacity in mAh is found", flow?.capacitymAh, capacity)
+        T.check("\(name): energy is computed", (flow?.fullEnergy ?? 0) > 70, "\(flow?.fullEnergy ?? 0) Wh")
+    }
+    T.check("macOS 27: health still comes out of BatteryData",
+            macOS27.designmAh == 6_249 && macOS27.capacitymAh == 6_204)
+    T.check("macOS 27: a temperature that no longer exists is unknown, not an error", macOS27.celsius == nil)
+    T.equal("macOS 26: temperature in hundredths of a degree", macOS26.celsius, 30.5)
+
+    // A node down to just the charge level still makes a reading.
+    let bare = BatteryRegistry(fields: ["CurrentCapacity": 55, "MaxCapacity": 100])
+    T.equal("only a percentage is enough to show the battery", PowerFlow.flow(from: bare, liveDraw: nil)?.percent, 55)
+    T.check("nothing at all is no battery", PowerFlow.flow(from: BatteryRegistry(fields: [:]), liveDraw: nil) == nil)
+
+    // The live machine: if there is a battery node, it must read.
+    let hasBattery = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+    if hasBattery != 0 {
+        IOObjectRelease(hasBattery)
+        let live = onQueue { PowerFlow.read(liveDraw: nil) }
+        T.check("a Mac with a battery always gets a reading on this macOS", live != nil,
+                live.map { "\($0.percent)%, \(Int($0.capacitymAh)) mAh" } ?? "nil — a key moved; see BatteryRegistry")
+    }
+
     T.begin("E. Telemetry — power, the panel's arithmetic")
+
+    T.check("the battery has no menu bar style to choose", !WidgetKind.power.hasMenuBarStyles)
+    T.equal("in the menu bar it is always the battery glyph",
+            WidgetKind.power.defaultMenuBarMode, .sparkline)
 
     if let flow = onQueue({ PowerFlow.read(liveDraw: nil) }) {
         T.check("system draw is never negative", flow.systemLoad >= 0,

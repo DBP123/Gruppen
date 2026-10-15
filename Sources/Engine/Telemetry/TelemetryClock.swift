@@ -32,7 +32,7 @@ final class TelemetryClock: @unchecked Sendable {
 
     /// A closure run on the queue that does the sampling, returning the
     /// main-thread work to apply its result — or nil when there is nothing new.
-    typealias Tick = () -> (@MainActor () -> Void)?
+    typealias Tick = @Sendable () -> (@MainActor @Sendable () -> Void)?
 
     private struct Entry {
         let period: TimeInterval
@@ -90,7 +90,7 @@ final class TelemetryClock: @unchecked Sendable {
     /// One pass: sample everything that is due, then one trip to the main thread.
     private func fire() {
         let now = DispatchTime.now()
-        var applies: [@MainActor () -> Void] = []
+        var applies: [@MainActor @Sendable () -> Void] = []
         // Every sampler allocates — arrays of ticks, process names, CFTypes
         // out of IOKit. One pool around the whole pass drains them together.
         autoreleasepool {
@@ -101,9 +101,10 @@ final class TelemetryClock: @unchecked Sendable {
             }
         }
         guard !applies.isEmpty else { return }
+        let batch = applies
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                for apply in applies { apply() }
+                for apply in batch { apply() }
             }
         }
     }

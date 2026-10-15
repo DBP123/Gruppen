@@ -230,8 +230,7 @@ final class NotchGeometryManager: ObservableObject {
     /// `auxiliaryTopLeftArea.maxX` and `auxiliaryTopRightArea.minX` is the
     /// housing, by definition, on any display that has one.
     static func notchBounds(of screen: NSScreen) -> NSRect? {
-        guard let left = screen.auxiliaryTopLeftArea,
-              let right = screen.auxiliaryTopRightArea else { return nil }
+        guard let (left, right) = screen.notchFlanks else { return nil }
         let width = right.minX - left.maxX
         // A non-positive gap means the two areas meet: no housing between them.
         guard width > 1 else { return nil }
@@ -253,11 +252,15 @@ final class NotchGeometryManager: ObservableObject {
         return rect
     }
 
-    /// The menu bar band's height on a given screen.
+    /// The menu bar band's height on a given screen: the housing's height where
+    /// there is one, the standard menu bar where there is not.
+    ///
+    /// There used to be a `safeAreaInsets.top` step between the two. It could
+    /// only matter on a display reporting a top inset but no auxiliary areas,
+    /// which no notched Mac on macOS 13 or later does, and keeping it would have
+    /// been a second way to ask the same question.
     static func bandHeight(of screen: NSScreen) -> CGFloat {
-        if let aux = screen.auxiliaryTopLeftArea { return aux.height }
-        if screen.safeAreaInsets.top > 0 { return screen.safeAreaInsets.top }
-        return NSStatusBar.system.thickness
+        screen.notchFlanks?.left.height ?? NSStatusBar.system.thickness
     }
 
     /// One line describing the current topology, for the log.
@@ -272,5 +275,20 @@ final class NotchGeometryManager: ObservableObject {
         return "anchor=\(anchor.displayID) "
             + (anchor.hasPhysicalNotch ? "notched" : "no-notch")
             + " of \(screens.joined(separator: " "))"
+    }
+}
+
+extension NSScreen {
+    /// The two menu-bar areas either side of the camera housing, or nil when
+    /// there is no housing.
+    ///
+    /// **This is the app's one question to the hardware about a notch.** The
+    /// tray's sides, the band it hides behind, which display it anchors to and
+    /// the sentinel that summons it all derive from this answer, so nothing
+    /// else asks the screen directly.
+    var notchFlanks: (left: NSRect, right: NSRect)? {
+        guard let left = auxiliaryTopLeftArea,
+              let right = auxiliaryTopRightArea else { return nil }
+        return (left, right)
     }
 }

@@ -10,33 +10,6 @@ struct GeneralSettingsPane: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var navigation: NavigationModel
 
-    /// The way into the developer menu. Deliberately unremarkable — a field
-    /// with no label promising anything, which does nothing at all unless what
-    /// is typed into it is the passphrase.
-    @State private var key = ""
-    @State private var showingDeveloper = false
-
-    private var developer: some View {
-        HStack(spacing: 8) {
-            SecureField("", text: $key, prompt: Text("").foregroundColor(Theme.textMuted))
-                .textFieldStyle(.plain)
-                .font(Theme.mono(11))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(width: 150)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 6)
-                .recessed()
-                .onSubmit {
-                    guard DeveloperGate.accepts(key) else { key = ""; return }
-                    key = ""
-                    showingDeveloper = true
-                }
-            Spacer()
-        }
-        .padding(.top, 4)
-        .sheet(isPresented: $showingDeveloper) { DeveloperMenu() }
-    }
-
     var body: some View {
         SettingsScroll {
             SettingToggle(title: "Launch at startup",
@@ -58,8 +31,6 @@ struct GeneralSettingsPane: View {
                           isOn: $settings.showPerformanceMonitor)
             Button("Open Telemetry Settings") { navigation.openTelemetrySettings() }
                 .industrialButton(.secondary)
-
-            developer
 
             LabeledSection(label: "BUILD") {
                 KeyValue("Version", Bundle.versionString)

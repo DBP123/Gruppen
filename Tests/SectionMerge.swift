@@ -35,6 +35,14 @@ private func writePDF(_ url: URL, pages: Int) -> Bool {
     return true
 }
 
+/// Whether the first glyph on a PDF page was set in a fixed-pitch font.
+private func isFixedPitch(_ page: PDFPage?) -> Bool {
+    guard let text = page?.attributedString, text.length > 0,
+          let font = text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    else { return false }
+    return font.isFixedPitch
+}
+
 func sectionMerge() {
     T.begin("H. Merge — what a selection is")
 
@@ -67,6 +75,7 @@ func sectionMerge() {
             StashFileMerger.plan(for: [txt, bin]) == nil)
     T.equal("text merges to .txt", StashFileMerger.Plan.text.ext, "txt")
     T.equal("every other merge is .pdf", StashFileMerger.Plan.mixed.ext, "pdf")
+    T.equal("the key says what it makes", StashFileMerger.Plan.pdf.label, "Combine to PDF")
 
     T.begin("H. Merge — text")
 
@@ -166,8 +175,22 @@ func sectionMerge() {
             let imagePage = document?.page(at: 2)?.bounds(for: .mediaBox) ?? .zero
             T.equal("images are set on Letter when the document is mixed",
                     "\(Int(imagePage.width))×\(Int(imagePage.height))", "612×792")
+            T.check("plain text is set in monospace in a mixed merge",
+                    isFixedPitch(document?.page(at: 3)))
         } catch {
             T.check("mixed merge succeeds", false, "\(error)")
+        }
+
+        // The same rule for a single text file converted on its own.
+        let code = dir.appendingPathComponent("script.py")
+        try? "def main():\n    return 42\n".write(to: code, atomically: true, encoding: .utf8)
+        let single = dir.appendingPathComponent("script.pdf")
+        do {
+            try FileConverter.documentToPDF(code, output: single)
+            T.check("a converted text file keeps its columns — monospace",
+                    isFixedPitch(PDFDocument(url: single)?.page(at: 0)))
+        } catch {
+            T.check("text to PDF succeeds", false, "\(error)")
         }
 
         // A file that claims to be a PDF and is not.

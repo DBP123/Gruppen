@@ -12,7 +12,7 @@ import IOKit.ps
 ///
 /// `host_statistics64` reports pages, not bytes, so everything is multiplied by
 /// the host page size (16 KB on Apple Silicon, not the 4 KB people assume).
-final class MemorySampler: TelemetrySampler {
+final class MemorySampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var total: UInt64
         /// Kernel memory that can never be paged out.
@@ -73,11 +73,14 @@ final class MemorySampler: TelemetrySampler {
     /// The top-five table, and when it was last built.
     ///
     /// Building it is a `proc_pid_rusage` walk over every process — the one
-    /// genuinely expensive thing in this sampler, and a list of the five
-    /// heaviest processes does not change five times in five seconds. The
+    /// genuinely expensive thing in this sampler, and a list of the heaviest
+    /// processes does not change five times in five seconds. The
     /// pressure figures above it still move every tick; only the table waits.
     private var consumersCache: (rows: [MemoryConsumer], at: Date)?
     private static let consumersInterval: TimeInterval = 5
+    /// Rows the consumers table holds; it shows four and scrolls the rest.
+    /// Names are paid for only for these, about a microsecond each.
+    static let consumerCount = 10
 
     /// One process's memory footprint.
     struct MemoryConsumer: Equatable, Identifiable {
@@ -96,10 +99,10 @@ final class MemorySampler: TelemetrySampler {
         guard bytes > 0 else { return [] }
 
         // Footprints first, names afterwards. `proc_name` is the most expensive
-        // call in this sweep — about 0.18 ms across every pid — and all but five
-        // of those names are sorted straight off the end of the list. Collecting
-        // the cheap number for everyone and paying for the string only for the
-        // five that get drawn is the same trick `EnergyImpactSampler` uses.
+        // call in this sweep — about 0.18 ms across every pid — and nearly all
+        // of those names would be sorted straight off the end of the list.
+        // Collecting the cheap number for everyone and paying for the string
+        // only for the rows kept is the same trick `EnergyImpactSampler` uses.
         var weights: [(pid: pid_t, footprint: UInt64)] = []
         weights.reserveCapacity(Int(bytes) / MemoryLayout<pid_t>.size)
         for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
@@ -111,8 +114,8 @@ final class MemorySampler: TelemetrySampler {
 
         var nameBuffer = [CChar](repeating: 0, count: 256)
         var rows: [MemoryConsumer] = []
-        rows.reserveCapacity(5)
-        for entry in weights.prefix(5) {
+        rows.reserveCapacity(Self.consumerCount)
+        for entry in weights.prefix(Self.consumerCount) {
             guard proc_name(entry.pid, &nameBuffer, 256) > 0 else { continue }
             rows.append(MemoryConsumer(pid: entry.pid,
                                        name: String(cString: nameBuffer),
@@ -210,7 +213,7 @@ final class MemoryTelemetryWidget: TelemetryModule<MemorySampler> {
 /// `getifaddrs`, because that is the only one of the two that carries 64-bit
 /// byte counts — the `getifaddrs` version wraps every 4 GB and would report
 /// nonsense on any machine that has been up a while.
-final class NetworkSampler: TelemetrySampler {
+final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         /// Bytes per second.
         var down: Double
@@ -227,6 +230,13 @@ final class NetworkSampler: TelemetrySampler {
     /// bridges and loopback do not, which is exactly what should be left out —
     /// a VPN's bytes are already counted on the interface carrying them.
     private static let ethernet: UInt8 = 0x06
+
+    /// Processes kept, busiest by total first. Ten rather than the four a table
+    /// shows: each direction re-sorts this one list, and with only five kept a
+    /// heavy uploader could push the busiest downloader out of the inbound
+    /// table entirely. Free — every flow is already named — and the tables
+    /// scroll past four.
+    static let talkerCount = 10
 
     private var previous: (down: UInt64, up: UInt64, at: Date)?
     /// The per-process subscription is opened on the first sample and closed by
@@ -267,7 +277,7 @@ final class NetworkSampler: TelemetrySampler {
                        downTotal: down,
                        upTotal: up,
                        interfaces: interfaces,
-                       talkers: Array(talkers.prefix(5)))
+                       talkers: Array(talkers.prefix(Self.talkerCount)))
     }
 
     private static func counters() -> (UInt64, UInt64, Int)? {
@@ -351,7 +361,7 @@ final class NetworkTelemetryWidget: TelemetryModule<NetworkSampler> {
 /// one. What the system does tell you is its *thermal pressure*: whether it is
 /// currently throttling to keep cool. That is the number that actually predicts
 /// whether your machine is about to slow down, so it is the one shown here.
-final class ThermalSampler: TelemetrySampler {
+final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var state: ProcessInfo.ThermalState
         var isLowPower: Bool
@@ -514,7 +524,7 @@ final class ThermalTelemetryWidget: TelemetryModule<ThermalSampler> {
 /// that is what this reports: awake or asleep, not a percentage. The load
 /// figures other tools show for those come out of IOReport, which has no public
 /// header, and a made-up percentage is worse than an honest binary.
-final class SiliconSampler: TelemetrySampler {
+final class SiliconSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var gpu: Double
         var renderer: Double
@@ -593,7 +603,7 @@ final class SiliconTelemetryWidget: TelemetryModule<SiliconSampler> {
 /// is a difference — the sampler holds the previous pass. A full sweep of ~190
 /// processes measures at 0.6 ms, which at the panel's 2 Hz is around a tenth of
 /// one percent of one core.
-final class ProcessSampler: TelemetrySampler {
+final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
     struct Row: Equatable, Identifiable {
         var pid: pid_t
         var name: String
@@ -718,7 +728,7 @@ final class ProcessTelemetryWidget: TelemetryModule<ProcessSampler> {
 /// The same three figures the old menu bar readout carried, on the same
 /// demand-driven footing as everything else. Not hideable: a monitor that will
 /// not report on itself is not worth trusting.
-final class FootprintSampler: TelemetrySampler {
+final class FootprintSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var cpu: Double
         var resident: UInt64

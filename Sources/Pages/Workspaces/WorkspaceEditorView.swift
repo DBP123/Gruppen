@@ -12,29 +12,22 @@ struct WorkspaceProfileDeck: View {
     @State private var editing: WorkspaceProfile?
 
     var body: some View {
-        LabeledSection(label: "WORKSPACE PROFILES", spacing: 10) {
-            VStack(alignment: .leading, spacing: 10) {
-                if engine.profiles.isEmpty {
-                    emptyState
-                } else {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 12)], spacing: 12) {
-                        ForEach(engine.profiles) { profile in
-                            ProfileCard(profile: profile, onEdit: { editing = profile })
-                        }
-                    }
-                    if let report = engine.lastReport { ActivationReceipt(report: report) }
-                }
-
-                HStack(spacing: 10) {
-                    Button { editing = engine.add() } label: { Text("+ New Profile") }
-                        .industrialButton(.secondary)
-                    Spacer()
-                    if DockManager.hasBackup {
-                        Button { _ = DockManager.restoreOriginal() } label: { Text("Restore Original Dock") }
-                            .industrialButton(.ghost)
-                            .help("Puts the Dock back to how it was before any profile changed it")
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SectionLabel("WORKSPACE PROFILES")
+                Spacer()
+                Button { editing = engine.add() } label: { Label("New Profile", systemImage: "plus") }
+                    .industrialButton(.secondary)
+            }
+            if engine.profiles.isEmpty {
+                empty
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 330), spacing: 16)], spacing: 16) {
+                    ForEach(engine.profiles) { profile in
+                        ProfileCard(profile: profile, onEdit: { editing = profile })
                     }
                 }
+                if let report = engine.lastReport { ActivationReceipt(report: report) }
             }
         }
         .sheet(item: $editing) { profile in
@@ -42,75 +35,102 @@ struct WorkspaceProfileDeck: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("No profiles yet")
-                .font(Theme.mono(12, .medium))
-                .foregroundStyle(Theme.textSecondary)
-            Text("A profile switches the whole environment at once — telemetry layout, Dock, apps, links and folders — from one shortcut.")
-                .font(Theme.mono(10))
-                .foregroundStyle(Theme.textMuted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .panelRow()
+    private var empty: some View {
+        Text("NO PROFILES")
+            .font(Theme.mono(11, .semibold)).tracking(1.2)
+            .foregroundStyle(Theme.textMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 28)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radiusMd)
+                    .strokeBorder(Theme.borderSubtle, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            )
+            .help("A profile switches the whole environment at once — telemetry, Dock, apps, links, folders, desktop and a script — from one shortcut")
     }
 }
 
-/// One profile, as a card you can fire.
+/// One profile, as a raised card you can fire: what it launches as icons,
+/// everything else it changes as small glyphs, and the key that runs it.
 private struct ProfileCard: View {
     @EnvironmentObject private var engine: WorkspaceEngine
+    @EnvironmentObject private var store: GroupStore
     let profile: WorkspaceProfile
     var onEdit: () -> Void
 
     private var isActive: Bool { engine.activeProfileID == profile.id }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 8) {
-                LED(color: profile.color, lit: isActive, size: 8)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                LED(color: profile.color, lit: isActive)
                 Text(profile.name)
-                    .font(Theme.sans(13, .semibold))
+                    .font(Theme.sans(14, .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
-                Spacer(minLength: 6)
+                if isActive { Chip(text: "AKTIV", tint: Theme.green, size: 9) }
+                Spacer(minLength: 8)
                 if let display = profile.shortcutDisplay {
-                    Text(display)
-                        .font(Theme.mono(9.5))
-                        .foregroundStyle(engine.unavailableShortcuts.contains(profile.id)
-                                         ? Theme.red : Theme.textMuted)
-                        .fixedSize()
+                    KeyBadge(text: display, enabled: !engine.unavailableShortcuts.contains(profile.id))
                 }
             }
-
-            Text(profile.summary)
-                .font(Theme.mono(9.5))
-                .foregroundStyle(Theme.textMuted)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
-                Button { engine.activate(profile) } label: {
-                    Text(engine.isActivating && isActive ? "Activating…" : "Activate")
+                ForEach(profile.launches.prefix(5)) { app in
+                    AppIconTile(app: app, running: store.isRunning(app))
                 }
-                .industrialButton(.primary)
-                .disabled(engine.isActivating || profile.isEmpty)
+                if profile.launches.count > 5 {
+                    Text("+\(profile.launches.count - 5)")
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 32, height: 32)
+                        .recessed(cornerRadius: 7, fill: .black.opacity(0.38))
+                }
+                ForEach(Array(stages.enumerated()), id: \.offset) { _, stage in
+                    Image(systemName: stage.glyph)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 32, height: 32)
+                        .recessed(cornerRadius: 7, fill: .black.opacity(0.38))
+                        .help(stage.help)
+                }
+                if profile.isEmpty {
+                    Text("NOTHING SET UP")
+                        .font(Theme.mono(10))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(height: 32)
+                }
+            }
 
-                Button(action: onEdit) { Text("Edit") }
-                    .industrialButton(.secondary)
+            Rectangle().fill(Theme.borderSubtle).frame(height: 1)
+            HStack(spacing: 6) {
                 Spacer()
-                Button { engine.remove(profile) } label: {
-                    Image(systemName: "trash").font(.system(size: 10))
-                }
-                .industrialButton(.danger)
-                .help("Delete this profile")
+                Button("Edit", action: onEdit).industrialButton(.secondary)
+                Button(engine.isActivating && isActive ? "Activating…" : "Activate") { engine.activate(profile) }
+                    .industrialButton(.primary)
+                    .disabled(engine.isActivating || profile.isEmpty)
             }
         }
-        .padding(12)
-        .machined(cornerRadius: Theme.radiusMd,
-                  fill: Theme.machined,
-                  border: isActive ? profile.color.opacity(0.55) : Theme.machinedBorder)
+        .padding(18)
+        .raisedPanel(rail: isActive ? profile.color : nil)
+        .contextMenu {
+            Button("Activate") { engine.activate(profile) }.disabled(profile.isEmpty)
+            Button("Edit…", action: onEdit)
+            Divider()
+            Button("Delete", role: .destructive) { engine.remove(profile) }
+        }
+    }
+
+    /// Every stage besides launching apps, as a glyph and what it does.
+    private var stages: [(glyph: String, help: String)] {
+        var stages: [(String, String)] = []
+        if let telemetry = profile.telemetry { stages.append(("gauge.with.dots.needle.33percent", "Telemetry: \(telemetry.summary)")) }
+        if profile.replacesDock { stages.append(("dock.rectangle", "Sets the Dock to \(profile.dockApps.count) app(s)")) }
+        if !profile.terminates.isEmpty { stages.append(("xmark.app", "Quits \(profile.terminates.map(\.name).joined(separator: ", "))")) }
+        if !profile.links.isEmpty { stages.append(("link", profile.links.joined(separator: "\n"))) }
+        if !profile.folders.isEmpty { stages.append(("folder", profile.folders.joined(separator: "\n"))) }
+        if let space = profile.spaceIndex { stages.append(("rectangle.split.3x1", "Switches to desktop \(space)")) }
+        if profile.scriptID != nil { stages.append(("chevron.left.forwardslash.chevron.right", "Runs a script last")) }
+        return stages
     }
 }
 
@@ -167,7 +187,9 @@ private struct ActivationReceipt: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panelRow()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .raisedPanel(rail: failures == 0 ? nil : Theme.red)
     }
 
     private func tint(_ outcome: WorkspaceActivationReport.Outcome) -> Color {
@@ -181,7 +203,8 @@ private struct ActivationReceipt: View {
 
 // MARK: - Editor
 
-/// The profile editor sheet.
+/// The profile editor sheet: who the profile is, then what it does when it
+/// runs, in the order it does it.
 ///
 /// Edits are written straight through to the engine rather than staged in local
 /// state and applied on close: the profile list is the source of truth, and a
@@ -200,422 +223,273 @@ struct WorkspaceEditorView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let profile {
-                header(profile)
-                Divider().overlay(Theme.borderSubtle)
+                SheetHeader(title: "PROFIL", badge: "KONFIGURATION", tint: profile.color)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
-                        NameAndColor(profile: profile)
-                        ShortcutRow(profile: profile)
-                        TelemetrySection(profile: profile)
-                        DockSection(profile: profile)
-                        AppListSection(profile: profile, role: .launch)
-                        AppListSection(profile: profile, role: .terminate)
-                        TextListSection(profile: profile, role: .links)
-                        TextListSection(profile: profile, role: .folders)
-                        DesktopSection(profile: profile)
-                        ScriptSection(profile: profile)
+                        Identity(profile: profile)
+                        LabeledSection(label: "WHEN ACTIVATED") { Stages(profile: profile) }
                     }
                     .padding(20)
                 }
                 .scrollContentBackground(.hidden)
+                footer(profile)
             } else {
                 Text("This profile no longer exists.")
                     .font(Theme.mono(11))
                     .foregroundStyle(Theme.textMuted)
-                    .padding(40)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: 620, height: 680)
+        .frame(width: 620, height: 700)
         .background(Theme.panel.grain(0.26))
     }
 
-    private func header(_ profile: WorkspaceProfile) -> some View {
-        HStack(spacing: 10) {
-            LED(color: profile.color, lit: true, size: 9)
-            Text(profile.name.isEmpty ? "Untitled" : profile.name)
-                .font(Theme.sans(14, .semibold))
-                .foregroundStyle(Theme.textPrimary)
+    private func footer(_ profile: WorkspaceProfile) -> some View {
+        SheetFooter {
+            Button("Delete Profile") {
+                dismiss()
+                engine.remove(profile)
+            }
+            .industrialButton(.danger)
             Spacer()
-            Button { engine.activate(profile) } label: { Text("Test Run") }
+            Button("Test Run") { engine.activate(profile) }
                 .industrialButton(.secondary)
                 .disabled(engine.isActivating || profile.isEmpty)
                 .help("Activate this profile now, without closing the editor")
-            Button { dismiss() } label: { Text("Done") }
+            Button("Done") { dismiss() }
                 .industrialButton(.primary)
                 .keyboardShortcut(.defaultAction)
         }
-        .padding(.horizontal, 20)
-        .frame(height: 56)
     }
 }
 
-// MARK: Sections
+// MARK: Identity
 
-private struct NameAndColor: View {
+/// Name, colour and shortcut — one card, since together they are what you
+/// recognise the profile by.
+private struct Identity: View {
     @EnvironmentObject private var engine: WorkspaceEngine
     let profile: WorkspaceProfile
 
     var body: some View {
-        LabeledSection(label: "IDENTITY") {
-            HStack(spacing: 10) {
-                TextField("Profile name", text: Binding(
-                    get: { profile.name },
-                    set: { var next = profile; next.name = $0; engine.update(next) }
-                ))
-                .textFieldStyle(.plain)
-                .font(Theme.sans(12))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .recessed(cornerRadius: Theme.radiusSm)
-
-                ForEach(Theme.presetColors) { preset in
-                    let selected = profile.colorHex == preset.hex
-                    Button {
-                        var next = profile; next.colorHex = preset.hex; engine.update(next)
-                    } label: {
-                        Circle()
-                            .fill(Color(hex: preset.hex))
-                            .frame(width: 16, height: 16)
-                            .overlay(
-                                Circle().strokeBorder(.white.opacity(selected ? 0.9 : 0.15),
-                                                      lineWidth: selected ? 2 : 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .help(preset.name)
+        SettingsCard(rail: profile.color) {
+            TextField("Profile name", text: Binding(
+                get: { profile.name },
+                set: { var next = profile; next.name = $0; engine.update(next) }
+            ))
+            .textFieldStyle(.plain)
+            .font(Theme.sans(15, .semibold))
+            .foregroundStyle(Theme.textPrimary)
+            .cardRow()
+            CardDivider()
+            HStack(spacing: 12) {
+                Text("Colour").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 12)
+                SwatchRow(hex: profile.colorHex) { hex in
+                    var next = profile; next.colorHex = hex; engine.update(next)
                 }
             }
+            .cardRow()
+            CardDivider()
+            HStack(spacing: 8) {
+                Text("Shortcut").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                Spacer(minLength: 12)
+                ShortcutKeys(shortcut: profile.shortcut,
+                             unavailable: engine.unavailableShortcuts.contains(profile.id),
+                             onRecordingChange: { $0 ? engine.suspendHotkeys() : engine.resumeHotkeys() },
+                             onRecord: { engine.setShortcut($0, for: profile) })
+            }
+            .cardRow()
         }
     }
 }
 
-/// Click to arm, then press. Mirrors the Gruppe recorder exactly — the same
-/// interaction should not feel different in two places in one app.
-private struct ShortcutRow: View {
+// MARK: Stages
+
+/// Everything a profile does, top to bottom in the order activation does it.
+private struct Stages: View {
     @EnvironmentObject private var engine: WorkspaceEngine
-    @StateObject private var recorder = KeyRecorder()
+    @EnvironmentObject private var scripts: ScriptLibrary
     let profile: WorkspaceProfile
 
-    private var unavailable: Bool { engine.unavailableShortcuts.contains(profile.id) }
-
     var body: some View {
-        LabeledSection(label: "GLOBAL SHORTCUT") {
-            HStack(spacing: 10) {
-                Button(action: toggle) {
-                    HStack(spacing: 6) {
-                        if recorder.isRecording {
-                            Circle().fill(Theme.orange).frame(width: 6, height: 6)
-                            Text("PRESS KEYS…")
-                        } else {
-                            Text(profile.shortcutDisplay ?? "Not bound")
-                        }
-                    }
-                    .font(Theme.mono(12))
-                    .foregroundStyle(labelColor)
-                    .frame(minWidth: 130)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .recessed(cornerRadius: Theme.radiusSm)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+        SettingsCard {
+            telemetry
+            CardDivider()
+            dock
+            CardDivider()
+            StageApps(title: "Launch", apps: profile.launches, empty: "Nothing to launch",
+                      help: "Apps already running are left exactly as they are — nothing is brought to the front") { apps in
+                var next = profile; next.launches = apps; engine.update(next)
+            }
+            CardDivider()
+            StageApps(title: "Quit", apps: profile.terminates, empty: "Nothing to quit",
+                      help: "Each app is asked to quit, so anything with unsaved work still gets to ask you. Gruppen never quits itself") { apps in
+                var next = profile; next.terminates = apps; engine.update(next)
+            }
+            CardDivider()
+            StageList(title: "Open links", role: .links, values: profile.links) { values in
+                var next = profile; next.links = values; engine.update(next)
+            }
+            CardDivider()
+            StageList(title: "Open folders", role: .folders, values: profile.folders) { values in
+                var next = profile; next.folders = values; engine.update(next)
+            }
+            CardDivider()
+            desktop
+            CardDivider()
+            script
+        }
+    }
 
-                if profile.shortcut != nil && !recorder.isRecording {
-                    Button { engine.setShortcut(nil, for: profile) } label: {
-                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                    }
+    private var telemetry: some View {
+        HStack(spacing: 8) {
+            Text("Telemetry layout").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                .help("Arrange the monitor the way you want it, then capture: which modules run, which are in the dropdown, and which are in the menu bar")
+            if let captured = profile.telemetry {
+                Chip(text: captured.summary.uppercased(), tint: Theme.textSecondary, size: 8.5)
+            }
+            Spacer(minLength: 12)
+            if profile.telemetry != nil {
+                Button("Clear") { var next = profile; next.telemetry = nil; engine.update(next) }
                     .industrialButton(.ghost)
-                }
+            }
+            Button(profile.telemetry == nil ? "Capture current" : "Recapture") { engine.captureTelemetry(into: profile) }
+                .industrialButton(.secondary)
+        }
+        .cardRow()
+    }
 
-                Text(hint)
+    @ViewBuilder private var dock: some View {
+        SwitchRow(title: "Replace the Dock's apps", isOn: Binding(
+            get: { profile.replacesDock },
+            set: { var next = profile; next.replacesDock = $0; engine.update(next) }
+        ))
+        .help("Restarts the Dock, which flashes once. The Dock you had first is kept, and Settings on the Workspaces page can put it back")
+        if profile.replacesDock {
+            AppList(apps: profile.dockApps, empty: "No apps yet — the Dock is left alone until you add some") { apps in
+                var next = profile; next.dockApps = apps; engine.update(next)
+            } extra: {
+                Button("Use current Dock") {
+                    var next = profile
+                    next.dockApps = DockManager.currentPaths().compactMap { AppEntry(url: URL(fileURLWithPath: $0)) }
+                    engine.update(next)
+                }
+                .industrialButton(.ghost)
+            }
+            .padding([.horizontal, .bottom], 12)
+        }
+    }
+
+    @ViewBuilder private var desktop: some View {
+        HStack(spacing: 12) {
+            Text("Switch to desktop").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                .help("macOS has no API for going to a numbered desktop, so this presses the \"Switch to Desktop N\" shortcut for you")
+            Spacer(minLength: 12)
+            Menu {
+                Button("Stay put") { setSpace(nil) }
+                Divider()
+                ForEach(1...SpaceManager.maximumDesktop, id: \.self) { index in
+                    Button("Desktop \(index)") { setSpace(index) }
+                }
+            } label: {
+                MenuKeyLabel(title: profile.spaceIndex.map { "Desktop \($0)" } ?? "Stay put", compact: false)
+            }
+            .menuKey()
+        }
+        .cardRow()
+        if let readiness = profile.spaceIndex.map(SpaceManager.readiness(for:)), readiness != .ready {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.amber)
+                Text(readiness.explanation)
                     .font(Theme.mono(10))
-                    .foregroundStyle(unavailable ? Theme.red : Theme.textMuted)
-                Spacer()
-            }
-        }
-        .onDisappear {
-            if recorder.isRecording { engine.resumeHotkeys() }
-            recorder.stop()
-        }
-    }
-
-    private var labelColor: Color {
-        if recorder.isRecording { return Theme.orange }
-        if profile.shortcut == nil { return Theme.textMuted }
-        return unavailable ? Theme.red : Theme.textPrimary
-    }
-
-    private var hint: String {
-        if recorder.isRecording { return "⎋ cancel · ⌫ clear · needs ⌘, ⌥ or ⌃" }
-        if unavailable { return "UNAVAILABLE — claimed elsewhere" }
-        return profile.shortcut == nil ? "Click to record" : "Activates from anywhere"
-    }
-
-    private func toggle() {
-        if recorder.isRecording {
-            recorder.stop()
-            engine.resumeHotkeys()
-            return
-        }
-        engine.suspendHotkeys()
-        recorder.start { captured in
-            engine.setShortcut(captured, for: profile)
-            engine.resumeHotkeys()
-        }
-    }
-}
-
-private struct TelemetrySection: View {
-    @EnvironmentObject private var engine: WorkspaceEngine
-    let profile: WorkspaceProfile
-
-    var body: some View {
-        LabeledSection(label: "TELEMETRY LAYOUT") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Text(profile.telemetry?.summary ?? "Left as it is")
-                        .font(Theme.mono(11))
-                        .foregroundStyle(profile.telemetry == nil ? Theme.textMuted : Theme.textPrimary)
-                    Spacer()
-                    Button { engine.captureTelemetry(into: profile) } label: { Text("Capture Current") }
+                    .foregroundStyle(Theme.amber)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                if readiness == .needsAccessibility {
+                    Button("Grant Accessibility…") { SpaceManager.requestAccessibility() }
                         .industrialButton(.secondary)
-                    if profile.telemetry != nil {
-                        Button {
-                            var next = profile; next.telemetry = nil; engine.update(next)
-                        } label: { Text("Clear") }
-                            .industrialButton(.ghost)
-                    }
-                }
-                .panelRow()
-
-                FootNote("Arrange the monitor the way you want it, then capture. Stores which modules are armed, which are in the dropdown, and which are pinned to the menu bar with what display mode.")
-            }
-        }
-    }
-}
-
-private struct DockSection: View {
-    @EnvironmentObject private var engine: WorkspaceEngine
-    let profile: WorkspaceProfile
-
-    var body: some View {
-        LabeledSection(label: "DOCK") {
-            VStack(alignment: .leading, spacing: 8) {
-                SettingToggle(title: "Replace the Dock's pinned apps",
-                              detail: "Restarts the Dock, which flashes once",
-                              isOn: Binding(
-                                get: { profile.replacesDock },
-                                set: { var next = profile; next.replacesDock = $0; engine.update(next) }
-                              ))
-
-                if profile.replacesDock {
-                    AppRows(apps: profile.dockApps,
-                            empty: "No apps — the Dock is left alone until you add some",
-                            onRemove: { id in
-                                var next = profile
-                                next.dockApps.removeAll { $0.id == id }
-                                engine.update(next)
-                            },
-                            onAdd: { urls in
-                                var next = profile
-                                let existing = Set(next.dockApps.map(\.id))
-                                next.dockApps += urls.compactMap(AppEntry.init(url:))
-                                    .filter { !existing.contains($0.id) }
-                                engine.update(next)
-                            },
-                            onMove: { source, destination in
-                                var next = profile
-                                next.dockApps.move(fromOffsets: source, toOffset: destination)
-                                engine.update(next)
-                            })
-
-                    Button {
-                        var next = profile
-                        next.dockApps = DockManager.currentPaths()
-                            .compactMap { AppEntry(url: URL(fileURLWithPath: $0)) }
-                        engine.update(next)
-                    } label: { Text("Capture Current Dock") }
-                        .industrialButton(.secondary)
-
-                    FootNote("The Dock as it was before Gruppen first changed it is saved to Application Support, and \"Restore Original Dock\" on the Workspaces page puts it back.")
                 }
             }
+            .padding([.horizontal, .bottom], 12)
         }
     }
-}
 
-private struct AppListSection: View {
-    enum Role { case launch, terminate }
-
-    @EnvironmentObject private var engine: WorkspaceEngine
-    let profile: WorkspaceProfile
-    let role: Role
-
-    private var apps: [AppEntry] { role == .launch ? profile.launches : profile.terminates }
-    private var label: String { role == .launch ? "LAUNCH" : "QUIT" }
-    private var note: String {
-        role == .launch
-            ? "Apps already running are left exactly as they are — nothing is brought to the front."
-            : "Each app is asked to quit, so anything with unsaved work still gets to ask you about it. Gruppen never quits itself."
-    }
-
-    var body: some View {
-        LabeledSection(label: label) {
-            VStack(alignment: .leading, spacing: 8) {
-                AppRows(apps: apps,
-                        empty: role == .launch ? "Nothing to launch" : "Nothing to quit",
-                        onRemove: { id in
-                            var next = profile
-                            if role == .launch { next.launches.removeAll { $0.id == id } }
-                            else { next.terminates.removeAll { $0.id == id } }
-                            engine.update(next)
-                        },
-                        onAdd: { urls in
-                            var next = profile
-                            let entries = urls.compactMap(AppEntry.init(url:))
-                            if role == .launch {
-                                let existing = Set(next.launches.map(\.id))
-                                next.launches += entries.filter { !existing.contains($0.id) }
-                            } else {
-                                let existing = Set(next.terminates.map(\.id))
-                                next.terminates += entries.filter { !existing.contains($0.id) }
-                            }
-                            engine.update(next)
-                        },
-                        onMove: { source, destination in
-                            var next = profile
-                            if role == .launch { next.launches.move(fromOffsets: source, toOffset: destination) }
-                            else { next.terminates.move(fromOffsets: source, toOffset: destination) }
-                            engine.update(next)
-                        })
-                FootNote(note)
+    private var script: some View {
+        HStack(spacing: 12) {
+            Text("Run a script").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                .help("Runs last, once everything else is in place, and shows up in that script's history")
+            Spacer(minLength: 12)
+            Menu {
+                Button("None") { setScript(nil) }
+                Divider()
+                ForEach(scripts.scripts) { script in
+                    Button(script.name) { setScript(script.id) }
+                }
+            } label: {
+                MenuKeyLabel(title: scripts.scripts.first { $0.id == profile.scriptID }?.name ?? "None",
+                             compact: false)
             }
+            .menuKey()
         }
+        .cardRow()
+    }
+
+    private func setSpace(_ index: Int?) {
+        var next = profile; next.spaceIndex = index; engine.update(next)
+    }
+
+    private func setScript(_ id: UUID?) {
+        var next = profile; next.scriptID = id; engine.update(next)
     }
 }
 
-/// Shared app list: rows with icons, drag to reorder, drop to add.
-private struct AppRows: View {
+/// A stage that is a list of apps: its title, then the list.
+private struct StageApps: View {
+    let title: String
     let apps: [AppEntry]
     let empty: String
-    var onRemove: (AppEntry.ID) -> Void
-    var onAdd: ([URL]) -> Void
-    var onMove: (IndexSet, Int) -> Void
-
-    @State private var targeted = false
+    let help: String
+    let onChange: ([AppEntry]) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if apps.isEmpty {
-                Text(empty)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(Array(apps.enumerated()), id: \.element.id) { index, app in
-                    HStack(spacing: 8) {
-                        Text("\(index + 1)")
-                            .font(Theme.mono(9)).foregroundStyle(Theme.textMuted)
-                            .frame(width: 14, alignment: .trailing)
-                        Image(nsImage: app.icon)
-                            .resizable().frame(width: 18, height: 18)
-                        Text(app.name)
-                            .font(Theme.mono(11)).foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        if !FileManager.default.fileExists(atPath: app.path) {
-                            Text("MISSING")
-                                .font(Theme.mono(8.5, .semibold))
-                                .foregroundStyle(Theme.red)
-                        }
-                        Button { onRemove(app.id) } label: {
-                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                        }
-                        .industrialButton(.ghost)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                }
-                .onMove(perform: onMove)
-            }
-
-            Button { choose() } label: { Text("+ Add Apps…") }
-                .industrialButton(.ghost)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary).help(help)
+            AppList(apps: apps, empty: empty, onChange: onChange) { EmptyView() }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .machined(fill: targeted ? Theme.machined.mixed(with: .white, amount: 0.06) : Theme.machined,
-                  border: targeted ? Theme.orange.opacity(0.6) : Theme.machinedBorder)
-        .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
-            Task { @MainActor in
-                var urls: [URL] = []
-                for provider in providers {
-                    guard let item = try? await provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier),
-                          let data = item as? Data,
-                          let url = URL(dataRepresentation: data, relativeTo: nil) else { continue }
-                    urls.append(url)
-                }
-                if !urls.isEmpty { onAdd(urls) }
-            }
-            return true
-        }
-    }
-
-    private func choose() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.allowsMultipleSelection = true
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK else { return }
-        onAdd(panel.urls)
+        .cardRow()
     }
 }
 
-/// Links and folders: same shape, different validation.
-private struct TextListSection: View {
+/// Links or folders: a title, the entries, and a field to add one.
+private struct StageList: View {
     enum Role { case links, folders }
 
-    @EnvironmentObject private var engine: WorkspaceEngine
-    let profile: WorkspaceProfile
+    let title: String
     let role: Role
+    let values: [String]
+    let onChange: ([String]) -> Void
     @State private var draft = ""
-
-    private var values: [String] { role == .links ? profile.links : profile.folders }
-    private var label: String { role == .links ? "LINKS" : "FOLDERS" }
-    private var placeholder: String {
-        role == .links ? "docs.example.com/dashboard" : "~/Documents/Chem Lab"
-    }
+    /// Folders that are not there, checked when the list changes rather than on
+    /// every keystroke in the field below it.
+    @State private var missing: Set<String> = []
 
     var body: some View {
-        LabeledSection(label: label) {
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(values.enumerated()), id: \.offset) { index, value in
-                    HStack(spacing: 8) {
-                        Image(systemName: role == .links ? "link" : "folder")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textMuted)
-                        Text(value)
-                            .font(Theme.mono(10.5))
-                            .foregroundStyle(Theme.textPrimary)
-                            .lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 6)
-                        if role == .folders, !exists(value) {
-                            Text("NOT FOUND")
-                                .font(Theme.mono(8.5, .semibold))
-                                .foregroundStyle(Theme.red)
-                        }
-                        Button { remove(at: index) } label: {
-                            Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
-                        }
-                        .industrialButton(.ghost)
+                    ListRow(glyph: role == .links ? "link" : "folder",
+                            title: value,
+                            warning: missing.contains(value) ? "NOT FOUND" : nil) {
+                        var next = values; next.remove(at: index); onChange(next)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
                 }
-
                 HStack(spacing: 8) {
-                    TextField(placeholder, text: $draft)
+                    TextField(role == .links ? "docs.example.com/dashboard" : "~/Documents/Project",
+                              text: $draft)
                         .textFieldStyle(.plain)
                         .font(Theme.mono(10.5))
                         .foregroundStyle(Theme.textPrimary)
@@ -624,153 +498,216 @@ private struct TextListSection: View {
                         .recessed(cornerRadius: Theme.radiusSm)
                         .onSubmit(commit)
                     if role == .folders {
-                        Button { browse() } label: { Text("Browse…") }
-                            .industrialButton(.ghost)
+                        Button("Browse…", action: browse).industrialButton(.ghost)
                     }
-                    Button(action: commit) { Text("Add") }
+                    Button("Add", action: commit)
                         .industrialButton(.ghost)
                         .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                .padding(.horizontal, 4)
-                .padding(.bottom, 4)
+                .padding(.top, values.isEmpty ? 0 : 4)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .machined()
+        }
+        .cardRow()
+        .task(id: values) {
+            missing = role == .folders ? Set(values.filter { !Self.isFolder($0) }) : []
         }
     }
 
-    private func exists(_ path: String) -> Bool {
+    private static func isFolder(_ path: String) -> Bool {
         var isDirectory: ObjCBool = false
         let expanded = (path as NSString).expandingTildeInPath
-        return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory)
-            && isDirectory.boolValue
+        return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 
     private func commit() {
         let trimmed = draft.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
-        var next = profile
-        if role == .links { next.links.append(trimmed) } else { next.folders.append(trimmed) }
-        engine.update(next)
+        onChange(values + [trimmed])
         draft = ""
     }
 
-    private func remove(at index: Int) {
-        var next = profile
-        if role == .links { next.links.remove(at: index) } else { next.folders.remove(at: index) }
-        engine.update(next)
-    }
-
     private func browse() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        guard panel.runModal() == .OK else { return }
-        var next = profile
+        let urls = Pickers.folders(title: "Open which folders?")
+        guard !urls.isEmpty else { return }
         // Written back with the home directory as `~` so a profile stays
         // portable between machines and readable in the saved file.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        next.folders += panel.urls.map { url -> String in
+        onChange(values + urls.map { url -> String in
             url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
-        }
-        engine.update(next)
+        })
     }
 }
 
-/// The desktop stage, with its preconditions stated up front rather than
-/// discovered when it silently does nothing.
-private struct DesktopSection: View {
-    @EnvironmentObject private var engine: WorkspaceEngine
-    let profile: WorkspaceProfile
+// MARK: - Shared editor parts
 
-    private var readiness: SpaceManager.Readiness? {
-        profile.spaceIndex.map(SpaceManager.readiness(for:))
-    }
+/// A list of apps in a recess: icon and name per row, remove on hover, drop
+/// apps on it or add them from a panel.
+struct AppList<Extra: View>: View {
+    let apps: [AppEntry]
+    let empty: String
+    let onChange: ([AppEntry]) -> Void
+    @ViewBuilder let extra: Extra
+
+    @State private var targeted = false
+    /// Apps no longer on disk, checked when the list changes, not per redraw.
+    @State private var missing: Set<String> = []
 
     var body: some View {
-        LabeledSection(label: "DESKTOP") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Text("Switch to desktop")
-                        .font(Theme.mono(11))
-                        .foregroundStyle(Theme.textSecondary)
-                    Picker("", selection: Binding(
-                        get: { profile.spaceIndex ?? 0 },
-                        set: {
-                            var next = profile
-                            next.spaceIndex = $0 == 0 ? nil : $0
-                            engine.update(next)
-                        }
-                    )) {
-                        Text("Stay put").tag(0)
-                        ForEach(1...SpaceManager.maximumDesktop, id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .labelsHidden()
-                    .frame(width: 110)
-                    Spacer()
-                }
-                .panelRow()
-
-                if let readiness, readiness != .ready {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.amber)
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(readiness.explanation)
-                                .font(Theme.mono(10))
-                                .foregroundStyle(Theme.amber)
-                                .fixedSize(horizontal: false, vertical: true)
-                            if readiness == .needsAccessibility {
-                                Button { SpaceManager.requestAccessibility() } label: {
-                                    Text("Grant Accessibility…")
-                                }
-                                .industrialButton(.secondary)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .panelRow()
-                }
-
-                FootNote("macOS has no API for going to a numbered desktop, so this presses the \"Switch to Desktop N\" shortcut for you. That shortcut ships switched off, and synthetic keystrokes need Accessibility — both are checked before anything is sent, and reported if missing.")
+        VStack(alignment: .leading, spacing: 2) {
+            if apps.isEmpty {
+                Text(empty)
+                    .font(Theme.mono(10))
+                    .foregroundStyle(Theme.textMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
             }
+            ForEach(apps) { app in
+                ListRow(icon: app.icon, title: app.name,
+                        warning: missing.contains(app.path) ? "MISSING" : nil,
+                        help: app.bundleID.isEmpty ? app.path : app.bundleID) {
+                    onChange(apps.filter { $0.id != app.id })
+                }
+            }
+            HStack(spacing: 6) {
+                Button { choose() } label: { Label("Add Applikationen…", systemImage: "plus") }
+                    .industrialButton(.ghost)
+                extra
+            }
+            .padding(.top, 2)
         }
+        .padding(6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: apps.map(\.path)) {
+            missing = Set(apps.map(\.path).filter { !FileManager.default.fileExists(atPath: $0) })
+        }
+        .recessed(cornerRadius: Theme.radiusSm)
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
+                .strokeBorder(targeted ? Theme.orange.opacity(0.7) : .clear, lineWidth: 1)
+        )
+        .dropDestination(for: URL.self) { urls, _ in
+            add(urls)
+            return true
+        } isTargeted: { targeted = $0 }
+    }
+
+    private func add(_ urls: [URL]) {
+        let existing = Set(apps.map(\.id))
+        let new = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
+        if !new.isEmpty { onChange(apps + new) }
+    }
+
+    private func choose() {
+        add(Pickers.apps())
     }
 }
 
-private struct ScriptSection: View {
-    @EnvironmentObject private var engine: WorkspaceEngine
-    @EnvironmentObject private var scripts: ScriptLibrary
-    let profile: WorkspaceProfile
+/// One entry in an editor list: an icon or glyph, a name, a warning when it is
+/// gone, and a remove key that shows on hover.
+struct ListRow: View {
+    var icon: NSImage? = nil
+    var glyph: String? = nil
+    let title: String
+    var warning: String? = nil
+    var help: String? = nil
+    let onRemove: () -> Void
+
+    @State private var hovering = false
 
     var body: some View {
-        LabeledSection(label: "SCRIPT") {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("", selection: Binding(
-                    get: { profile.scriptID ?? Self.none },
-                    set: {
-                        var next = profile
-                        next.scriptID = $0 == Self.none ? nil : $0
-                        engine.update(next)
-                    }
-                )) {
-                    Text("None").tag(Self.none)
-                    ForEach(scripts.scripts) { script in
-                        Text(script.name).tag(script.id)
-                    }
+        HStack(spacing: 8) {
+            if let icon {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 18, height: 18)
+            } else if let glyph {
+                Image(systemName: glyph).font(.system(size: 10)).foregroundStyle(Theme.textMuted).frame(width: 18)
+            }
+            Text(title)
+                .font(Theme.mono(11))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(help ?? title)
+            Spacer(minLength: 6)
+            if let warning {
+                Text(warning).font(Theme.mono(8.5, .semibold)).tracking(0.6).foregroundStyle(Theme.red)
+            }
+            Button(action: onRemove) {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+            }
+            .industrialButton(.ghost)
+            .opacity(hovering ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 5).fill(hovering ? Color.white.opacity(0.04) : .clear))
+        .onHover { hovering = $0 }
+    }
+}
+
+/// The colour swatches every editor shares, plus a well for any other colour.
+struct SwatchRow: View {
+    let hex: String
+    let pick: (String) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(Theme.presetColors) { preset in
+                let selected = hex.caseInsensitiveCompare(preset.hex) == .orderedSame
+                Button { pick(preset.hex) } label: {
+                    Circle()
+                        .fill(Color(hex: preset.hex))
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().strokeBorder(Theme.panel, lineWidth: selected ? 2 : 0))
+                        .overlay(Circle().strokeBorder(selected ? Color(hex: preset.hex) : .clear, lineWidth: 1.5).padding(-3))
+                        .shadow(color: selected ? Color(hex: preset.hex).opacity(0.6) : .clear, radius: 5)
                 }
+                .buttonStyle(.plain)
+                .help(preset.name)
+            }
+            // At its own size: squeezed into a fixed frame, the system well
+            // kept drawing at full width and sat over the last swatch.
+            ColorPicker("", selection: Binding(get: { Color(hex: hex) },
+                                               set: { pick($0.hexString) }),
+                        supportsOpacity: false)
                 .labelsHidden()
-                .frame(maxWidth: 260, alignment: .leading)
-                .panelRow()
-
-                FootNote("Runs last, after everything else is in place. Scripts come from the Scripts page, so a profile's script gets the same transcript, feedback setting and argument safety as any other.")
-            }
+                .fixedSize()
+                .padding(.leading, 4)
+                .help("Any other colour")
         }
     }
+}
 
-    /// A sentinel rather than an optional tag: SwiftUI's `Picker` cannot match
-    /// `nil` against a `UUID` tag, so "None" needs a real value of its own.
-    private static let none = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+/// The plate across the top of a sheet: what it edits, in the German badge.
+struct SheetHeader: View {
+    let title: String
+    let badge: String
+    var tint: Color = Theme.orange
+
+    var body: some View {
+        HStack(spacing: 8) {
+            LED(color: tint, lit: true, size: 8)
+            Text(title)
+                .font(Theme.mono(11, .medium)).tracking(1.3)
+                .foregroundStyle(Theme.textSecondary)
+            Chip(text: badge, tint: Theme.orange, size: 9)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 48)
+        .background(LinearGradient(colors: [Theme.surfaceTop, Theme.panel], startPoint: .top, endPoint: .bottom))
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.borderSubtle).frame(height: 1) }
+    }
+}
+
+/// The key row along the bottom of a sheet.
+struct SheetFooter<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        HStack(spacing: 8) { content }
+            .padding(.horizontal, 20)
+            .frame(height: 56)
+            .background(Theme.panel)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.borderSubtle).frame(height: 1) }
+    }
 }

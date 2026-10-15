@@ -83,62 +83,24 @@ enum ScriptExecutionEngine {
         let scriptURL = try write(source, extension: interpreter.fileExtension)
         defer { try? FileManager.default.removeItem(at: scriptURL) }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: interpreter.path)
-        process.arguments = interpreter.leadingArguments + [scriptURL.path] + paths.map(\.path)
-        process.environment = environment(for: action)
-
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        process.standardInput = FileHandle.nullDevice
-
-        // Drained as it arrives. Waiting first and reading after deadlocks the
-        // moment a script writes more than one pipe buffer holds — measured at
-        // roughly 64KB, and a chatty script passes that in a heartbeat.
-        let collector = OutputCollector()
-        out.fileHandleForReading.readabilityHandler = { collector.appendOutput($0.availableData) }
-        err.fileHandleForReading.readabilityHandler = { collector.appendError($0.availableData) }
-
         let started = Date()
-        let watchdog = DispatchWorkItem { [weak process] in
-            guard let process, process.isRunning else { return }
-            collector.markTimedOut()
-            process.terminate()
+        let result: Tool.Result
+        do {
+            result = try await Tool.run(interpreter.path,
+                                        interpreter.leadingArguments + [scriptURL.path] + paths.map(\.path),
+                                        environment: environment(for: action),
+                                        timeout: timeout)
+        } catch {
+            throw ScriptError.launchFailed(error.localizedDescription)
         }
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        if result.timedOut { throw ScriptError.timedOut(timeout) }
 
-        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-            let resumed = Resumed()
-            process.terminationHandler = { process in
-                guard resumed.claim() else { return }
-                continuation.resume(returning: process.terminationStatus)
-            }
-            do {
-                try process.run()
-            } catch {
-                if resumed.claim() {
-                    continuation.resume(throwing: ScriptError.launchFailed(error.localizedDescription))
-                }
-            }
-        }
-
-        watchdog.cancel()
-        out.fileHandleForReading.readabilityHandler = nil
-        err.fileHandleForReading.readabilityHandler = nil
-        // Whatever landed between the last callback and exit.
-        collector.appendOutput(out.fileHandleForReading.availableData)
-        collector.appendError(err.fileHandleForReading.availableData)
-
-        if collector.didTimeOut { throw ScriptError.timedOut(timeout) }
-
-        let run = ScriptRun(output: collector.output,
-                            errorOutput: collector.errorOutput,
-                            exitCode: status,
+        let run = ScriptRun(output: result.output,
+                            errorOutput: result.errorOutput,
+                            exitCode: result.status,
                             duration: Date().timeIntervalSince(started))
         guard run.succeeded else {
-            throw ScriptError.exited(status, run.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+            throw ScriptError.exited(result.status, run.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return run
     }
@@ -209,51 +171,5 @@ enum ScriptExecutionEngine {
             throw ScriptError.launchFailed(error.localizedDescription)
         }
         return url
-    }
-}
-
-/// Thread-safe accumulation of two pipes drained from arbitrary queues.
-private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var outputData = Data()
-    private var errorData = Data()
-    private var timedOut = false
-
-    func appendOutput(_ data: Data) {
-        guard !data.isEmpty else { return }
-        lock.lock(); outputData.append(data); lock.unlock()
-    }
-
-    func appendError(_ data: Data) {
-        guard !data.isEmpty else { return }
-        lock.lock(); errorData.append(data); lock.unlock()
-    }
-
-    func markTimedOut() { lock.lock(); timedOut = true; lock.unlock() }
-
-    var didTimeOut: Bool { lock.lock(); defer { lock.unlock() }; return timedOut }
-
-    var output: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: outputData, encoding: .utf8) ?? ""
-    }
-
-    var errorOutput: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: errorData, encoding: .utf8) ?? ""
-    }
-}
-
-/// Guarantees a continuation resumes exactly once, whichever of the launch
-/// failure and the termination handler reaches it first.
-private final class Resumed: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-
-    func claim() -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if done { return false }
-        done = true
-        return true
     }
 }

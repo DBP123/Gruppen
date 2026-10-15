@@ -1,192 +1,202 @@
 import AppKit
 import SwiftUI
 
-/// The Stash page: what the notch stash is holding, how many stashes are open,
-/// and the ways to summon one.
+/// The Stash page: the stashes you have hidden, and every stash setting.
+///
+/// One page rather than a page and a settings pane: the page itself was a
+/// single row, and sending you somewhere else for eight switches made the
+/// settings the harder thing to find.
 struct StashPage: View {
-    @EnvironmentObject private var stash: StashCoordinator
-    @EnvironmentObject private var navigation: NavigationModel
-
     var body: some View {
-        if navigation.showingSettingsPane {
-            StashSettingsPane()
-        } else {
-            SettingsScroll {
-                LabeledSection(label: "NOTCH STASH") {
-                    NotchStashSummary()
-                        .environmentObject(stash.notchShelf)
-                }
+        SettingsScroll {
+            HiddenStashes()
+            LabeledSection(label: "SETTINGS") {
+                StashSettings()
             }
         }
     }
 }
 
-/// Contents of the notch stash, and whether its tray is out.
-private struct NotchStashSummary: View {
-    @EnvironmentObject private var stash: StashCoordinator
-    @EnvironmentObject private var store: GroupStore
-    @EnvironmentObject private var shelf: ShelfState
+/// Floating stashes put away with their hide key, each drawn as what it holds,
+/// with a way back. Nothing at all when none are hidden — an empty section
+/// would only say so.
+private struct HiddenStashes: View {
+    @ObservedObject private var manager = ShelfWindowManager.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                LED(color: Theme.orange, lit: !shelf.isEmpty, size: 9)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(shelf.isEmpty ? "Nothing on the notch stash" : "\(shelf.items.count) item\(shelf.items.count == 1 ? "" : "s")")
-                        .font(Theme.sans(13))
-                        .foregroundStyle(Theme.textPrimary)
-                    // There is one notch, so one notch stash: open or not.
-                    Text(stash.isNotchOpen ? "Notch stash open" : "No stashes open")
-                        .font(Theme.mono(10))
+        let hidden = manager.hiddenShelves
+        if !hidden.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("HIDDEN STASHES")
+                        .font(Theme.mono(10, .semibold))
+                        .tracking(1.1)
                         .foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
-                if !shelf.isEmpty {
-                    Button("Clear") { shelf.clear() }
-                        .industrialButton(.secondary)
-                }
-            }
-            .panelRow()
-
-            ForEach(shelf.items) { item in
-                HStack(spacing: 10) {
-                    Image(nsImage: item.icon)
-                        .resizable().interpolation(.high)
-                        .frame(width: 20, height: 20)
-                    Text(item.title)
-                        .font(Theme.sans(13))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1).truncationMode(.middle)
+                    Chip(text: "\(hidden.count)", tint: Theme.textSecondary, size: 9)
                     Spacer()
-                    Button { shelf.remove(item) } label: {
-                        Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+                    if hidden.count > 1 {
+                        Button("Reopen all") { manager.reopenAll() }
+                            .industrialButton(.secondary, compact: true)
                     }
-                    .industrialButton(.ghost)
                 }
-                .panelRow()
-                .stashDraggable(item, from: shelf)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+                    ForEach(hidden) { shelf in
+                        HiddenStashCard(shelf: shelf) { manager.reopen(shelf.id) }
+                    }
+                }
             }
+            .transition(.opacity)
         }
     }
 }
 
-/// Records the global shortcut that summons a stash.
-private struct StashShortcutRow: View {
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var stash: StashCoordinator
-    @StateObject private var recorder = KeyRecorder()
+/// One hidden stash: its files as a row of icons, and the key that brings it
+/// back where it was.
+private struct HiddenStashCard: View {
+    @ObservedObject var shelf: ShelfState
+    let reopen: () -> Void
 
-    var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Stash shortcut")
-                    .font(Theme.sans(13))
-                    .foregroundStyle(Theme.textPrimary)
-                Text(recorder.isRecording ? "Press keys to set shortcut" : "Requires ⌘, ⌥ or ⌃")
-                    .font(Theme.mono(10))
-                    .foregroundStyle(recorder.isRecording ? Theme.ambient : Theme.textMuted)
-            }
-            Spacer()
-            if let shortcut = settings.stashShortcut, !recorder.isRecording {
-                KeyBadge(text: shortcut.display)
-                Button("Clear") {
-                    settings.stashShortcut = nil
-                    stash.applySummonShortcut()
-                }
-                .industrialButton(.ghost)
-            }
-            Button(recorder.isRecording ? "Cancel" : "Record Shortcut") {
-                if recorder.isRecording {
-                    recorder.stop()
-                } else {
-                    recorder.start { recorded in
-                        settings.stashShortcut = recorded
-                        stash.applySummonShortcut()
-                    }
-                }
-            }
-            .industrialButton(recorder.isRecording ? .danger : .secondary)
-        }
-        .panelRow()
-        .onDisappear { recorder.stop() }
+    private static let shown = 5
+
+    private var summary: String {
+        shelf.items.count == 1 ? shelf.items[0].title : "\(shelf.items.count) items"
     }
-}
-
-/// Picks where "Export as Zip" writes.
-private struct ExportPathRow: View {
-    @EnvironmentObject private var settings: AppSettings
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Download folder")
-                    .font(Theme.sans(13))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: -6) {
+                ForEach(shelf.items.prefix(Self.shown)) { item in
+                    Image(nsImage: item.icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 28, height: 28)
+                        .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
+                }
+                if shelf.items.count > Self.shown {
+                    Text("+\(shelf.items.count - Self.shown)")
+                        .font(Theme.mono(10, .semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .padding(.leading, 12)
+                }
+            }
+            HStack(spacing: 8) {
+                Text(summary)
+                    .font(Theme.sans(12))
                     .foregroundStyle(Theme.textPrimary)
-                Text(settings.exportDirectory.path)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(Theme.textMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                Spacer(minLength: 4)
+                Button("Reopen", action: reopen)
+                    .industrialButton(.secondary, compact: true)
             }
-            Spacer()
-            Button("Choose…", action: choose)
-                .industrialButton(.secondary)
         }
-        .panelRow()
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .raisedPanel()
+        .help(shelf.items.map(\.title).joined(separator: "\n"))
+    }
+}
+
+/// Every stash setting, in two cards.
+///
+/// The first is the master switch and the three ways of opening a stash,
+/// drawn as options *of* that switch — pills inside its card — rather than as
+/// three more switches that look like settings in their own right. They fold
+/// away when stashes are off, since an option of nothing does nothing.
+///
+/// The second is how stashes behave. No line of grey under any title: each
+/// title says what the control does, and the control shows its state.
+private struct StashSettings: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SettingsCard(rail: settings.stashEnabled ? Theme.orange : nil) {
+                SwitchRow(title: "Enable stashes", badge: "\(triggerCount)/3 AKTIV", isOn: $settings.stashEnabled)
+                if settings.stashEnabled {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 6) { triggers }
+                        VStack(spacing: 6) { triggers }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.18), value: settings.stashEnabled)
+
+            SettingsCard {
+                ChoiceSwitch(left: "Copy files with stash", right: "Move files with stash",
+                             isRight: $settings.stashMovesOnDragOut)
+                    .cardRow()
+                CardDivider()
+                SwitchRow(title: "Clear notch stash on close", isOn: $settings.notchCloseClearsStash)
+                CardDivider()
+                ShortcutRow(title: "Shortcut to open a stash", shortcut: $settings.stashShortcut)
+                CardDivider()
+                ShortcutRow(title: "Shortcut to toggle stash visibility", shortcut: $settings.stashToggleShortcut)
+                CardDivider()
+                ExportFolderRow()
+            }
+        }
+    }
+
+    private var triggerCount: Int {
+        [settings.stashNotchEnabled, settings.stashEdgeEnabled, settings.stashShakeEnabled].filter { $0 }.count
+    }
+
+    @ViewBuilder private var triggers: some View {
+        OptionPill(title: "Drag to notch", isOn: $settings.stashNotchEnabled)
+        OptionPill(title: "Drag to edges", isOn: $settings.stashEdgeEnabled)
+        OptionPill(title: "Shake to enable", isOn: $settings.stashShakeEnabled)
+    }
+}
+
+/// One of the stash's global shortcuts, re-registered the moment it changes.
+private struct ShortcutRow: View {
+    let title: String
+    @Binding var shortcut: Shortcut?
+    @EnvironmentObject private var stash: StashCoordinator
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
+            ShortcutKeys(shortcut: shortcut) { recorded in
+                shortcut = recorded
+                stash.applyShortcuts()
+            }
+        }
+        .cardRow()
+    }
+}
+
+/// Where zips and extractions are written. The folder's name is the button;
+/// its full path is the tooltip.
+private struct ExportFolderRow: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Text("Change zip folder").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+            Spacer(minLength: 12)
+            Button(action: choose) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder.fill").font(.system(size: 11))
+                    Text(settings.exportDirectory.lastPathComponent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .industrialButton(.secondary)
+            .help(settings.exportDirectory.path)
+        }
+        .cardRow()
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose a download folder"
-        panel.prompt = "Choose"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = settings.exportDirectory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = Pickers.folder(title: "Choose where zips and extractions go",
+                                       startingAt: settings.exportDirectory) else { return }
         settings.exportPath = url.path
-    }
-}
-
-/// Isolated settings for the Stash tool.
-///
-/// One list, no section headings: every row here is about the same thing, and
-/// a caption over each one was a label for a group of one. The trigger switches
-/// and the drag-out choice sit under the master switch and only while it is on —
-/// a switch for a stash that cannot exist is a control that does nothing.
-struct StashSettingsPane: View {
-    @EnvironmentObject private var settings: AppSettings
-    @EnvironmentObject private var stash: StashCoordinator
-
-    var body: some View {
-        SettingsScroll {
-            VStack(alignment: .leading, spacing: 8) {
-                SettingToggle(title: "Enable stashes", isOn: $settings.stashEnabled)
-
-                if settings.stashEnabled {
-                    SettingToggle(title: "Notch stash",
-                                  detail: "Drag toward the notch",
-                                  isOn: $settings.stashNotchEnabled)
-                    SettingToggle(title: "Screen-edge stash",
-                                  detail: "Drag to either side of the screen",
-                                  isOn: $settings.stashEdgeEnabled)
-                    SettingToggle(title: "Shake stash",
-                                  detail: "Shake while dragging",
-                                  isOn: $settings.stashShakeEnabled)
-                    // The detail states what happens *now*, in both positions,
-                    // rather than describing the switch — so it answers "what
-                    // will this drag do" without anyone having to work out which
-                    // way round on means.
-                    SettingToggle(title: "Move files when dragging out",
-                                  detail: settings.stashMovesOnDragOut
-                                      ? "The file leaves its original folder"
-                                      : "A copy is made; the original stays put",
-                                  isOn: $settings.stashMovesOnDragOut)
-                }
-
-                StashShortcutRow()
-                ExportPathRow()
-            }
-        }
     }
 }

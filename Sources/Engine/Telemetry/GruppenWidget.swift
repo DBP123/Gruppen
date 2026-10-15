@@ -219,8 +219,11 @@ protocol GruppenWidget: AnyObject {
 /// `Telemetry.queue`. It owns whatever previous counters a rate needs, which is
 /// the whole reason the split exists: those counters must not be main-actor
 /// state, and the published reading must not be anything else.
-protocol TelemetrySampler: AnyObject {
-    associatedtype Reading: Equatable
+/// `Sendable` because every call is made on `Telemetry.queue`, which is serial:
+/// the queue is a sampler's lock. That is why conformers are
+/// `@unchecked Sendable`.
+protocol TelemetrySampler: AnyObject, Sendable {
+    associatedtype Reading: Equatable & Sendable
     /// Called on `Telemetry.queue`. Returns nil when there is nothing to report
     /// yet — typically the first tick of a rate-based module, which has a
     /// baseline but no interval to divide by.
@@ -254,6 +257,14 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
     /// Newest last. Cleared on stop — a sparkline with a hole in it is a lie
     /// about the interval it appears to cover.
     @Published private(set) var history: [Double] = []
+    /// True once the sampler has come back empty `patience` times in a row
+    /// with nothing to show — the system stopped answering, as the battery
+    /// node did on macOS 27. Shown as "unavailable" rather than a spinner that
+    /// never ends, and cleared by the next real reading.
+    @Published private(set) var isUnavailable = false
+
+    /// Empty samples in a row before a module says it is unavailable.
+    nonisolated static var patience: Int { 3 }
 
     var isPanelActive = false
     var isMenuBarPinned = false
@@ -276,9 +287,17 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
         self.rate = rate
 
         let sampler = self.sampler
+        let misses = MissCount()
+        let patience = Self.patience
         TelemetryClock.shared.register(ObjectIdentifier(self), period: rate) { [weak self] in
-            guard let reading = sampler.sample() else { return nil }
-            return { self?.accept(reading) }
+            // On the sampling queue, which is serial: the count needs no lock.
+            guard let reading = sampler.sample() else {
+                misses.value += 1
+                guard misses.value == patience else { return nil }
+                return { [weak self] in self?.markUnavailable() }
+            }
+            misses.value = 0
+            return { [weak self] in self?.accept(reading) }
         }
     }
 
@@ -293,7 +312,14 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
         Telemetry.queue.async { sampler.teardown() }
     }
 
+    private func markUnavailable() {
+        guard reading == nil, !isUnavailable else { return }
+        isUnavailable = true
+        GroupStore.log("TELEMETRY \(kind.rawValue): no reading after \(Self.patience) tries — shown as unavailable")
+    }
+
     private func accept(_ next: S.Reading) {
+        if isUnavailable { isUnavailable = false }
         if reading != next { reading = next }
         if let value = historyValue(for: next) {
             history.append(value)
@@ -356,4 +382,10 @@ struct MenuBarSample: Equatable {
     var batteryPercent: Int?
     var powerState: PowerFlow.State?
     var condition: PowerFlow.Condition?
+}
+
+/// A counter a sampling closure can carry between ticks. Touched only on the
+/// serial sampling queue, so it needs no lock.
+private final class MissCount: @unchecked Sendable {
+    var value = 0
 }

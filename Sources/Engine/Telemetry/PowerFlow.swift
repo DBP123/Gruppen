@@ -188,7 +188,7 @@ struct PowerFlow: Equatable {
         case .adapterAssist: return "PACK SUPPLEMENTING CHARGER"
         case .acPassthrough: return "FULLY CHARGED"
         case .optimizedHold: return "PAUSED AT \(percent)%"
-        case .lowPowerMode: return "THROTTLE ACTIVE"
+        case .lowPowerMode: return "THROTTLE AKTIV"
         case .discharging:
             if percent < 20 { return "ON BATTERY • CRITICAL" }
             if percent < 50 { return "ON BATTERY • DRAINING" }
@@ -222,31 +222,6 @@ struct PowerFlow: Equatable {
     private func minutes(_ hours: Double) -> Int? {
         guard hours > 0, hours < 48 else { return nil }
         return Int((hours * 60).rounded())
-    }
-
-    /// The charge percentage, taken from the figure macOS itself shows.
-    ///
-    /// Computing it from raw capacity — `AppleRawCurrentCapacity` over
-    /// `AppleRawMaxCapacity` — looks like the obvious thing and is wrong: it
-    /// gave 72% against the menu bar's 76% on this machine, because Apple
-    /// applies its own calibration on top of the cell's raw coulomb count. Two
-    /// battery readouts on the same screen disagreeing by four points is worse
-    /// than either number alone, so this reads `CurrentCapacity`, which *is*
-    /// that calibrated percentage whenever `MaxCapacity` is 100.
-    ///
-    /// On the older Macs where the pair is reported in mAh instead, the ratio is
-    /// still the right answer, so that stays as the fallback.
-    ///
-    /// Note this is only about the percentage. Watt-hours still come from raw
-    /// capacity times voltage, which is a physical quantity and has no
-    /// calibrated equivalent.
-    private static func chargePercent(_ fields: [String: Any],
-                                      currentmAh: Double, maxmAh: Double) -> Int {
-        func number(_ key: String) -> Double? { (fields[key] as? NSNumber)?.doubleValue }
-        if let current = number("CurrentCapacity"), number("MaxCapacity") == 100 {
-            return Int(current.rounded())
-        }
-        return Int((currentmAh / maxmAh * 100).rounded())
     }
 
     /// Reads the pack. Nil on a machine with no battery.
@@ -343,26 +318,22 @@ struct PowerFlow: Equatable {
     }
 
     static func read(liveDraw: Double? = liveSystemDraw()) -> PowerFlow? {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault,
-                                                  IOServiceMatching("AppleSmartBattery"))
-        guard service != 0 else { return nil }
-        defer { IOObjectRelease(service) }
+        BatteryRegistry.read().flatMap { flow(from: $0, liveDraw: liveDraw) }
+    }
 
-        var raw: Unmanaged<CFMutableDictionary>?
-        guard IORegistryEntryCreateCFProperties(service, &raw, kCFAllocatorDefault, 0) == KERN_SUCCESS,
-              let fields = raw?.takeRetainedValue() as? [String: Any]
-        else { return nil }
-
-        func number(_ key: String, in source: [String: Any]) -> Double? {
-            (source[key] as? NSNumber)?.doubleValue
-        }
-        let telemetry = fields["PowerTelemetryData"] as? [String: Any] ?? [:]
-        let adapter = fields["AdapterDetails"] as? [String: Any] ?? [:]
+    /// The reading, from a battery node already read — split out so every
+    /// macOS's shape of that node can be tested from a fixture.
+    ///
+    /// Only the charge level is required. Anything else that cannot be found
+    /// reads as zero or unknown, and the panel still shows the battery.
+    static func flow(from battery: BatteryRegistry, liveDraw: Double?) -> PowerFlow? {
+        guard let percent = battery.percent else { return nil }
+        let telemetry = battery.dictionary("PowerTelemetryData")
+        let adapter = battery.dictionary("AdapterDetails")
 
         // Millivolts and milliamps; the product is milliwatts.
-        let millivolts = number("Voltage", in: fields) ?? 0
-        let milliamps = number("Amperage", in: fields) ?? 0
-        guard millivolts > 0 else { return nil }
+        let millivolts = battery.millivolts ?? 0
+        let milliamps = battery.milliamps ?? 0
         let volts = millivolts / 1000
 
         // Pack power from the **coulomb counter**, not from `BatteryPower`.
@@ -387,16 +358,13 @@ struct PowerFlow: Equatable {
         // with the capacity actually gained. It is the measurement.
         let measured = milliamps * millivolts / 1_000_000
         let batteryWatts = Self.deadbanded(measured)
-        let systemWatts = (number("SystemLoad", in: telemetry)).map { $0 / 1000 }
-        let inputWatts = (number("SystemPowerIn", in: telemetry)).map { $0 / 1000 }
+        let systemWatts = (telemetry["SystemLoad"] as? NSNumber).map { $0.doubleValue / 1000 }
+        let inputWatts = (telemetry["SystemPowerIn"] as? NSNumber).map { $0.doubleValue / 1000 }
 
-        let plugged = (number("ExternalConnected", in: fields) ?? 0) != 0
-        let charging = (number("IsCharging", in: fields) ?? 0) != 0
-
-        guard let currentmAh = number("AppleRawCurrentCapacity", in: fields),
-              let maxmAh = number("AppleRawMaxCapacity", in: fields),
-              maxmAh > 0
-        else { return nil }
+        let plugged = battery.flag("ExternalConnected", "AppleRawExternalConnected") ?? false
+        let charging = battery.flag("IsCharging", "ChargerData.IsCharging") ?? false
+        let chargemAh = battery.chargemAh ?? 0
+        let capacitymAh = battery.capacitymAh ?? 0
 
         // The live rail first; see `fallbackLoad` for what happens when there
         // isn't one. Clamped either way, because there is no state of a computer
@@ -417,20 +385,20 @@ struct PowerFlow: Equatable {
             // by however much the machine's load has changed in the last minute.
             adapterInput: Self.adapterInput(reported: inputWatts, system: load,
                                             battery: batteryWatts, plugged: plugged),
-            adapterRating: number("Watts", in: adapter),
+            adapterRating: (adapter["Watts"] as? NSNumber)?.doubleValue,
             isCharging: charging,
             isPluggedIn: plugged,
-            isFull: (number("FullyCharged", in: fields) ?? 0) != 0,
-            percent: Self.chargePercent(fields, currentmAh: currentmAh, maxmAh: maxmAh),
-            remainingEnergy: currentmAh / 1000 * volts,
-            fullEnergy: maxmAh / 1000 * volts,
-            chargemAh: currentmAh,
-            capacitymAh: maxmAh,
-            isPresent: (number("BatteryInstalled", in: fields) ?? 1) != 0,
+            isFull: battery.flag("FullyCharged", "BatteryData.FullyCharged") ?? false,
+            percent: percent,
+            remainingEnergy: chargemAh / 1000 * volts,
+            fullEnergy: capacitymAh / 1000 * volts,
+            chargemAh: chargemAh,
+            capacitymAh: capacitymAh,
+            isPresent: battery.flag("BatteryInstalled") ?? true,
             // A named health condition — "Service Battery", "Check Battery" —
             // is the pack telling you something is wrong. Empty means fine.
-            hasFault: (number("PermanentFailureStatus", in: fields) ?? 0) != 0
-                || !((fields["BatteryHealthCondition"] as? String) ?? "").isEmpty,
+            hasFault: battery.flag("PermanentFailureStatus") ?? false
+                || !(battery.string("BatteryHealthCondition") ?? "").isEmpty,
             isLowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
     }
 }
@@ -449,7 +417,7 @@ struct PowerFlow: Equatable {
 /// It is also much cheaper alone. Thermal costs 2.5 ms a tick because it walks a
 /// dozen SMC keys; this reads one IORegistry node at 0.23 ms, so pinning the
 /// battery to the menu bar no longer drags the sensor sweep along with it.
-final class PowerSampler: TelemetrySampler {
+final class PowerSampler: TelemetrySampler, @unchecked Sendable {
     /// One quantity, four ways of reading it.
     ///
     /// The averages are over a *time* window rather than a sample count, because
@@ -617,22 +585,12 @@ final class PowerSampler: TelemetrySampler {
 extension PowerFlow {
     /// Cycle count, state of health, and cell temperature.
     static func condition() -> (cycles: Int?, health: Double?, celsius: Double?) {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault,
-                                                  IOServiceMatching("AppleSmartBattery"))
-        guard service != 0 else { return (nil, nil, nil) }
-        defer { IOObjectRelease(service) }
-
-        func number(_ key: String) -> Double? {
-            (IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
-                .takeRetainedValue() as? NSNumber)?.doubleValue
-        }
-        let design = number("DesignCapacity")
-        let maximum = number("AppleRawMaxCapacity")
+        guard let battery = BatteryRegistry.read() else { return (nil, nil, nil) }
         // Health is what the pack can still hold against what it shipped with.
-        let health = (design.flatMap { d in maximum.map { $0 / d } }).map { min($0, 1) }
-        // Reported in hundredths of a degree.
-        let celsius = number("Temperature").map { $0 / 100 }
-        return (number("CycleCount").map(Int.init), health, celsius)
+        let health = battery.designmAh.flatMap { design in
+            battery.capacitymAh.map { min($0 / design, 1) }
+        }
+        return (battery.cycles, health, battery.celsius)
     }
 }
 

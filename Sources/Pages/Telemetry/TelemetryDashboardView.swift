@@ -29,6 +29,7 @@ struct TelemetryDashboardView: View {
     @ObservedObject private var manager = WidgetManager.shared
     @StateObject private var window = WindowVisibility()
     @StateObject private var layout = DashboardLayout()
+
     var body: some View {
         // One `GeometryReader` around both halves, and the measured width passed
         // down as a plain argument.
@@ -75,13 +76,7 @@ struct TelemetryDashboardView: View {
     /// rearrange itself when you resize the window.
     private func board(order: [WidgetKind], available: CGFloat) -> some View {
         ScrollView([.vertical, .horizontal]) {
-            VStack(alignment: .leading, spacing: 14) {
-                // Above the board rather than on it: the machine's identity is
-                // the context every card is read against, and it is the one
-                // thing here that never moves.
-                SystemHeroBanner()
-                    .frame(width: min(available, 920))
-
+            Group {
                 if order.isEmpty {
                     NoModulesNotice().frame(width: min(available, 920))
                 } else {

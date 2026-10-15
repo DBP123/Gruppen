@@ -30,7 +30,7 @@ enum StashExporter {
     /// Writes `<destination>/Stash-<timestamp>.zip`. Returns its URL.
     @discardableResult
     nonisolated static func export(items: [(name: String, url: URL?, text: String?)],
-                                   to destination: URL) throws -> URL {
+                                   to destination: URL) async throws -> URL {
         guard !items.isEmpty else { throw ExportError.nothingToExport }
         // Checked before any work, because these are the two failures with a
         // reason worth naming — left to `zip`, both come back as "could not
@@ -51,7 +51,8 @@ enum StashExporter {
 
         var used: Set<String> = []
         for item in items { autoreleasepool {
-            let name = uniqueName(for: item.name, in: &used)
+            let name = FileName.unique(item.name) { used.contains($0) }
+            used.insert(name)
             let target = staging.appendingPathComponent(name)
             if let source = item.url, FileManager.default.fileExists(atPath: source.path) {
                 // Hard link rather than copy. On APFS this changes little —
@@ -70,13 +71,8 @@ enum StashExporter {
             }
         } }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let archive = uniqueArchive(in: destination, named: "Stash-\(formatter.string(from: Date()))")
+        let archive = FileName.unique("Stash-\(Stamp.moment()).zip", in: destination)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.currentDirectoryURL = staging
         // Compression level, chosen by what is actually on the shelf.
         //
         // Measured on 240MB of media: `-6` (the default) took 3.08s and produced
@@ -92,16 +88,9 @@ enum StashExporter {
         //
         // `-y` stores symlinks rather than following them.
         let level = items.allSatisfy { isPrecompressed($0.url) } ? "-0" : "-6"
-        process.arguments = ["-r", "-q", level, "-y", archive.path, "."]
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw ExportError.zipFailed(message.trimmingCharacters(in: .whitespacesAndNewlines))
+        let result = try await Tool.run("/usr/bin/zip", ["-r", "-q", level, "-y", archive.path, "."], in: staging)
+        guard result.succeeded else {
+            throw ExportError.zipFailed(result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return archive
     }
@@ -118,29 +107,6 @@ enum StashExporter {
             "zip", "gz", "bz2", "xz", "7z", "dmg", "ipa", "jar"
         ]
         return compressed.contains(url.pathExtension.lowercased())
-    }
-
-    private nonisolated static func uniqueName(for name: String, in used: inout Set<String>) -> String {
-        var candidate = name
-        var counter = 1
-        while used.contains(candidate) {
-            let base = (name as NSString).deletingPathExtension
-            let ext = (name as NSString).pathExtension
-            candidate = ext.isEmpty ? "\(base)-\(counter)" : "\(base)-\(counter).\(ext)"
-            counter += 1
-        }
-        used.insert(candidate)
-        return candidate
-    }
-
-    private nonisolated static func uniqueArchive(in folder: URL, named base: String) -> URL {
-        var candidate = folder.appendingPathComponent("\(base).zip")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = folder.appendingPathComponent("\(base)-\(counter).zip")
-            counter += 1
-        }
-        return candidate
     }
 
     /// Where exports land. Defaults to Downloads.

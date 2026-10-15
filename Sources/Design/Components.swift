@@ -82,33 +82,268 @@ struct SettingToggle: View {
     }
 }
 
-struct RadioRow: View {
-    let title: String
-    let detail: String
-    let selected: Bool
-    let action: () -> Void
+/// One raised panel holding several rows, so related settings read as one
+/// piece of hardware instead of a column of identical boxes. `rail` lights its
+/// leading edge while what it controls is live.
+struct SettingsCard<Content: View>: View {
+    var rail: Color? = nil
+    @ViewBuilder let content: Content
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(selected ? Theme.orange : Theme.borderStrong, lineWidth: 1)
-                        .frame(width: 14, height: 14)
-                    if selected { Circle().fill(Theme.orange).frame(width: 6, height: 6) }
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                    Text(detail).font(Theme.mono(10)).foregroundStyle(Theme.textMuted)
-                }
-                Spacer()
+        VStack(alignment: .leading, spacing: 0) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .raisedPanel(rail: rail)
+    }
+}
+
+struct CardDivider: View {
+    var body: some View {
+        Rectangle().fill(Theme.borderSubtle).frame(height: 1).padding(.leading, 12)
+    }
+}
+
+/// A title and its switch, sized to sit inside a card. `badge` is a short
+/// status chip beside the title — AKTIV, 6/8 AKTIV.
+struct SwitchRow: View {
+    let title: String
+    var badge: String? = nil
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .font(Theme.sans(13, badge == nil ? .regular : .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            if let badge, isOn {
+                Chip(text: badge, tint: Theme.green, size: 9)
+                    .transition(.opacity)
             }
-            .panelRow(accent: selected ? Theme.orange.opacity(0.5) : nil)
+            Spacer(minLength: 12)
+            Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.industrial)
+        }
+        .cardRow()
+    }
+}
+
+/// A choice that belongs to a switch: a check and a label, lit when chosen.
+///
+/// For options *of* a setting, as opposed to settings of their own — the ways
+/// a stash opens, where a telemetry module appears. Stretches to share a row
+/// with its siblings; give it a fixed frame instead to line pills up in columns.
+struct OptionPill: View {
+    let title: String
+    @Binding var isOn: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        Button { isOn.toggle() } label: {
+            HStack(spacing: 7) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isOn ? Theme.orange : Theme.textMuted)
+                Text(title)
+                    .font(Theme.sans(12))
+                    .foregroundStyle(isOn ? Theme.textPrimary : Theme.textSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isOn ? Theme.orange.opacity(0.10)
+                               : Color.white.opacity(hovering ? 0.05 : 0.025))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(isOn ? Theme.orange.opacity(0.55) : Theme.borderStrong.opacity(0.5),
+                                  lineWidth: 1)
+            )
             .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}
+
+extension View {
+    /// The padding every row inside a `SettingsCard` shares.
+    func cardRow() -> some View {
+        padding(.horizontal, 12).padding(.vertical, 10)
+    }
+}
+
+/// A menu key's title with its chevron, drawn as part of the label.
+///
+/// The system's own menu indicator is not drawn once a menu takes a custom
+/// button style — measured: a bare "Convert" key, indistinguishable from one
+/// that converts on the spot, to an unstated format. The chevron is what says
+/// "this opens a list".
+struct MenuKeyLabel: View {
+    let title: String
+    var compact = true
+
+    var body: some View {
+        HStack(spacing: compact ? 3 : 5) {
+            Text(title)
+            Image(systemName: "chevron.down").font(.system(size: compact ? 6.5 : 8, weight: .bold))
+        }
+    }
+}
+
+extension View {
+    /// A `Menu` drawn as one of the app's keys, so a key that opens a list
+    /// looks like the keys beside it. `compact` for the stash's half-size row.
+    ///
+    /// macOS 14 lets a menu take a button style; 13 does not, and gets the
+    /// plain borderless menu, which still reads as a key in a row of them. The
+    /// system indicator is hidden on both, since the label carries its own.
+    @ViewBuilder
+    func menuKey(compact: Bool = false) -> some View {
+        if #available(macOS 14.0, *) {
+            menuStyle(.button)
+                .buttonStyle(IndustrialButtonStyle(kind: .secondary, compact: compact))
+                .menuIndicator(.hidden)
+                .fixedSize()
+        } else {
+            menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+        }
+    }
+}
+
+/// The keys that record a global shortcut: the current one, a way to clear
+/// it, and Record / Change. Recording happens in the key itself and the
+/// modifier rule is its tooltip, so the row it sits in needs no second line.
+///
+/// Escape abandons, delete clears, and anything without ⌘/⌥/⌃ keeps listening
+/// rather than binding a bare key system-wide — see `KeyRecorder`.
+struct ShortcutKeys: View {
+    let shortcut: Shortcut?
+    /// Red, and says why in its tooltip, when the system would not hand the
+    /// combination over.
+    var unavailable = false
+    /// Told when listening starts and stops — Gruppe and profile hotkeys are
+    /// released while recording, so pressing a bound combination records it
+    /// instead of firing it.
+    var onRecordingChange: (Bool) -> Void = { _ in }
+    let onRecord: (Shortcut?) -> Void
+    @StateObject private var recorder = KeyRecorder()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let shortcut, !recorder.isRecording {
+                KeyBadge(text: shortcut.display, enabled: !unavailable)
+                    .help(unavailable ? "Claimed by macOS or another app" : "Works from anywhere")
+                Button("Clear") { onRecord(nil) }
+                    .industrialButton(.quiet)
+            }
+            Button(recorder.isRecording ? "Press keys…" : (shortcut == nil ? "Record" : "Change")) {
+                if recorder.isRecording {
+                    recorder.stop()
+                } else {
+                    recorder.start(onRecord)
+                }
+            }
+            .industrialButton(recorder.isRecording ? .danger : .secondary)
+            .help(recorder.isRecording ? "Click to cancel" : "Use ⌘, ⌥ or ⌃ with a key")
+        }
+        // Follows the recorder rather than the buttons: escape, delete, a
+        // capture and a cancel all end recording, and every one of them has to
+        // hand the hotkeys back.
+        .onChange(of: recorder.isRecording) { onRecordingChange($0) }
+        .onDisappear {
+            if recorder.isRecording { onRecordingChange(false) }
+            recorder.stop()
+        }
+    }
+}
+
+/// Named behaviours side by side, one of them lit — for a setting that
+/// chooses between ways of doing something rather than turning one thing on
+/// or off.
+///
+/// A rocker said "on" or "off", and "Move files" switched off does not say
+/// what happens instead. Every answer is written on the control, and the lit
+/// one slides across when another is picked.
+struct SegmentedChoice: View {
+    let options: [String]
+    @Binding var selection: Int
+    /// What each option means, as its tooltip.
+    var help: [String] = []
+    @Namespace private var lit
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.offset) { index, title in
+                segment(title, selected: selection == index) { selection = index }
+                    .help(index < help.count ? help[index] : title)
+            }
+        }
+        .padding(3)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.input))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.machinedBorder, lineWidth: 1)
+        )
+        .animation(.spring(response: 0.26, dampingFraction: 0.78), value: selection)
+    }
+
+    private func segment(_ title: String, selected: Bool, pick: @escaping () -> Void) -> some View {
+        Button(action: pick) {
+            Text(title)
+                .font(Theme.sans(12, selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.white : Theme.textSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 6)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Theme.orange)
+                            .shadow(color: Theme.orange.opacity(0.45), radius: 6)
+                            .matchedGeometryEffect(id: "lit", in: lit)
+                    }
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
+
+/// The two-way case of `SegmentedChoice`, bound straight to a `Bool`.
+struct ChoiceSwitch: View {
+    let left: String
+    let right: String
+    @Binding var isRight: Bool
+
+    var body: some View {
+        SegmentedChoice(options: [left, right],
+                        selection: Binding(get: { isRight ? 1 : 0 }, set: { isRight = $0 == 1 }))
+    }
+}
+
+/// Explanatory line under a group of controls.
+struct FootNote: View {
+    let text: String
+
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(Theme.mono(10))
+            .foregroundStyle(Theme.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 
 /// Fixed-width key with selectable value — the About tab's build details.
 struct KeyValue: View {
@@ -133,20 +368,6 @@ struct KeyValue: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
-    }
-}
-
-/// Explanatory line under a group of controls.
-struct FootNote: View {
-    let text: String
-
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text)
-            .font(Theme.mono(10))
-            .foregroundStyle(Theme.textMuted)
-            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

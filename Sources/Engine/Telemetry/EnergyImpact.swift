@@ -188,7 +188,7 @@ final class EnergyImpactMonitor: ObservableObject {
         let sampler = self.sampler
         TelemetryClock.shared.register(ObjectIdentifier(self), period: Self.interval) { [weak self] in
             guard let reading = sampler.sample() else { return nil }
-            return { self?.accept(reading) }
+            return { [weak self] in self?.accept(reading) }
         }
     }
 

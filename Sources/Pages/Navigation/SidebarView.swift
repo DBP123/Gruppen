@@ -18,7 +18,7 @@ struct SidebarView: View {
             brand
 
             VStack(spacing: 4) {
-                ForEach(Page.available) { page in
+                ForEach(Page.allCases) { page in
                     SidebarItem(page: page,
                                 selected: navigation.page == page,
                                 collapsed: collapsed) {
@@ -119,11 +119,6 @@ private struct SidebarItem: View {
                         .foregroundStyle(selected ? Theme.textPrimary : Theme.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
-                    if !page.isImplemented {
-                        Text("SOON")
-                            .font(Theme.mono(8, .semibold))
-                            .foregroundStyle(Theme.textMuted)
-                    }
                 }
             }
             .padding(.horizontal, collapsed ? 0 : 10)

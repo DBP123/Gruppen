@@ -32,8 +32,10 @@ final class MenuBarManager: NSObject {
 
     /// Handed the objects the panel's content needs, since a status item lives
     /// outside the scene graph and can inherit nothing from it.
-    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings) {
-        panel.attach(store: store, navigation: navigation, settings: settings)
+    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings,
+                scripts: ScriptLibrary, triggers: ScriptTriggerCoordinator) {
+        panel.attach(store: store, navigation: navigation, settings: settings,
+                     scripts: scripts, triggers: triggers)
         WidgetManager.shared.onModulesChanged = { [weak self] in self?.reconcile() }
         // `start()` builds the modules and calls back into `reconcile()` here,
         // so the items and the samplers behind them come up together.
@@ -619,15 +621,20 @@ private final class MonitorPanelController {
     private var store: GroupStore?
     private var navigation: NavigationModel?
     private var settings: AppSettings?
+    private var scripts: ScriptLibrary?
+    private var triggers: ScriptTriggerCoordinator?
 
     /// Installed only while the panel is open.
     private var outsideClick: Any?
     private var insideClick: Any?
 
-    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings) {
+    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings,
+                scripts: ScriptLibrary, triggers: ScriptTriggerCoordinator) {
         self.store = store
         self.navigation = navigation
         self.settings = settings
+        self.scripts = scripts
+        self.triggers = triggers
     }
 
     var isOpen: Bool { window?.isVisible ?? false }
@@ -646,11 +653,13 @@ private final class MonitorPanelController {
     }
 
     func open(from button: NSStatusBarButton?) {
-        guard let store, let navigation, let settings else { return }
+        guard let store, let navigation, let settings, let scripts, let triggers else { return }
         let content = MonitorPanel()
             .environmentObject(store)
             .environmentObject(navigation)
             .environmentObject(settings)
+            .environmentObject(scripts)
+            .environmentObject(triggers)
             .environmentObject(WidgetManager.shared)
 
         let host = FirstMouseHostingView(rootView: AnyView(content))

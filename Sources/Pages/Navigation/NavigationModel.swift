@@ -7,10 +7,6 @@ import Foundation
 /// identical write must never republish, or SwiftUI's scene updates can loop.
 @MainActor
 final class NavigationModel: ObservableObject {
-    /// The live instance, so the developer menu can move the selection off a
-    /// tool it has just switched off. Set on init; there is only ever one.
-    private(set) static weak var shared: NavigationModel?
-
     @Published var page: Page {
         didSet {
             guard page != oldValue else { return }
@@ -37,16 +33,6 @@ final class NavigationModel: ObservableObject {
 
     func requestLayoutReset() { layoutResetRequests += 1 }
 
-    /// Moves off a page that is no longer available — either because the
-    /// developer menu just hid it, or because it was hidden when the app last
-    /// quit and the stored selection points at it.
-    func retreatIfUnavailable() {
-        let available = Page.available
-        guard !available.contains(page) else { return }
-        page = available.first ?? .settings
-        showingSettingsPane = false
-    }
-
     private enum Keys {
         static let page = "navigationPage"
         static let collapsed = "sidebarCollapsed"
@@ -58,12 +44,9 @@ final class NavigationModel: ObservableObject {
         defaults.register(defaults: [Keys.collapsed: false])
         sidebarCollapsed = defaults.bool(forKey: Keys.collapsed)
         // Telemetry is the landing page, and also the fallback when the stored
-        // selection names a tool that no longer exists — which it will once,
-        // for anyone upgrading from a build whose rail still had a separate
-        // telemetry-settings entry.
+        // selection names a tool that no longer exists — a build whose rail
+        // had a separate telemetry-settings entry, or the Data tool.
         page = defaults.string(forKey: Keys.page).flatMap(Page.init(rawValue:)) ?? .telemetry
-        Self.shared = self
-        retreatIfUnavailable()
     }
 
     func select(_ page: Page) {
@@ -75,7 +58,6 @@ final class NavigationModel: ObservableObject {
     /// any pane that belonged to the tool being left, so the pane is opened
     /// second.
     func openTelemetrySettings() {
-        guard Page.available.contains(.telemetry) else { return }
         page = .telemetry
         showingSettingsPane = true
     }

@@ -59,7 +59,9 @@ enum SpaceManager {
     /// the user pressed — a permission dialog nobody asked for is a permission
     /// dialog they deny.
     static func requestAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+        // The value of `kAXTrustedCheckOptionPrompt`, which Swift imports as a
+        // mutable global and so cannot read safely from concurrent code.
+        let options = ["AXTrustedCheckOptionPrompt": true]
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
     }
 

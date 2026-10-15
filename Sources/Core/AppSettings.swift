@@ -38,15 +38,6 @@ final class AppSettings: ObservableObject {
         }
     }
 
-    /// Show the "Suggested Gruppen" chips on the overview. Some people know
-    /// exactly what they want and would rather not be offered anything.
-    @Published var showSuggestions: Bool {
-        didSet {
-            guard showSuggestions != oldValue else { return }
-            defaults.set(showSuggestions, forKey: Keys.showSuggestions)
-        }
-    }
-
     /// Bring a Gruppe's windows forward when it is launched. Off by default so
     /// activating a workspace never yanks focus mid-task.
     @Published var activateOnLaunch: Bool {
@@ -84,13 +75,14 @@ final class AppSettings: ObservableObject {
         didSet { persist(stashMovesOnDragOut, oldValue, Keys.stashMoveOnDragOut) }
     }
 
-    /// Whether Gruppen re-reads the machine's mutable hardware state at launch.
+    /// What the notch stash's close key does with the files on it: off, the
+    /// tray slides away and keeps them for next time; on, it empties first.
     ///
-    /// On by default. Off means the cached profile is used exactly as written
-    /// and no IOKit or `sysctl` probe runs on the app's behalf — which also
-    /// means an OS update or a newly attached display will not be noticed.
-    @Published var hardwareAutoDetection: Bool {
-        didSet { persist(hardwareAutoDetection, oldValue, Keys.hardwareAutoDetection) }
+    /// Off by default, because keeping is what closing has always done, and
+    /// only the close key reads it — a tray withdrawing on its own, at the end
+    /// of a drag or with its display unplugged, never clears anything.
+    @Published var notchCloseClearsStash: Bool {
+        didSet { persist(notchCloseClearsStash, oldValue, Keys.notchCloseClears) }
     }
 
     /// Where "Export as Zip" writes to.
@@ -113,13 +105,20 @@ final class AppSettings: ObservableObject {
 
     /// Summons a shelf in front of everything, from anywhere. Nil for none.
     @Published var stashShortcut: Shortcut? {
+        didSet { persist(stashShortcut, oldValue, Keys.stashShortcut) }
+    }
+
+    /// Hides every floating stash on screen, or brings the hidden ones back
+    /// when none are showing. Nil for none.
+    @Published var stashToggleShortcut: Shortcut? {
+        didSet { persist(stashToggleShortcut, oldValue, Keys.stashToggleShortcut) }
+    }
+
+    /// Opens the quick palette of actions. Nil for none.
+    @Published var paletteShortcut: Shortcut? {
         didSet {
-            guard stashShortcut != oldValue else { return }
-            if let stashShortcut, let data = try? JSONEncoder().encode(stashShortcut) {
-                defaults.set(data, forKey: Keys.stashShortcut)
-            } else {
-                defaults.removeObject(forKey: Keys.stashShortcut)
-            }
+            persist(paletteShortcut, oldValue, Keys.paletteShortcut)
+            QuickPalette.shared.applyShortcut()
         }
     }
 
@@ -135,20 +134,35 @@ final class AppSettings: ObservableObject {
         NotificationCenter.default.post(name: Self.didChange, object: self)
     }
 
+    /// Shortcuts are stored as JSON, and nil removes the key.
+    private func persist(_ value: Shortcut?, _ oldValue: Shortcut?, _ key: String) {
+        guard value != oldValue else { return }
+        if let value, let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    private static func shortcut(forKey key: String) -> Shortcut? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
+    }
+
     private enum Keys {
         static let showMenuBar = "showMenuBar"
         static let showDockIcon = "showDockIcon"
         static let activateOnLaunch = "activateOnLaunch"
-        static let showSuggestions = "showSuggestions"
         static let stashEnabled = "stashEnabled"
         static let stashNotch = "stashNotchEnabled"
         static let stashEdge = "stashEdgeEnabled"
         static let stashShake = "stashShakeEnabled"
         static let stashMoveOnDragOut = "stashMovesOnDragOut"
+        static let notchCloseClears = "notchCloseClearsStash"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
-        static let hardwareAutoDetection = "enableHardwareAutoDetection"
+        static let stashToggleShortcut = "stashToggleShortcut"
+        static let paletteShortcut = "paletteShortcut"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -160,29 +174,28 @@ final class AppSettings: ObservableObject {
             Keys.showMenuBar: true,
             Keys.showDockIcon: true,
             Keys.activateOnLaunch: false,
-            Keys.showSuggestions: true,
             Keys.stashEnabled: true,
             Keys.stashNotch: true,
             Keys.stashEdge: true,
             Keys.stashShake: true,
             Keys.stashMoveOnDragOut: false,
+            Keys.notchCloseClears: false,
             Keys.performanceMonitor: true,
-            Keys.hardwareAutoDetection: true,
         ])
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
         showDockIcon = defaults.bool(forKey: Keys.showDockIcon)
         activateOnLaunch = defaults.bool(forKey: Keys.activateOnLaunch)
-        showSuggestions = defaults.bool(forKey: Keys.showSuggestions)
         stashEnabled = defaults.bool(forKey: Keys.stashEnabled)
         stashNotchEnabled = defaults.bool(forKey: Keys.stashNotch)
         stashEdgeEnabled = defaults.bool(forKey: Keys.stashEdge)
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
         stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
-        hardwareAutoDetection = defaults.bool(forKey: Keys.hardwareAutoDetection)
+        notchCloseClearsStash = defaults.bool(forKey: Keys.notchCloseClears)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
-        stashShortcut = defaults.data(forKey: Keys.stashShortcut)
-            .flatMap { try? JSONDecoder().decode(Shortcut.self, from: $0) }
+        stashShortcut = Self.shortcut(forKey: Keys.stashShortcut)
+        stashToggleShortcut = Self.shortcut(forKey: Keys.stashToggleShortcut)
+        paletteShortcut = Self.shortcut(forKey: Keys.paletteShortcut)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 

@@ -45,6 +45,14 @@ final class ScriptTriggerCoordinator: ObservableObject {
         Task { @MainActor in self?.handleProcessLaunch(name: name, pid: pid) }
     }
     private var darwinNames: [String] = []
+    private var displayWatcher: DisplayWatcher?
+    private var wifiWatcher: WiFiWatcher?
+    private var audioWatcher: AudioOutputWatcher?
+    private var schedules: [UUID: DispatchSourceTimer] = [:]
+    /// Files a run has just written into a watched folder. A rule that renames
+    /// in place would otherwise see its own result arrive and run again on it,
+    /// for ever.
+    private var produced: Set<String> = []
     /// Darwin callbacks are C function pointers with no usable context object,
     /// so the live coordinator is reachable through this.
     fileprivate static weak var activeDarwinCoordinator: ScriptTriggerCoordinator?
@@ -77,13 +85,34 @@ final class ScriptTriggerCoordinator: ObservableObject {
                 if script.trigger.appMatch == .processName, script.trigger.appEvent == .quit {
                     armProcessExit(script)
                 }
-            case .systemState, .manual:
+            case .schedule:
+                schedule(script)
+            case .systemState, .display, .wifi, .audioDevice, .gruppe, .manual:
                 break
             }
         }
 
+        let kinds = Set(armable.map(\.trigger.kind))
+        if kinds.contains(.display) {
+            displayWatcher = DisplayWatcher { [weak self] added in self?.fire(on: .display(added ? .on : .off)) }
+        }
+        if kinds.contains(.wifi) {
+            wifiWatcher = WiFiWatcher { [weak self] network in self?.fire(on: .wifi(network)) }
+        }
+        if kinds.contains(.audioDevice) {
+            audioWatcher = AudioOutputWatcher { [weak self] device in
+                Task { @MainActor in self?.fire(on: .audioDevice(device)) }
+            }
+        }
+        if kinds.contains(.gruppe) { armGruppe() }
+
         if armable.contains(where: { $0.trigger.kind == .appLifecycle }) { armAppLifecycle() }
-        if armable.contains(where: { $0.trigger.kind == .systemState }) { armSystemState() }
+        // Sweeping rules need the wake notification too: an age is reached
+        // while the lid is shut.
+        if armable.contains(where: { $0.trigger.kind == .systemState
+                                     || ($0.trigger.kind == .folderWatch && $0.trigger.sweepsExisting) }) {
+            armSystemState()
+        }
 
         // The monitor is armed with exactly the names that need it, and with
         // nothing at all when none do — which is when it costs nothing.
@@ -123,6 +152,11 @@ final class ScriptTriggerCoordinator: ObservableObject {
             self.powerSource = nil
         }
         lastBatteryPercent = nil
+        displayWatcher?.stop(); displayWatcher = nil
+        wifiWatcher?.stop(); wifiWatcher = nil
+        audioWatcher?.stop(); audioWatcher = nil
+        schedules.values.forEach { $0.cancel() }
+        schedules.removeAll()
         isArmed = false
     }
 
@@ -131,12 +165,86 @@ final class ScriptTriggerCoordinator: ObservableObject {
     private func armFolderWatch(_ script: Script) {
         let folder = script.trigger.watchedFolder
         guard !folder.isEmpty else { return }
+        let id = script.id
         let watcher = FolderWatcher(path: folder) { [weak self] newFiles in
-            guard !newFiles.isEmpty else { return }
-            self?.fire(script.id, paths: newFiles)
+            self?.fireRule(id, arrivals: newFiles)
         }
         watcher.start()
         watchers[script.id] = watcher
+        if script.trigger.sweepsExisting { sweep(id) }
+    }
+
+    /// New files in a rule's folder: the ones the rule admits, minus any a run
+    /// just put there itself.
+    private func fireRule(_ id: UUID, arrivals: [URL]) {
+        guard let script = library.scripts.first(where: { $0.id == id }) else { return }
+        let fresh = arrivals.filter { produced.remove($0.path) == nil }
+        if script.trigger.sweepsExisting { sweep(id); return }
+        let admitted = fresh.filter { script.trigger.admits($0) }
+        guard !admitted.isEmpty else { return }
+        run(script, paths: admitted, source: "Rule")
+    }
+
+    /// Every file already in a rule's folder that the rule admits. For rules
+    /// with an age condition, run when armed, when the folder changes and on
+    /// wake — "older than 30 days" becomes true while nothing is happening.
+    private func sweep(_ id: UUID) {
+        guard let script = library.scripts.first(where: { $0.id == id }) else { return }
+        let folder = URL(fileURLWithPath: script.trigger.watchedFolder, isDirectory: true)
+        let files = ((try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? [])
+            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+            .filter { script.trigger.admits($0) }
+        guard !files.isEmpty else { return }
+        run(script, paths: files, source: "Rule")
+    }
+
+    /// Re-checks every sweeping rule. Called on wake.
+    func sweepAll() {
+        for script in library.scripts where script.isArmable
+            && script.trigger.kind == .folderWatch && script.trigger.sweepsExisting {
+            sweep(script.id)
+        }
+    }
+
+    // MARK: Context
+
+    /// Runs every armed script `event` sets off.
+    func fire(on event: ScriptTrigger.Event) {
+        for script in library.scripts where script.isArmable && script.trigger.isSetOff(by: event) {
+            fire(script.id, paths: [])
+        }
+    }
+
+    private func armGruppe() {
+        for (name, edge) in [(GroupStore.didLaunch, ScriptTrigger.Edge.on), (GroupStore.didClose, .off)] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
+                [weak self] note in
+                guard let id = note.object as? UUID else { return }
+                Task { @MainActor in self?.fire(on: .gruppe(id, edge)) }
+            })
+        }
+    }
+
+    /// One wake-up, at the next time the schedule is due — then it runs and
+    /// books the one after. A wall-clock deadline, so a Mac asleep through
+    /// the time runs it on waking rather than never.
+    private func schedule(_ script: Script) {
+        schedules[script.id]?.cancel()
+        guard let next = script.trigger.nextOccurrence(after: Date()) else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(wallDeadline: .now() + next.timeIntervalSinceNow)
+        let id = script.id
+        timer.setEventHandler { [weak self] in
+            Task { @MainActor in
+                guard let self, let current = self.library.scripts.first(where: { $0.id == id }),
+                      current.isArmable else { return }
+                self.fire(id, paths: [])
+                self.schedule(current)
+            }
+        }
+        timer.resume()
+        schedules[script.id] = timer
     }
 
     private func armHotkey(_ script: Script) {
@@ -285,7 +393,10 @@ final class ScriptTriggerCoordinator: ObservableObject {
         })
         observers.append(center.addObserver(forName: NSWorkspace.didWakeNotification,
                                             object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.fireSystem(.didWake) }
+            Task { @MainActor in
+                self?.fireSystem(.didWake)
+                self?.sweepAll()
+            }
         })
 
         // Power: a run-loop source the system signals, not a poll.
@@ -330,57 +441,81 @@ final class ScriptTriggerCoordinator: ObservableObject {
 
     // MARK: Running
 
-    /// Runs a script and applies its feedback. Called only from an event.
+    /// A run in flight: which step it is on, and how the ones before it went.
+    /// The page lights its slots from this.
+    struct Progress: Equatable {
+        var current: Int
+        var finished: [Bool] = []
+    }
+
+    @Published private(set) var progress: [UUID: Progress] = [:]
+
+    /// What the Gruppe and workspace steps call. Set by the app, which owns the
+    /// store and the workspace engine.
+    var hooks = ScriptRunner.Hooks()
+
+    /// Runs a script because its trigger fired.
     func fire(_ id: UUID, paths: [URL]) {
         guard let script = library.scripts.first(where: { $0.id == id }) else { return }
-        run(script, paths: paths)
+        run(script, paths: paths, source: script.trigger.kind.shortLabel)
     }
 
-    func run(_ script: Script, paths: [URL]) {
-        let action = script.action
-        let feedback = script.feedback
+    /// Runs `script`'s steps in order, handing each the files the last one
+    /// produced, and stops at the first that fails.
+    ///
+    /// A script already running is not started a second time — a folder that
+    /// fills faster than its script empties it would otherwise stack runs, and
+    /// a workspace whose script activates that workspace would never end.
+    @discardableResult
+    func run(_ script: Script, paths: [URL], source: String = "Manual") -> Bool {
         let id = script.id
-        let name = script.name
+        guard progress[id] == nil, !script.steps.isEmpty else { return false }
+        progress[id] = Progress(current: 0)
+        let hooks = hooks
+        let started = Date()
 
-        Task { [weak self] in
-            do {
-                let run = try await ScriptExecutionEngine.run(action, paths: paths)
-                await MainActor.run { self?.report(run, feedback: feedback, id: id, name: name) }
-            } catch {
-                await MainActor.run {
-                    self?.library.record(error.localizedDescription, failed: true, for: id)
-                    if feedback == .audio { NSSound(named: "Basso")?.play() }
-                    if feedback == .banner {
-                        Notifier.post(title: "\(name) failed", body: error.localizedDescription) { failure in
-                            guard let failure else { return }
-                            Task { @MainActor in self?.library.record("! \(failure)", failed: true, for: id) }
-                        }
-                    }
-                    GroupStore.log("SCRIPT \"\(name)\" failed — \(error.localizedDescription)")
+        Task { @MainActor [weak self] in
+            var files = paths
+            var outcomes: [ScriptRunRecord.StepOutcome] = []
+            for (index, step) in script.steps.enumerated() {
+                self?.progress[id]?.current = index
+                do {
+                    let outcome = try await ScriptRunner.perform(step, files: files, hooks: hooks)
+                    files = outcome.files
+                    self?.produced.formUnion(outcome.files.map(\.path))
+                    outcomes.append(.init(stepID: step.id, label: step.kind.label, ok: true,
+                                          message: outcome.message))
+                    self?.progress[id]?.finished.append(true)
+                } catch {
+                    outcomes.append(.init(stepID: step.id, label: step.kind.label, ok: false,
+                                          message: error.localizedDescription))
+                    self?.progress[id]?.finished.append(false)
+                    break
                 }
             }
+            let record = ScriptRunRecord(date: started, source: source,
+                                         duration: Date().timeIntervalSince(started), steps: outcomes)
+            self?.finish(record, of: script)
         }
+        return true
     }
 
-    private func report(_ run: ScriptRun, feedback: ScriptFeedback, id: UUID, name: String) {
-        // The transcript is always kept: the log drawer is a view of it, not the
-        // only reason to have it.
-        library.record(run.transcript.isEmpty
-                       ? String(format: "exit 0 · %.2fs", run.duration)
-                       : run.transcript,
-                       failed: false, for: id)
-        GroupStore.log("SCRIPT \"\(name)\" — " + String(format: "%.2fs", run.duration))
+    private func finish(_ record: ScriptRunRecord, of script: Script) {
+        progress[script.id] = nil
+        library.record(record, for: script.id)
+        GroupStore.log("SCRIPT \"\(script.name)\" \(record.succeeded ? "ok" : "failed")"
+                       + String(format: " %.2fs — ", record.duration) + record.summary)
 
-        switch feedback {
-        case .silent, .log:
+        switch record.succeeded ? script.output.onSuccess : script.output.onFailure {
+        case .none:
             break
-        case .audio:
-            NSSound(named: "Glass")?.play()
-        case .banner:
-            let body = run.transcript.split(separator: "\n").first.map(String.init) ?? "Done"
-            Notifier.post(title: name, body: body) { [weak self] failure in
+        case .sound:
+            NSSound(named: record.succeeded ? "Glass" : "Basso")?.play()
+        case .notification:
+            let body = record.summary.split(separator: "\n").first.map(String.init) ?? "Done"
+            Notifier.post(title: record.succeeded ? script.name : "\(script.name) failed", body: body) { failure in
                 guard let failure else { return }
-                Task { @MainActor in self?.library.record("! \(failure)", failed: true, for: id) }
+                GroupStore.log("SCRIPT notification failed — \(failure)")
             }
         }
     }
@@ -426,14 +561,17 @@ final class ScriptTriggerCoordinator: ObservableObject {
 /// `FSEventStream` is the event-driven route: the kernel posts changes to a
 /// dispatch queue and nothing runs in between. The latency argument is a
 /// coalescing window for bursts, not a polling interval.
-final class FolderWatcher {
+/// `@unchecked Sendable`: `known` is set in `start()` before the stream exists
+/// and from then on touched only on `queue`; the stream is made and torn down
+/// on the main thread.
+final class FolderWatcher: @unchecked Sendable {
     private let path: String
-    private let onNewFiles: ([URL]) -> Void
+    private let onNewFiles: @MainActor ([URL]) -> Void
     private var stream: FSEventStreamRef?
     private var known: Set<String> = []
     private let queue = DispatchQueue(label: "com.dhilanpatel.gruppen.folderwatch")
 
-    init(path: String, onNewFiles: @escaping ([URL]) -> Void) {
+    init(path: String, onNewFiles: @escaping @MainActor ([URL]) -> Void) {
         self.path = path
         self.onNewFiles = onNewFiles
     }
@@ -487,7 +625,7 @@ final class FolderWatcher {
         let arrived = current.filter { !known.contains($0.path) }
         known = currentPaths
         guard !arrived.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in self?.onNewFiles(arrived) }
+        Task { @MainActor [weak self] in self?.onNewFiles(arrived) }
     }
 
     private func currentFiles() -> [URL] {
@@ -510,8 +648,9 @@ final class FolderWatcher {
 /// `UNUserNotificationCenter` throws if the process has no bundle identifier —
 /// which is exactly the case in a test harness — so every call is guarded and
 /// simply does nothing when notifications are unavailable.
+@MainActor
 enum Notifier {
-    static func post(title: String, body: String, report: @escaping (String?) -> Void = { _ in }) {
+    static func post(title: String, body: String, report: @escaping @Sendable (String?) -> Void = { _ in }) {
         guard Bundle.main.bundleIdentifier != nil else {
             report("notifications need a bundled app")
             return

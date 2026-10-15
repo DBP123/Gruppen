@@ -36,7 +36,7 @@ enum IngestionManager {
     /// Reads a live drag. This is the path that supports file promises, which
     /// never appear as ordinary pasteboard items.
     @MainActor
-    static func ingest(_ info: NSDraggingInfo, into sink: @escaping @MainActor ([StashItem]) -> Void) {
+    static func ingest(_ info: NSDraggingInfo, into sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         let pasteboard = info.draggingPasteboard
 
         // 1. Promises first. Safari, Photos and Mail hand over a receipt rather
@@ -94,7 +94,7 @@ enum IngestionManager {
     /// write it out, and the result is copied into scratch before the source
     /// app reclaims its temporary.
     @MainActor
-    static func ingest(_ providers: [NSItemProvider], into sink: @escaping @MainActor ([StashItem]) -> Void) {
+    static func ingest(_ providers: [NSItemProvider], into sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -126,7 +126,7 @@ enum IngestionManager {
     @MainActor
     private static func claimFileRepresentation(from provider: NSItemProvider,
                                                 typeIdentifier: String,
-                                                sink: @escaping @MainActor ([StashItem]) -> Void) {
+                                                sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         // Read off the provider *here*, on the main actor: the callback runs on
         // an arbitrary queue and NSItemProvider is not Sendable.
         let suggested = provider.suggestedName
@@ -179,7 +179,7 @@ enum IngestionManager {
     /// A remote image becomes a local one; anything else becomes a `.webloc`,
     /// which is the file Finder itself writes when you drag a link to the
     /// desktop, so double-clicking it opens the page.
-    static func materialize(webURL url: URL, completion: @escaping (StashItem) -> Void) {
+    static func materialize(webURL url: URL, completion: @escaping @Sendable (StashItem) -> Void) {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             completion(.link(url))
             return
@@ -232,9 +232,7 @@ enum IngestionManager {
               let png = rep.representation(using: .png, properties: [:])
         else { completion(nil); return }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let name = "Image-\(formatter.string(from: Date())).png"
+        let name = "Image-\(Stamp.moment()).png"
         let destination = uniqueScratchURL(named: name)
         do {
             try png.write(to: destination)
@@ -247,16 +245,6 @@ enum IngestionManager {
     // MARK: - Naming
 
     static func uniqueScratchURL(named name: String) -> URL {
-        let safe = name.isEmpty ? "Item" : name
-        var candidate = scratch.appendingPathComponent(safe)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let base = (safe as NSString).deletingPathExtension
-            let ext = (safe as NSString).pathExtension
-            let next = ext.isEmpty ? "\(base)-\(counter)" : "\(base)-\(counter).\(ext)"
-            candidate = scratch.appendingPathComponent(next)
-            counter += 1
-        }
-        return candidate
+        FileName.unique(name.isEmpty ? "Item" : name, in: scratch)
     }
 }

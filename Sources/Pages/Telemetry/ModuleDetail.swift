@@ -113,13 +113,18 @@ private struct DetailHeader: View {
     }
 }
 
+/// What a module shows before its first reading — or, once the system has
+/// stopped answering, why there is nothing to show.
 struct Waiting: View {
+    var unavailable = false
+
     var body: some View {
-        Text("Waiting for the first reading…")
+        Text(unavailable ? "Unavailable on this Mac" : "Waiting for the first reading…")
             .font(Theme.mono(10))
-            .foregroundStyle(Theme.textMuted)
+            .foregroundStyle(unavailable ? Theme.amber : Theme.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
+            .help(unavailable ? "macOS did not answer this module's reading. Details are in ~/Library/Logs/Gruppen.log" : "")
     }
 }
 
@@ -205,6 +210,42 @@ struct TableHeader: View {
                         .foregroundStyle(Theme.textMuted)
                         .frame(width: column.2, alignment: .trailing)
                 }
+            }
+        }
+    }
+}
+
+/// A table's rows, four at a time.
+///
+/// Every process table sits under a `TableHeader` inside a card you can size
+/// yourself, and a long list used to either push the card's content past its
+/// edge or get cut off at an arbitrary count. Past `visible` rows this scrolls
+/// inside a box exactly that many rows tall, so the header stays put and the
+/// card keeps its height. At or under `visible`, it is just the rows — no scroll
+/// view, no space held open for rows that are not there.
+///
+/// Every row is given the same height, which is what makes "four rows tall" an
+/// exact measurement rather than an estimate.
+struct ScrollingRows<Item: Identifiable, Row: View>: View {
+    let items: [Item]
+    var visible = 4
+    var rowHeight: CGFloat = 15
+    var spacing: CGFloat = 5
+    @ViewBuilder let row: (Item) -> Row
+
+    var body: some View {
+        if items.count > visible {
+            ScrollView(.vertical) { rows }
+                .frame(height: CGFloat(visible) * rowHeight + CGFloat(visible - 1) * spacing)
+        } else {
+            rows
+        }
+    }
+
+    private var rows: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(items) { item in
+                row(item).frame(height: rowHeight)
             }
         }
     }

@@ -139,6 +139,18 @@ struct StashItem: Identifiable, Equatable {
 /// which is why the data source is installed directly here and kept alive by
 /// this type rather than by a view controller. The app is activated first,
 /// because the preview panel will not come forward for a background app.
+///
+/// ## Giving the foreground back
+///
+/// Activating Gruppen for the preview has a cost when the preview closes: the
+/// app is still active, so AppKit makes its next window key — and if that is
+/// the main window on another desktop, macOS switches you to that desktop. You
+/// pressed Quick Look on a stash; you did not ask to go anywhere.
+///
+/// So when Gruppen was in the background before the preview, the preview hands
+/// the foreground back to whichever app had it the moment it closes, before
+/// AppKit can pick another Gruppen window to make key. If Gruppen was already
+/// the app you were using, nothing is handed back — you stay where you were.
 @MainActor
 enum QuickLook {
     private static let source = Source()
@@ -147,21 +159,53 @@ enum QuickLook {
         guard FileManager.default.fileExists(atPath: url.path),
               let panel = QLPreviewPanel.shared() else { return }
         source.url = url as NSURL
+        source.handBackTo = NSApp.isActive ? nil : NSWorkspace.shared.frontmostApplication
         NSApp.activate(ignoringOtherApps: true)
         panel.dataSource = source
+        panel.delegate = source
         panel.reloadData()
         panel.makeKeyAndOrderFront(nil)
     }
 
-    /// Retained for the lifetime of the app: `QLPreviewPanel.dataSource` is a
-    /// weak reference, and a data source that deallocates leaves an empty panel.
-    private final class Source: NSObject, QLPreviewPanelDataSource {
+    /// Retained for the lifetime of the app: `QLPreviewPanel.dataSource` and
+    /// `delegate` are weak references, and a data source that deallocates
+    /// leaves an empty panel.
+    private final class Source: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegate {
         var url: NSURL?
+        /// The app that was in front before the preview took the foreground,
+        /// or nil when Gruppen already had it.
+        var handBackTo: NSRunningApplication?
 
         func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { url == nil ? 0 : 1 }
 
         func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
             url
+        }
+
+        // Two ways the panel goes away, and both are covered: closed outright,
+        // or ordered out (which it reports as losing key while no longer on
+        // screen). Losing key while still visible is the user clicking into
+        // another app, which needs nothing from us.
+        func windowWillClose(_ notification: Notification) { handBack() }
+
+        func windowDidResignKey(_ notification: Notification) {
+            guard let panel = notification.object as? NSWindow, !panel.isVisible else { return }
+            handBack()
+        }
+
+        /// Resigns first, synchronously, so Gruppen is no longer active by the
+        /// time AppKit looks for a window to make key; then returns the
+        /// foreground to the app that had it.
+        private func handBack() {
+            guard let app = handBackTo else { return }
+            handBackTo = nil
+            // Panel delegate calls arrive on the main thread.
+            MainActor.assumeIsolated { NSApp.deactivate() }
+            if #available(macOS 14.0, *) {
+                app.activate()
+            } else {
+                app.activate(options: [])
+            }
         }
     }
 }

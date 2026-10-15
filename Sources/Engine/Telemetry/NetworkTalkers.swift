@@ -23,7 +23,10 @@ import Foundation
 /// rest of the module — interface throughput, which is entirely public —
 /// carries on. That is the trade being made, and it is worth making: a
 /// throughput figure that cannot say *who* is a number you can do nothing with.
-final class NetworkTalkers {
+// `@unchecked Sendable`: `flows` is behind `lock`; `manager` is set in
+// `start()` before any work is queued, read only on `queue`, and cleared inside
+// `queue.sync`; `started` is touched only from the telemetry queue.
+final class NetworkTalkers: @unchecked Sendable {
     /// A process holding network connections, and what those connections have
     /// carried since Gruppen started watching them.
     ///
@@ -222,11 +225,22 @@ final class NetworkTalkers {
     func stop() {
         guard started else { return }
         started = false
-        if let manager { destroyManager(manager) }
-        manager = nil
-        lock.lock()
-        flows.removeAll()
-        lock.unlock()
+        // On `queue`, for the same reason the queries are: nothing may be
+        // asking a source while the manager that owns it is torn down.
+        queue.sync {
+            // Destroy only invalidates; the manager came from a Create call and
+            // is ours to release. Without this every stop leaked one, with its
+            // XPC connection (checked under `leaks --atExit`: five cycles, five
+            // leaked managers before, none after).
+            if let manager {
+                destroyManager(manager)
+                Unmanaged<AnyObject>.fromOpaque(manager).release()
+            }
+            manager = nil
+            lock.lock()
+            flows.removeAll()
+            lock.unlock()
+        }
     }
 
     /// Takes either a description or a counts dictionary — they share the byte
@@ -257,17 +271,14 @@ final class NetworkTalkers {
     /// which at 2 Hz is half a second and is invisible next to the fact that
     /// these are averages over the interval anyway.
     func sample() -> [Talker] {
-        guard started, let manager else { return [] }
+        guard started else { return [] }
 
         // Fold the live flows up by process. The rates are already computed
         // per flow, so this is a sum, not a difference — nothing here depends
         // on when the sampler happens to tick.
         lock.lock()
         var folded: [pid_t: Talker] = [:]
-        var liveSources: [UnsafeMutableRawPointer] = []
-        liveSources.reserveCapacity(flows.count)
         for flow in flows.values {
-            liveSources.append(flow.source)
             // A flow that has not reported in a while is not moving data; hold
             // it in the list at zero rather than showing a stale rate.
             var talker = folded[flow.pid] ?? Talker(pid: flow.pid, name: flow.name,
@@ -281,9 +292,24 @@ final class NetworkTalkers {
         lock.unlock()
 
         // Ask every live flow for its current counters, and refresh the
-        // descriptions so newly opened flows get named. Both land on `queue`.
-        for source in liveSources { querySourceCounts(source) }
-        queryAll(manager) {}
+        // descriptions so newly opened flows get named.
+        //
+        // **On `queue`, never from here.** A source pointer is only valid until
+        // its removed block has run, and that block runs on `queue`. Asked from
+        // the sampling queue, a flow could close between reading the list and
+        // asking it, and the pointer asked was freed memory — measured: a crash
+        // on wake, when connections close by the dozen, as
+        // `doesNotRecognizeSelector` sent to whatever object had taken the
+        // address. On `queue` the removal and the query cannot interleave: a
+        // flow is either still in the list and still alive, or already gone.
+        queue.async { [weak self] in
+            guard let self, let manager = self.manager else { return }
+            self.lock.lock()
+            let sources = self.flows.values.map(\.source)
+            self.lock.unlock()
+            for source in sources { self.querySourceCounts(source) }
+            self.queryAll(manager) {}
+        }
 
         var talkers = Array(folded.values)
         talkers.sort { $0.total > $1.total }

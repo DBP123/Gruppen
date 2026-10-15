@@ -28,8 +28,8 @@ import IOKit
 /// once, and neither should pay the discovery cost twice, but the last one to
 /// let go must still close the connection. Every method is called on
 /// `Telemetry.queue`, which is serial — that is what makes the counting safe
-/// without a lock.
-final class AppleSiliconTelemetry {
+/// without a lock, and the queue is why this is `@unchecked Sendable`.
+final class AppleSiliconTelemetry: @unchecked Sendable {
     static let shared = AppleSiliconTelemetry()
 
     private init() {}
@@ -580,7 +580,7 @@ final class AppleSiliconTelemetry {
 // Laid out to match the kernel's own structure exactly; a field out of place
 // here reads as garbage rather than as an error.
 
-private struct SMCVersion {
+private struct SMCVersion { // sweep: keep — kernel layout
     var major: UInt8 = 0
     var minor: UInt8 = 0
     var build: UInt8 = 0
@@ -588,7 +588,7 @@ private struct SMCVersion {
     var release: UInt16 = 0
 }
 
-private struct SMCLimitData {
+private struct SMCLimitData { // sweep: keep — kernel layout
     var version: UInt16 = 0
     var length: UInt16 = 0
     var cpuPLimit: UInt32 = 0
@@ -596,13 +596,13 @@ private struct SMCLimitData {
     var memPLimit: UInt32 = 0
 }
 
-struct SMCKeyInfoData {
+struct SMCKeyInfoData { // sweep: keep — kernel layout
     var dataSize: UInt32 = 0
     var dataType: UInt32 = 0
     var dataAttributes: UInt8 = 0
 }
 
-private struct SMCParamStruct {
+private struct SMCParamStruct { // sweep: keep — kernel layout
     var key: UInt32 = 0
     var vers = SMCVersion()
     var pLimitData = SMCLimitData()

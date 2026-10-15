@@ -6,8 +6,13 @@ struct Suite {
         await MainActor.run { sectionCore() }
         await MainActor.run { sectionMigration() }
         await sectionScripts()
+        await sectionScriptSteps()
+        await sectionScriptTransfer()
+        await sectionAutomationEngine()
+        await sectionTools()
+        await sectionSequencing()
         sectionTelemetry()
-        await MainActor.run { sectionStash() }
+        await sectionStash()
         await sectionWorkspaces()
         await MainActor.run { sectionPortability() }
         sectionMerge()

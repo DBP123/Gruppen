@@ -61,21 +61,40 @@ final class StashHostingView<Content: View>: NSHostingView<Content> {
     /// That is the whole reason the notch's close button had never worked once.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// The tracking area behind `onMouseEntered` / `onMouseExited`, and only
+    /// that one.
+    ///
+    /// **Why it is kept by reference.** This used to clear *every* tracking
+    /// area on the view before adding its own — and SwiftUI's `.onHover` works
+    /// through tracking areas installed on this same view. Measured: one area
+    /// left, none of them SwiftUI's. So nothing in a stash panel could ever be
+    /// hovered: the remove key on a notch file appeared only once a drag had
+    /// started, because the drag reached SwiftUI by another route. Replacing
+    /// just this one leaves SwiftUI's alone.
+    private var windowTracking: NSTrackingArea?
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds,
-                                       options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
-                                       owner: self,
-                                       userInfo: nil))
+        if let windowTracking { removeTrackingArea(windowTracking) }
+        let area = NSTrackingArea(rect: bounds,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self,
+                                  userInfo: nil)
+        addTrackingArea(area)
+        windowTracking = area
     }
 
+    // Both pass the event on first: SwiftUI's hover areas report to this view
+    // too, and an override that swallowed them would undo the fix above. Only
+    // the window-level area drives the callbacks.
     override func mouseEntered(with event: NSEvent) {
-        onMouseEntered?()
+        super.mouseEntered(with: event)
+        if event.trackingArea === windowTracking { onMouseEntered?() }
     }
 
     override func mouseExited(with event: NSEvent) {
-        onMouseExited?()
+        super.mouseExited(with: event)
+        if event.trackingArea === windowTracking { onMouseExited?() }
     }
 
     @available(*, unavailable)

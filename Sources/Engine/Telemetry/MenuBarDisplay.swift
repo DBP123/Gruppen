@@ -55,6 +55,13 @@ extension WidgetKind {
         }
     }
 
+    /// Whether the menu bar style is a choice at all.
+    ///
+    /// Not for power: its item is the battery, always. A battery reading as a
+    /// bare percentage or a line of watts is a menu bar item that has to be
+    /// read, where the glyph is one you only have to see.
+    var hasMenuBarStyles: Bool { self != .power }
+
     /// Widest string this module can produce in a mode, in characters.
     ///
     /// This is what makes the item a fixed width. It is a declared worst case

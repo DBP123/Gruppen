@@ -20,10 +20,10 @@ func sectionMigration() {
             from: Data(#"{"kind":"manual"}"#.utf8))) != nil),
         ("ScriptAction", (try? JSONDecoder().decode(ScriptAction.self,
             from: Data(#"{"kind":"shellCommand"}"#.utf8))) != nil),
-        ("MetricDefinition", (try? JSONDecoder().decode(MetricDefinition.self,
-            from: Data(#"{"name":"x"}"#.utf8))) != nil),
-        ("MetricSource", (try? JSONDecoder().decode(MetricSource.self,
-            from: Data(#"{"kind":"musicTrack"}"#.utf8))) != nil),
+        ("ScriptStep", (try? JSONDecoder().decode(ScriptStep.self,
+            from: Data(#"{"kind":"moveTo"}"#.utf8))) != nil),
+        ("ScriptOutput", (try? JSONDecoder().decode(ScriptOutput.self,
+            from: Data(#"{}"#.utf8))) != nil),
         ("SystemBuildInfo", (try? JSONDecoder().decode(SystemBuildInfo.self,
             from: Data(#"{"osVersion":"14.0"}"#.utf8))) != nil),
         ("MacHardwareProfile", (try? JSONDecoder().decode(MacHardwareProfile.self,
@@ -41,8 +41,8 @@ func sectionMigration() {
     let fromTheFuture = #"{"name":"x","trigger":{"kind":"quantumEntanglement"},"action":{"kind":"telepathy"},"feedback":"interpretiveDance"}"#
     if let script = try? JSONDecoder().decode(Script.self, from: Data(fromTheFuture.utf8)) {
         T.check("an unknown enum case degrades instead of throwing",
-                script.action.kind == .shellCommand && script.feedback == .silent,
-                "trigger \(script.trigger.kind), action \(script.action.kind), feedback \(script.feedback)")
+                script.steps.first?.kind == .shell && script.output == ScriptOutput(onSuccess: .none, onFailure: .none),
+                "trigger \(script.trigger.kind), steps \(script.steps.map(\.kind)), output \(script.output)")
     } else {
         T.check("an unknown enum case degrades instead of throwing", false, "decode threw")
     }
@@ -100,15 +100,10 @@ func sectionMigration() {
 
     withTempDir { dir in
         let file = dir.appendingPathComponent("workspaces.json")
-        try? Data(#"[{"name":"Keep"}, null, {"name":"AlsoKeep"}]"#.utf8).write(to: file)
+        try? Data(#"[{"name":"Keep"}, null, 7, {"name":"AlsoKeep"}]"#.utf8).write(to: file)
         let engine = WorkspaceEngine(fileURL: file)
+        // `null` and a bare `7` are the fragments that once raised an
+        // uncatchable exception in `LenientLibrary`; both must cost one entry.
         T.equal("WorkspaceEngine keeps what it can read", engine.profiles.count, 2)
-    }
-
-    withTempDir { dir in
-        let file = dir.appendingPathComponent("metrics.json")
-        try? Data(#"[{"name":"Keep"}, 7, {"name":"AlsoKeep"}]"#.utf8).write(to: file)
-        let library = MetricLibrary(fileURL: file)
-        T.equal("MetricLibrary keeps what it can read", library.metrics.count, 2)
     }
 }

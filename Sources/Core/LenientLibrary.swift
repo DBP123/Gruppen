@@ -5,7 +5,7 @@ import Foundation
 /// ## Why this exists
 ///
 /// Every library in Gruppen is a JSON array decoded in one call —
-/// `try? JSONDecoder().decode([Script].self, from: data)` and its three
+/// `try? JSONDecoder().decode([Script].self, from: data)` and its two
 /// siblings. That is all-or-nothing by construction: `Decodable` on an array
 /// fails the *array* when any element fails, and the `try?` then turns that
 /// failure into `nil`, which every loader reads as "there was nothing here".
@@ -84,5 +84,31 @@ enum LenientLibrary {
                            + "skipped \(result.skipped) unreadable entr\(result.skipped == 1 ? "y" : "ies")")
         }
         return result.items
+    }
+
+    /// The other direction: writes `value` as readable JSON, atomically.
+    ///
+    /// A failed save is logged with its reason — a full disk or a folder whose
+    /// permissions changed would otherwise lose the edit at the next launch
+    /// with no trace of why.
+    @discardableResult
+    static func save<T: Encodable>(_ value: T, to url: URL,
+                                   encoder: JSONEncoder = readableEncoder(),
+                                   label: String) -> Bool {
+        do {
+            try encoder.encode(value).write(to: url, options: .atomic)
+            return true
+        } catch {
+            GroupStore.log("\(label): not saved to \(url.lastPathComponent) — \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Pretty-printed with sorted keys, so a saved file diffs cleanly and reads
+    /// by hand.
+    static func readableEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
     }
 }

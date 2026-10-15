@@ -93,33 +93,33 @@ enum FileConverter {
 
     /// Converts each file and returns the results. Off the main actor: every
     /// path here is either a subprocess or a render.
-    nonisolated static func convert(_ urls: [URL], to target: Target) throws -> [URL] {
-        // One pool per file: converting a folder of images otherwise piles up
-        // every intermediate until the whole batch finishes.
-        try urls.map { url in
-            try autoreleasepool { try convert(url, to: target) }
-        }
+    nonisolated static func convert(_ urls: [URL], to target: Target) async throws -> [URL] {
+        var results: [URL] = []
+        for url in urls { results.append(try await convert(url, to: target)) }
+        return results
     }
 
-    nonisolated static func convert(_ url: URL, to target: Target) throws -> URL {
+    nonisolated static func convert(_ url: URL, to target: Target) async throws -> URL {
         let output = destination(for: url, ext: target.ext)
         switch family(of: url) {
         case .image:
             if target.ext == "pdf" {
-                try imageToPDF(url, output: output)
+                // One pool per render: a folder of images otherwise piles up
+                // every intermediate until the whole batch finishes.
+                try autoreleasepool { try imageToPDF(url, output: output) }
             } else {
-                try run("/usr/bin/sips",
+                try await run("/usr/bin/sips",
                         ["-s", "format", sipsFormat(for: target.ext), url.path, "--out", output.path])
             }
         case .document:
             if target.ext == "pdf" {
-                try documentToPDF(url, output: output)
+                try autoreleasepool { try documentToPDF(url, output: output) }
             } else {
-                try run("/usr/bin/textutil",
+                try await run("/usr/bin/textutil",
                         ["-convert", target.ext, url.path, "-output", output.path])
             }
         case .audio:
-            try run("/usr/bin/afconvert",
+            try await run("/usr/bin/afconvert",
                     ["-f", audioContainer(for: target.ext), "-d", audioFormat(for: target.ext),
                      url.path, output.path])
         case .unsupported:
@@ -157,15 +157,33 @@ enum FileConverter {
     /// which covers txt, rtf, doc and docx — then let a framesetter walk it page
     /// by page until the content runs out.
     ///
+    /// **Plain text is set in monospace.** The reader gives a `.txt` no font of
+    /// its own, so it came out in proportional Helvetica — and code, logs, CSV
+    /// and Markdown are exactly the files whose meaning lives in their columns
+    /// and indentation. Whether a file is plain is the reader's answer, not an
+    /// extension list, so rtf, doc and docx keep the fonts they were written in.
+    ///
+    /// Menlo rather than the system monospace: that one is private
+    /// (`.SFNSMono`), and a PDF naming it is a PDF no reader can identify the
+    /// font of — measured, PDFKit reads it back as Times. Menlo ships on every
+    /// Mac and survives the round trip.
+    ///
     /// Internal for the same reason as `imageToPDF` above: the merger paginates
     /// text through this rather than repeating the CoreText walk and the
     /// zero-length-frame guard that keeps it from looping forever.
     nonisolated static func documentToPDF(_ url: URL, output: URL) throws {
-        let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [:]
-        guard let text = try? NSAttributedString(url: url, options: options,
-                                                 documentAttributes: nil),
-              text.length > 0
+        var attributes: NSDictionary?
+        guard let read = try? NSAttributedString(url: url, options: [:],
+                                                 documentAttributes: &attributes),
+              read.length > 0
         else { throw ConversionError.unreadable(url.lastPathComponent) }
+
+        let type = attributes?[NSAttributedString.DocumentAttributeKey.documentType.rawValue] as? String
+        let text = type == NSAttributedString.DocumentType.plain.rawValue
+            ? NSAttributedString(string: read.string,
+                                 attributes: [.font: NSFont(name: "Menlo-Regular", size: 10)
+                                                     ?? .monospacedSystemFont(ofSize: 10, weight: .regular)])
+            : read
 
         var page = CGRect(x: 0, y: 0, width: 612, height: 792)
         let margin: CGFloat = 54
@@ -194,20 +212,10 @@ enum FileConverter {
 
     // MARK: - Tools
 
-    private nonisolated static func run(_ tool: String, _ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = Pipe()
-        try process.run()
-        let data = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
-            throw ConversionError.toolFailed((tool as NSString).lastPathComponent,
-                                             message.trimmingCharacters(in: .whitespacesAndNewlines))
+    private nonisolated static func run(_ tool: String, _ arguments: [String]) async throws {
+        let result = try await Tool.run(tool, arguments)
+        guard result.succeeded else {
+            throw ConversionError.toolFailed(result.tool, result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 
@@ -246,13 +254,6 @@ enum FileConverter {
     /// want it. Scratch is cleared at launch, so one you never take is one that
     /// cleans itself up.
     private nonisolated static func destination(for url: URL, ext: String) -> URL {
-        let base = url.deletingPathExtension().lastPathComponent
-        var candidate = IngestionManager.scratch.appendingPathComponent("\(base).\(ext)")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = IngestionManager.scratch.appendingPathComponent("\(base)-\(counter).\(ext)")
-            counter += 1
-        }
-        return candidate
+        FileName.unique("\(url.deletingPathExtension().lastPathComponent).\(ext)", in: IngestionManager.scratch)
     }
 }

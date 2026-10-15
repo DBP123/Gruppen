@@ -10,7 +10,6 @@ final class GroupStore: ObservableObject {
             guard !isLoading else { return }
             save()
             syncHotkeys()
-            updateSuggestions()
             updateCounters()
         }
     }
@@ -40,27 +39,6 @@ final class GroupStore: ObservableObject {
     /// by macOS or another app). The badge renders these as unavailable.
     @Published private(set) var unavailableShortcuts: Set<UUID> = []
 
-    /// Preset rules that match what is installed. Computed once at launch and
-    /// again only when the user asks for a rescan — never polled.
-    @Published private(set) var suggestions: [Presets.Match] = []
-
-    /// Result of the last application index pass, shown in Konfiguration.
-    @Published private(set) var indexReport: IndexReport?
-
-    struct IndexReport: Equatable {
-        var appCount: Int
-        var repairedPaths: Int
-        var scannedAt: Date
-
-        var summary: String {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "HH:mm:ss"
-            var text = "Indexed \(appCount) apps • Last scanned \(formatter.string(from: scannedAt))"
-            if repairedPaths > 0 { text += " • \(repairedPaths) path(s) repaired" }
-            return text
-        }
-    }
-
     /// Reads the saved grace period, pulling it across from the app's former
     /// bundle identifier the first time.
     static var storedGracePeriod: TimeInterval {
@@ -85,10 +63,7 @@ final class GroupStore: ObservableObject {
     /// In-flight sequenced launch/termination, one per Gruppe. Cancelled when
     /// the opposite action is requested so the two can never interleave.
     private var sequenceTasks: [UUID: Task<Void, Never>] = [:]
-    /// Preset rules resolved against the disk. Refreshed at launch and on an
-    /// explicit rescan only.
-    private var cachedMatches: [Presets.Match] = []
-    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    private var observers: [NSObjectProtocol] = []
     /// Running state comes from here now — no timer, no process-list walk on a
     /// schedule. See `RunningAppTracker` for why and for the one caveat.
     let tracker = RunningAppTracker()
@@ -119,8 +94,10 @@ final class GroupStore: ObservableObject {
         Self.log("STORE INIT — \(groups.count) group(s), active: \(groups.filter(\.isActive).map(\.name))")
         refreshRunning()
         syncHotkeys()
-        cachedMatches = Presets.matches()
-        updateSuggestions()
+        // An app updated or moved since last launch is found again by its
+        // bundle identifier. Only missing paths are looked up, so a library
+        // where nothing moved costs one existence check per app.
+        repairAppPaths()
 
         // The tracker publishes on system events; mirror it into runningIDs.
         observers.append(NotificationCenter.default.addObserver(
@@ -137,8 +114,16 @@ final class GroupStore: ObservableObject {
     /// Appends a line to `~/Library/Logs/Gruppen.log`. Every launch and
     /// every kill goes through here, so the log is the record of who closed
     /// what and when.
-    static func log(_ message: String) {
-        let stamp = ISO8601DateFormatter().string(from: Date())
+    private nonisolated static let logLock = NSLock()
+    /// Only ever used under `logLock`.
+    nonisolated(unsafe) private static let logStamp = ISO8601DateFormatter()
+
+    /// Callable from any thread — telemetry samplers log from their own queue.
+    /// The lock keeps two writers from interleaving a line.
+    nonisolated static func log(_ message: String) {
+        logLock.lock()
+        defer { logLock.unlock() }
+        let stamp = logStamp.string(from: Date())
         let line = "[\(stamp)] pid \(ProcessInfo.processInfo.processIdentifier) \(message)\n"
         NSLog("Gruppen: %@", message)
         let url = FileManager.default.homeDirectoryForCurrentUser
@@ -210,10 +195,7 @@ final class GroupStore: ObservableObject {
     }
 
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(groups) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        LenientLibrary.save(groups, to: fileURL, label: "GROUPS")
     }
 
     // MARK: - Editing
@@ -399,9 +381,15 @@ final class GroupStore: ObservableObject {
     ///
     /// When the Gruppe is sequenced, apps start in list order with the
     /// configured pause between them; otherwise they all go at once.
+    /// Posted with the Gruppe's id as the object, for automations that run
+    /// when a Gruppe launches or closes.
+    static let didLaunch = Notification.Name("GruppenGroupDidLaunch")
+    static let didClose = Notification.Name("GruppenGroupDidClose")
+
     func launchGroup(_ group: AppGroup) {
         guard let index = index(of: group) else { return }
         groups[index].isActive = true
+        NotificationCenter.default.post(name: Self.didLaunch, object: group.id)
         cancelSequence(for: group.id)
         if pendingKills.removeValue(forKey: group.id) != nil {
             Self.log("cancelled pending force quit for \"\(groups[index].name)\"")
@@ -457,16 +445,14 @@ final class GroupStore: ObservableObject {
     func terminateGroup(_ group: AppGroup) {
         guard let index = index(of: group) else { return }
         groups[index].isActive = false
+        NotificationCenter.default.post(name: Self.didClose, object: group.id)
         cancelSequence(for: group.id)
 
         let live = groups[index]
         Self.log("TERMINATE \"\(live.name)\"" + (live.isSequenced ? " [LIFO \(live.sequenceDelay)s]" : ""))
 
-        let spared = protectedBundleIDs(excluding: live.id)
-        let doomed = live.apps.filter { !spared.contains($0.id) }
-        guard !doomed.isEmpty else { return }
-
-        let ordered = live.isSequenced ? Array(doomed.reversed()) : doomed
+        let ordered = Self.closingOrder(for: live, among: groups)
+        guard !ordered.isEmpty else { return }
         let ownBundleID = Bundle.main.bundleIdentifier
         // Resolve the exact processes once, up front. Re-resolving later would
         // target whatever happens to be running at that moment.
@@ -537,13 +523,13 @@ final class GroupStore: ObservableObject {
         Self.log("cancelled in-flight sequence")
     }
 
-    /// Ids of apps kept alive by some *other* active group.
-    private func protectedBundleIDs(excluding groupID: UUID) -> Set<AppEntry.ID> {
-        var protected: Set<AppEntry.ID> = []
-        for group in groups where group.id != groupID && group.isActive {
-            protected.formUnion(group.apps.map(\.id))
-        }
-        return protected
+    /// The apps closing `group` closes, in the order it closes them: every
+    /// app not also in another active Gruppe, last launched first when the
+    /// Gruppe is sequenced.
+    nonisolated static func closingOrder(for group: AppGroup, among groups: [AppGroup]) -> [AppEntry] {
+        let spared = Set(groups.filter { $0.id != group.id && $0.isActive }.flatMap { $0.apps.map(\.id) })
+        let closing = group.apps.filter { !spared.contains($0.id) }
+        return group.isSequenced ? closing.reversed() : closing
     }
 
     // MARK: - Snapshot
@@ -582,45 +568,11 @@ final class GroupStore: ObservableObject {
         return group
     }
 
-    @discardableResult
-    func createGroup(from match: Presets.Match) -> AppGroup {
-        createGroup(named: match.name,
-                    apps: match.urls.compactMap(AppEntry.init(url:)),
-                    colorHex: match.colorHex)
-    }
-
-    // MARK: - Application index
-
-    /// Filters the cached preset matches against the Gruppen that already
-    /// exist. Pure in-memory work — safe to run on every `groups` change.
-    private func updateSuggestions() {
-        let taken = Set(groups.map { $0.name.lowercased() })
-        let filtered = cachedMatches.filter { !taken.contains($0.name.lowercased()) }
-        if filtered.map(\.id) != suggestions.map(\.id) {
-            suggestions = filtered
-        }
-    }
-
-    /// Re-reads the disk. The directory walk runs off the main actor; the
-    /// LaunchServices lookups that repair moved bundles stay on it.
-    func rescanApplications() async {
-        let scanned: (matches: [Presets.Match], count: Int) = await Task.detached(priority: .utility) {
-            (Presets.matchesOnDisk(), Presets.indexedApplicationCount())
-        }.value
-
-        IconCache.shared.clear()
-        let repaired = repairAppPaths()
-        cachedMatches = scanned.matches
-        updateSuggestions()
-        refreshRunning()
-        indexReport = IndexReport(appCount: scanned.count,
-                                  repairedPaths: repaired,
-                                  scannedAt: Date())
-        Self.log("RESCAN — \(scanned.count) apps, \(scanned.matches.count) preset match(es), \(repaired) path(s) repaired")
-    }
+    // MARK: - Moved apps
 
     /// Points entries whose bundle has moved at wherever LaunchServices says
     /// that bundle identifier lives now.
+    @discardableResult
     private func repairAppPaths() -> Int {
         var updated = groups
         var repaired = 0

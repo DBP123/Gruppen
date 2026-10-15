@@ -9,8 +9,9 @@ import Foundation
 /// memory for that is a straight win.
 ///
 /// `NSCache` is thread-safe and evicts itself under memory pressure, so the
-/// ceiling is a target rather than a hard allocation.
-final class IconCache {
+/// ceiling is a target rather than a hard allocation. It is also the only
+/// state here, which is what makes sharing this across threads safe.
+final class IconCache: @unchecked Sendable {
     static let shared = IconCache()
 
     /// Icons are stored flattened. `NSWorkspace` hands back an image carrying
