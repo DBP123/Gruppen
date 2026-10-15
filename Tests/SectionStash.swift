@@ -62,10 +62,12 @@ func sectionStash() async {
 
     T.begin("D. Stash — emptying, which closes the notch tray")
 
-    // The notch tray closes on `onEmptied`, so when it fires is the behaviour.
+    // The notch tray closes on `onEmptied`, so when it fires, and why, is the
+    // behaviour.
     let tray = ShelfState()
     var emptied = 0
-    tray.onEmptied = { emptied += 1 }
+    var lastEmptying: ShelfState.Emptying?
+    tray.onEmptied = { emptied += 1; lastEmptying = $0 }
     tray.clear()
     T.equal("a tray that never held anything does not close itself", emptied, 0)
 
@@ -75,18 +77,31 @@ func sectionStash() async {
     T.equal("taking one item out leaves the tray open", emptied, 0)
     tray.remove(Array(three.dropFirst()))
     T.equal("the last items leaving together close it exactly once", emptied, 1)
+    T.check("as files that left", lastEmptying == .filesLeft)
 
     tray.add([three[0]])
     tray.clear()
     T.equal("clearing a loaded tray closes it", emptied, 2)
 
-    // A file deleted with its own remove key never closes the stash, even the
-    // last one; the tray stays open, empty, until it is closed on purpose.
+    // Files deleted with their own remove keys say so: the pointer is still on
+    // the tray, which is what decides when it may close.
     tray.add([three[0], three[1]])
-    tray.remove(three[0], keepingOpen: true)
-    tray.remove(three[1], keepingOpen: true)
-    T.check("deleting the last file by hand leaves the stash open",
-            emptied == 2 && tray.isEmpty, "emptied \(emptied) time(s), \(tray.items.count) left")
+    tray.remove(three[0], byHand: true)
+    T.equal("deleting a file by hand with others left keeps the tray", emptied, 2)
+    tray.remove(three[1], byHand: true)
+    T.check("deleting the last one by hand empties it, by hand",
+            emptied == 3 && lastEmptying == .removedByHand, "emptied \(emptied) time(s), \(String(describing: lastEmptying))")
+
+    T.begin("D. Stash — what an emptied notch tray does")
+
+    typealias Response = StashCoordinator.EmptiedResponse
+    T.equal("files dragged out: it closes", Response.to(.filesLeft, closesWhenEmpty: true), .close)
+    T.equal("files removed by hand: it closes once the pointer leaves",
+            Response.to(.removedByHand, closesWhenEmpty: true), .closeOnLeaving)
+    T.equal("with the setting off, dragged out: it stays",
+            Response.to(.filesLeft, closesWhenEmpty: false), .stay)
+    T.equal("with the setting off, removed by hand: it stays",
+            Response.to(.removedByHand, closesWhenEmpty: false), .stay)
 
     T.begin("D. Stash — batch extraction planning")
 

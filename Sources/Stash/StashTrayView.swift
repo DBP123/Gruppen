@@ -250,7 +250,7 @@ private struct StashRow: View {
                 .hardwareKey(size: 20)
                 .help("Copy path")
             }
-            Button { state.remove(item) } label: {
+            Button { state.remove(item, byHand: true) } label: {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
             }
             .hardwareKey(size: 20)

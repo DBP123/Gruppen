@@ -16,11 +16,21 @@ final class ShelfState: ObservableObject, Identifiable {
     /// and on the whole stash when there is not.
     @Published var selection: Set<UUID> = []
 
-    /// Called when the shelf goes from holding something to holding nothing —
-    /// the last item dragged out, or cleared. Not called for a shelf that was
-    /// never filled, which is what lets a speculatively-opened shelf sit there
-    /// waiting for a drop instead of closing the instant it appears.
-    var onEmptied: (() -> Void)?
+    /// How a shelf came to hold nothing. The shelf only reports it; what
+    /// emptying *means* — close now, close later, stay — is its owner's call.
+    enum Emptying {
+        /// The files went somewhere: dragged out, or the shelf was cleared.
+        case filesLeft
+        /// The last file was deleted with its own remove key, so the pointer
+        /// that pressed it is still on the shelf.
+        case removedByHand
+    }
+
+    /// Called when the shelf goes from holding something to holding nothing.
+    /// Not called for a shelf that was never filled, which is what lets a
+    /// speculatively-opened shelf sit there waiting for a drop instead of
+    /// closing the instant it appears.
+    var onEmptied: ((Emptying) -> Void)?
 
     init(id: UUID = UUID(), items: [StashItem] = []) {
         self.id = id
@@ -34,17 +44,13 @@ final class ShelfState: ObservableObject, Identifiable {
         items.append(contentsOf: newItems)
     }
 
-    /// Takes `item` off the shelf.
-    ///
-    /// `keepingOpen` is for a file deleted by hand with its own remove key:
-    /// that never closes the shelf, even when it was the last file. Emptying a
-    /// shelf by dragging its files out still does — the files went somewhere,
-    /// and the shelf goes with them.
-    func remove(_ item: StashItem, keepingOpen: Bool = false) {
+    /// Takes `item` off the shelf. `byHand` is for a file deleted with its own
+    /// remove key, rather than dragged out to somewhere.
+    func remove(_ item: StashItem, byHand: Bool = false) {
         let wasFilled = !items.isEmpty
         items.removeAll { $0.id == item.id }
         selection.remove(item.id)
-        if wasFilled, items.isEmpty, !keepingOpen { onEmptied?() }
+        if wasFilled, items.isEmpty { onEmptied?(byHand ? .removedByHand : .filesLeft) }
     }
 
     func remove(_ batch: [StashItem]) {
@@ -55,7 +61,7 @@ final class ShelfState: ObservableObject, Identifiable {
         let wasFilled = !items.isEmpty
         items.removeAll()
         selection.removeAll()
-        if wasFilled { onEmptied?() }
+        if wasFilled { onEmptied?(.filesLeft) }
     }
 
     /// What a click means.
@@ -154,11 +160,11 @@ final class ShelfWindowManager: ObservableObject {
         let controller = FloatingShelfController(state: state, anchor: point,
                                                  onDestroy: { [weak self] id in self?.destroyShelf(id: id) },
                                                  onHide: { [weak self] id in self?.hide(id) })
-        // Emptying a shelf closes it: an empty shelf you have already used is
-        // just a box in the way.
+        // Emptying a shelf closes it, however it emptied: an empty shelf you
+        // have already used is just a box in the way.
         // The id, not the state: the state owns this closure, and capturing it
         // here would keep every closed shelf alive.
-        state.onEmptied = { [weak self, id = state.id] in
+        state.onEmptied = { [weak self, id = state.id] _ in
             Task { @MainActor in self?.destroyShelf(id: id, scaling: true) }
         }
         activeShelves[state.id] = controller

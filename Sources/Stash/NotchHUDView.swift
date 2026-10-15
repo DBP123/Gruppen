@@ -339,9 +339,9 @@ private struct NotchItemChip: View {
                     // Orange at rest, not only under the pointer: a pale glyph
                     // on a dark key, sitting over a file's own icon, was easy
                     // to miss entirely.
-                    // Removes this file and nothing more: the stash stays open
-                    // even if it was the last one.
-                    Button { state.remove(item, keepingOpen: true) } label: {
+                    // Removes this file and nothing more. If it was the last,
+                    // the coordinator decides what an emptied tray does.
+                    Button { state.remove(item, byHand: true) } label: {
                         Image(systemName: "xmark").font(.system(size: 7, weight: .heavy))
                     }
                     .hardwareKey(size: 14, tint: Theme.ambient, glow: true)
