@@ -680,6 +680,36 @@ struct ScriptTrigger: Codable, Hashable {
         }
     }
 
+    /// Something that happened on the Mac, as the triggers that wait on it see it.
+    enum Event {
+        /// A display connected (`on`) or disconnected (`off`).
+        case display(Edge)
+        /// A Wi-Fi network joined, by name.
+        case wifi(String)
+        /// The sound output switched to this device.
+        case audioDevice(String)
+        /// A Gruppe launched (`on`) or closed (`off`).
+        case gruppe(UUID, Edge)
+    }
+
+    /// Whether `event` sets this trigger off. A network is matched by its whole
+    /// name, ignoring case — joining "Home" must not fire for "Home-Guest". A
+    /// device by part of its name, because "AirPods" is what people type for
+    /// "Sam's AirPods Pro".
+    func isSetOff(by event: Event) -> Bool {
+        let wanted = match.trimmingCharacters(in: .whitespaces)
+        switch event {
+        case .display(let edge):
+            return kind == .display && self.edge == edge
+        case .wifi(let network):
+            return kind == .wifi && network.caseInsensitiveCompare(wanted) == .orderedSame
+        case .audioDevice(let device):
+            return kind == .audioDevice && !wanted.isEmpty && device.localizedCaseInsensitiveContains(wanted)
+        case .gruppe(let id, let edge):
+            return kind == .gruppe && gruppeID == id && self.edge == edge
+        }
+    }
+
     /// Whether `url` passes the rule's conditions.
     func admits(_ url: URL, now: Date = Date()) -> Bool {
         guard !conditions.isEmpty else { return true }

@@ -10,6 +10,7 @@ struct Suite {
         await sectionScriptTransfer()
         await sectionAutomationEngine()
         await sectionTools()
+        await sectionSequencing()
         sectionTelemetry()
         await sectionStash()
         await sectionWorkspaces()

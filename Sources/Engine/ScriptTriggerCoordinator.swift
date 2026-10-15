@@ -94,16 +94,14 @@ final class ScriptTriggerCoordinator: ObservableObject {
 
         let kinds = Set(armable.map(\.trigger.kind))
         if kinds.contains(.display) {
-            displayWatcher = DisplayWatcher { [weak self] added in self?.fireEdge(.display, added ? .on : .off) }
+            displayWatcher = DisplayWatcher { [weak self] added in self?.fire(on: .display(added ? .on : .off)) }
         }
         if kinds.contains(.wifi) {
-            wifiWatcher = WiFiWatcher { [weak self] network in
-                Task { @MainActor in self?.fireMatching(.wifi, name: network, exact: true) }
-            }
+            wifiWatcher = WiFiWatcher { [weak self] network in self?.fire(on: .wifi(network)) }
         }
         if kinds.contains(.audioDevice) {
             audioWatcher = AudioOutputWatcher { [weak self] device in
-                Task { @MainActor in self?.fireMatching(.audioDevice, name: device, exact: false) }
+                Task { @MainActor in self?.fire(on: .audioDevice(device)) }
             }
         }
         if kinds.contains(.gruppe) { armGruppe() }
@@ -211,21 +209,10 @@ final class ScriptTriggerCoordinator: ObservableObject {
 
     // MARK: Context
 
-    private func fireEdge(_ kind: ScriptTrigger.Kind, _ edge: ScriptTrigger.Edge) {
-        for script in library.scripts where script.isArmable
-            && script.trigger.kind == kind && script.trigger.edge == edge {
+    /// Runs every armed script `event` sets off.
+    func fire(on event: ScriptTrigger.Event) {
+        for script in library.scripts where script.isArmable && script.trigger.isSetOff(by: event) {
             fire(script.id, paths: [])
-        }
-    }
-
-    /// A network joined or a sound output connected: scripts whose `match` is
-    /// that network's exact name, or part of that device's.
-    private func fireMatching(_ kind: ScriptTrigger.Kind, name: String, exact: Bool) {
-        for script in library.scripts where script.isArmable && script.trigger.kind == kind {
-            let wanted = script.trigger.match.trimmingCharacters(in: .whitespaces)
-            let hit = exact ? name.caseInsensitiveCompare(wanted) == .orderedSame
-                            : name.localizedCaseInsensitiveContains(wanted)
-            if hit { fire(script.id, paths: []) }
         }
     }
 
@@ -234,14 +221,7 @@ final class ScriptTriggerCoordinator: ObservableObject {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
                 [weak self] note in
                 guard let id = note.object as? UUID else { return }
-                Task { @MainActor in
-                    guard let self else { return }
-                    for script in self.library.scripts where script.isArmable
-                        && script.trigger.kind == .gruppe && script.trigger.edge == edge
-                        && script.trigger.gruppeID == id {
-                        self.fire(script.id, paths: [])
-                    }
-                }
+                Task { @MainActor in self?.fire(on: .gruppe(id, edge)) }
             })
         }
     }

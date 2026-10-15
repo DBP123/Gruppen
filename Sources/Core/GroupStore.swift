@@ -451,11 +451,8 @@ final class GroupStore: ObservableObject {
         let live = groups[index]
         Self.log("TERMINATE \"\(live.name)\"" + (live.isSequenced ? " [LIFO \(live.sequenceDelay)s]" : ""))
 
-        let spared = protectedBundleIDs(excluding: live.id)
-        let doomed = live.apps.filter { !spared.contains($0.id) }
-        guard !doomed.isEmpty else { return }
-
-        let ordered = live.isSequenced ? Array(doomed.reversed()) : doomed
+        let ordered = Self.closingOrder(for: live, among: groups)
+        guard !ordered.isEmpty else { return }
         let ownBundleID = Bundle.main.bundleIdentifier
         // Resolve the exact processes once, up front. Re-resolving later would
         // target whatever happens to be running at that moment.
@@ -526,13 +523,13 @@ final class GroupStore: ObservableObject {
         Self.log("cancelled in-flight sequence")
     }
 
-    /// Ids of apps kept alive by some *other* active group.
-    private func protectedBundleIDs(excluding groupID: UUID) -> Set<AppEntry.ID> {
-        var protected: Set<AppEntry.ID> = []
-        for group in groups where group.id != groupID && group.isActive {
-            protected.formUnion(group.apps.map(\.id))
-        }
-        return protected
+    /// The apps closing `group` closes, in the order it closes them: every
+    /// app not also in another active Gruppe, last launched first when the
+    /// Gruppe is sequenced.
+    nonisolated static func closingOrder(for group: AppGroup, among groups: [AppGroup]) -> [AppEntry] {
+        let spared = Set(groups.filter { $0.id != group.id && $0.isActive }.flatMap { $0.apps.map(\.id) })
+        let closing = group.apps.filter { !spared.contains($0.id) }
+        return group.isSequenced ? closing.reversed() : closing
     }
 
     // MARK: - Snapshot
