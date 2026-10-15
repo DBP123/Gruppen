@@ -288,4 +288,14 @@ func sectionStash() async {
     T.check("choosing to clear on close survives a relaunch", AppSettings().notchCloseClearsStash)
     if let savedClose { defaults.set(savedClose, forKey: "notchCloseClearsStash") }
     else { defaults.removeObject(forKey: "notchCloseClearsStash") }
+
+    // Closing when emptied is what the notch stash has always done.
+    let savedEmpty = defaults.object(forKey: "notchClosesWhenEmpty")
+    defaults.removeObject(forKey: "notchClosesWhenEmpty")
+    T.check("an emptied notch stash closes by default", AppSettings().notchClosesWhenEmpty)
+    let emptySettings = AppSettings()
+    emptySettings.notchClosesWhenEmpty = false
+    T.check("keeping it open survives a relaunch", AppSettings().notchClosesWhenEmpty == false)
+    if let savedEmpty { defaults.set(savedEmpty, forKey: "notchClosesWhenEmpty") }
+    else { defaults.removeObject(forKey: "notchClosesWhenEmpty") }
 }

@@ -85,6 +85,15 @@ final class AppSettings: ObservableObject {
         didSet { persist(notchCloseClearsStash, oldValue, Keys.notchCloseClears) }
     }
 
+    /// Whether the notch stash slides away once its last file is gone: on, an
+    /// emptied tray closes itself; off, it stays out until its close key.
+    ///
+    /// On by default, because that is what the notch stash has always done.
+    /// Read at the moment the tray empties, so a change applies at once.
+    @Published var notchClosesWhenEmpty: Bool {
+        didSet { persist(notchClosesWhenEmpty, oldValue, Keys.notchClosesWhenEmpty) }
+    }
+
     /// Where "Export as Zip" writes to.
     @Published var exportPath: String {
         didSet {
@@ -158,6 +167,7 @@ final class AppSettings: ObservableObject {
         static let stashShake = "stashShakeEnabled"
         static let stashMoveOnDragOut = "stashMovesOnDragOut"
         static let notchCloseClears = "notchCloseClearsStash"
+        static let notchClosesWhenEmpty = "notchClosesWhenEmpty"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
@@ -180,6 +190,7 @@ final class AppSettings: ObservableObject {
             Keys.stashShake: true,
             Keys.stashMoveOnDragOut: false,
             Keys.notchCloseClears: false,
+            Keys.notchClosesWhenEmpty: true,
             Keys.performanceMonitor: true,
         ])
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
@@ -191,6 +202,7 @@ final class AppSettings: ObservableObject {
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
         stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
         notchCloseClearsStash = defaults.bool(forKey: Keys.notchCloseClears)
+        notchClosesWhenEmpty = defaults.bool(forKey: Keys.notchClosesWhenEmpty)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
         stashShortcut = Self.shortcut(forKey: Keys.stashShortcut)

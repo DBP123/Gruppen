@@ -42,11 +42,17 @@ final class StashCoordinator: ObservableObject {
         // Anything left in scratch belongs to a previous run: shelves do not
         // survive a relaunch, so nothing still there is referenced.
         IngestionManager.purgeScratch()
-        // A notch stash with nothing left on it has nothing left to show, so it
-        // slides away by itself — the same retraction as its close key. Only
-        // on *becoming* empty: a tray opened by a drag and not yet dropped on
-        // is empty too, and that one is governed by the withdrawal below.
-        notchShelf.onEmptied = { [weak self] in self?.closeNotch() }
+        // A notch stash with nothing left on it slides away by itself — the
+        // same retraction as its close key — unless the setting keeps it out.
+        // Only on *becoming* empty: a tray opened by a drag and not yet dropped
+        // on is empty too, and that one is governed by the withdrawal below.
+        // Kept out, it is pinned, so the pointer leaving does not close it
+        // either — a tray reopened with last time's files starts unpinned.
+        // Its close key does.
+        notchShelf.onEmptied = { [weak self] in
+            guard let self else { return }
+            if AppSettings.shared.notchClosesWhenEmpty { self.closeNotch() } else { self.isNotchPinned = true }
+        }
     }
 
 

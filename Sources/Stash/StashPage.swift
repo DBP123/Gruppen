@@ -130,6 +130,8 @@ private struct StashSettings: View {
                              isRight: $settings.stashMovesOnDragOut)
                     .cardRow()
                 CardDivider()
+                SwitchRow(title: "Close notch stash when empty", isOn: $settings.notchClosesWhenEmpty)
+                CardDivider()
                 SwitchRow(title: "Clear notch stash on close", isOn: $settings.notchCloseClearsStash)
                 CardDivider()
                 ShortcutRow(title: "Shortcut to open a stash", shortcut: $settings.stashShortcut)
