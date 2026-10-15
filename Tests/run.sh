@@ -18,12 +18,7 @@ cd "$(dirname "$0")/.."
 ARCH="${1:-$(uname -m)}"
 OUT="build/suite-$ARCH"
 
-SDK_ROOT="$(dirname "$(xcrun --show-sdk-path)")"
-if [ -d "${SDK_ROOT}/MacOSX26.sdk" ]; then
-    SDK="${SDK_ROOT}/MacOSX26.sdk"
-else
-    SDK="$(xcrun --show-sdk-path)"
-fi
+source "sdk.sh"
 
 mkdir -p build
 echo "Building the suite for ${ARCH}..."

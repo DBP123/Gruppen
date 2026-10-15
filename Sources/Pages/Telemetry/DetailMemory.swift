@@ -77,7 +77,7 @@ struct MemoryDetail: View {
                 }
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 

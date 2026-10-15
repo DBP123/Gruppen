@@ -45,7 +45,7 @@ struct ThermalDetail: View {
 
             Well { fans(reading.fans) }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 

@@ -122,7 +122,7 @@ struct PowerDetail: View {
                 UptimeRows()
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 

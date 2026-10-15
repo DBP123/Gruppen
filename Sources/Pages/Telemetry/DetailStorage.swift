@@ -56,7 +56,7 @@ struct StorageDetail: View {
                 }
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 }

@@ -74,7 +74,7 @@ struct CPUDetail: View {
                 }
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 }

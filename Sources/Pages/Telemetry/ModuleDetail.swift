@@ -113,13 +113,18 @@ private struct DetailHeader: View {
     }
 }
 
+/// What a module shows before its first reading — or, once the system has
+/// stopped answering, why there is nothing to show.
 struct Waiting: View {
+    var unavailable = false
+
     var body: some View {
-        Text("Waiting for the first reading…")
+        Text(unavailable ? "Unavailable on this Mac" : "Waiting for the first reading…")
             .font(Theme.mono(10))
-            .foregroundStyle(Theme.textMuted)
+            .foregroundStyle(unavailable ? Theme.amber : Theme.textMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 10)
+            .help(unavailable ? "macOS did not answer this module's reading. Details are in ~/Library/Logs/Gruppen.log" : "")
     }
 }
 

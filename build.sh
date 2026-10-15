@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.52"
+VERSION="1.53"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 
@@ -21,12 +21,7 @@ BUILD_DIR="build"
 APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
 ARCH="$(uname -m)"
 
-SDK_ROOT="$(dirname "$(xcrun --show-sdk-path)")"
-if [ -d "${SDK_ROOT}/MacOSX26.sdk" ]; then
-    SDK="${SDK_ROOT}/MacOSX26.sdk"
-else
-    SDK="$(xcrun --show-sdk-path)"
-fi
+source "$(dirname "$0")/sdk.sh"
 
 INSTALL=1
 RUN=0

@@ -51,7 +51,7 @@ struct NetworkDetail: View {
                          rows: reading.talkers.sorted { $0.upTotal > $1.upTotal },
                          value: \.upTotal)
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 }

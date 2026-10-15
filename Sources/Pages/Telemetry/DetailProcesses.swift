@@ -42,7 +42,7 @@ struct ProcessDetail: View {
                     .padding(.top, 2)
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 }

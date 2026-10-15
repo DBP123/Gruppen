@@ -55,7 +55,7 @@ struct SiliconDetail: View {
                 engine("IMAGE", reading.imageEngine)
             }
         } else {
-            Waiting()
+            Waiting(unavailable: widget.isUnavailable)
         }
     }
 
