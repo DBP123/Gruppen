@@ -254,13 +254,6 @@ enum FileConverter {
     /// want it. Scratch is cleared at launch, so one you never take is one that
     /// cleans itself up.
     private nonisolated static func destination(for url: URL, ext: String) -> URL {
-        let base = url.deletingPathExtension().lastPathComponent
-        var candidate = IngestionManager.scratch.appendingPathComponent("\(base).\(ext)")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = IngestionManager.scratch.appendingPathComponent("\(base)-\(counter).\(ext)")
-            counter += 1
-        }
-        return candidate
+        FileName.unique("\(url.deletingPathExtension().lastPathComponent).\(ext)", in: IngestionManager.scratch)
     }
 }

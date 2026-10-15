@@ -472,6 +472,9 @@ private struct StageList: View {
     let values: [String]
     let onChange: ([String]) -> Void
     @State private var draft = ""
+    /// Folders that are not there, checked when the list changes rather than on
+    /// every keystroke in the field below it.
+    @State private var missing: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -480,7 +483,7 @@ private struct StageList: View {
                 ForEach(Array(values.enumerated()), id: \.offset) { index, value in
                     ListRow(glyph: role == .links ? "link" : "folder",
                             title: value,
-                            warning: role == .folders && !exists(value) ? "NOT FOUND" : nil) {
+                            warning: missing.contains(value) ? "NOT FOUND" : nil) {
                         var next = values; next.remove(at: index); onChange(next)
                     }
                 }
@@ -505,9 +508,12 @@ private struct StageList: View {
             }
         }
         .cardRow()
+        .task(id: values) {
+            missing = role == .folders ? Set(values.filter { !Self.isFolder($0) }) : []
+        }
     }
 
-    private func exists(_ path: String) -> Bool {
+    private static func isFolder(_ path: String) -> Bool {
         var isDirectory: ObjCBool = false
         let expanded = (path as NSString).expandingTildeInPath
         return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDirectory) && isDirectory.boolValue
@@ -521,15 +527,12 @@ private struct StageList: View {
     }
 
     private func browse() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = true
-        guard panel.runModal() == .OK else { return }
+        let urls = Pickers.folders(title: "Open which folders?")
+        guard !urls.isEmpty else { return }
         // Written back with the home directory as `~` so a profile stays
         // portable between machines and readable in the saved file.
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        onChange(values + panel.urls.map { url -> String in
+        onChange(values + urls.map { url -> String in
             url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
         })
     }
@@ -546,6 +549,8 @@ struct AppList<Extra: View>: View {
     @ViewBuilder let extra: Extra
 
     @State private var targeted = false
+    /// Apps no longer on disk, checked when the list changes, not per redraw.
+    @State private var missing: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -558,7 +563,7 @@ struct AppList<Extra: View>: View {
             }
             ForEach(apps) { app in
                 ListRow(icon: app.icon, title: app.name,
-                        warning: FileManager.default.fileExists(atPath: app.path) ? nil : "MISSING",
+                        warning: missing.contains(app.path) ? "MISSING" : nil,
                         help: app.bundleID.isEmpty ? app.path : app.bundleID) {
                     onChange(apps.filter { $0.id != app.id })
                 }
@@ -572,6 +577,9 @@ struct AppList<Extra: View>: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: apps.map(\.path)) {
+            missing = Set(apps.map(\.path).filter { !FileManager.default.fileExists(atPath: $0) })
+        }
         .recessed(cornerRadius: Theme.radiusSm)
         .overlay(
             RoundedRectangle(cornerRadius: Theme.radiusSm, style: .continuous)
@@ -590,12 +598,7 @@ struct AppList<Extra: View>: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.application]
-        panel.allowsMultipleSelection = true
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK else { return }
-        add(panel.urls)
+        add(Pickers.apps())
     }
 }
 

@@ -168,15 +168,9 @@ struct GroupEditorView: View {
     }
 
     private func addApps(_ group: AppGroup) {
-        let panel = NSOpenPanel()
-        panel.title = "Add Applikationen"
-        panel.prompt = "Add"
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK else { return }
-        store.add(urls: panel.urls, to: group)
+        let urls = Pickers.apps()
+        guard !urls.isEmpty else { return }
+        store.add(urls: urls, to: group)
     }
 }
 

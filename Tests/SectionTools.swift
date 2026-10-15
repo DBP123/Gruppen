@@ -55,4 +55,27 @@ func sectionTools() async {
         T.check("a save that cannot be written says so",
                 !LenientLibrary.save(["a"], to: missing, label: "SUITE"))
     }
+
+    T.begin("H. Tools — naming without clashes")
+
+    T.equal("the first copy keeps its name", FileName.numbered("Report.pdf", 1), "Report.pdf")
+    T.equal("the second is numbered Finder's way", FileName.numbered("Report.pdf", 2), "Report 2.pdf")
+    T.equal("a name without an extension", FileName.numbered("Notes", 3), "Notes 3")
+    T.equal("a folder keeps its dots", FileName.numbered("v1.2", 2, isDirectory: true), "v1.2 2")
+    T.equal("taken names are skipped",
+            FileName.unique("a.txt") { ["a.txt", "a 2.txt"].contains($0) }, "a 3.txt")
+    withTempDir { dir in
+        try? Data().write(to: dir.appendingPathComponent("Stash.zip"))
+        T.equal("a file on disk is not overwritten",
+                FileName.unique("Stash.zip", in: dir).lastPathComponent, "Stash 2.zip")
+    }
+
+    T.begin("H. Tools — dates in file names")
+
+    var parts = DateComponents()
+    (parts.year, parts.month, parts.day, parts.hour, parts.minute, parts.second) = (2026, 3, 7, 14, 5, 9)
+    let date = Calendar.current.date(from: parts)!
+    T.equal("a day", Stamp.day(date), "2026-03-07")
+    T.equal("a month", Stamp.month(date), "2026-03")
+    T.equal("a moment, 24-hour", Stamp.moment(date), "2026-03-07-140509")
 }

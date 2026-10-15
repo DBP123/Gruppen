@@ -113,12 +113,7 @@ struct AutomationsView: View {
     }
 
     private func importScript() {
-        let panel = NSOpenPanel()
-        panel.title = "Import a script"
-        panel.prompt = "Import"
-        panel.allowsMultipleSelection = true
-        guard panel.runModal() == .OK else { return }
-        for url in panel.urls {
+        for url in Pickers.files(title: "Import a script", prompt: "Import") {
             do {
                 open = try library.importScript(from: url).id
             } catch {
@@ -301,14 +296,23 @@ private struct AutomationEditor: View {
     private var runs: [ScriptRunRecord] { library.runs[script.id] ?? [] }
 
     /// Files in the rule's folder today that pass its conditions — a preview
-    /// before it is switched on. Read only while the card is open.
-    private var matchesNow: Int {
-        let folder = URL(fileURLWithPath: script.trigger.watchedFolder, isDirectory: true)
+    /// before it is switched on. Counted off the main thread, and again only
+    /// when the rule changes: a Downloads folder is thousands of files, and a
+    /// download-source condition reads an attribute from each one.
+    @State private var matchesNow: Int?
+
+    private nonisolated static func count(_ trigger: ScriptTrigger) async -> Int? {
+        let folder = URL(fileURLWithPath: trigger.watchedFolder, isDirectory: true)
         let files = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
-        return files.filter {
-            (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true && script.trigger.admits($0)
-        }.count
+        var count = 0
+        for file in files {
+            // Superseded by a newer edit: that count is the one to show.
+            if Task.isCancelled { return nil }
+            if (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+               trigger.admits(file) { count += 1 }
+        }
+        return count
     }
 
     var body: some View {
@@ -317,13 +321,15 @@ private struct AutomationEditor: View {
             TriggerEditor(trigger: $script.trigger, kinds: script.section.triggerKinds)
             if script.section == .rules && !script.trigger.watchedFolder.isEmpty {
                 EditorRow(label: "MATCHES NOW") {
-                    let count = matchesNow
-                    Text(count == 1 ? "1 file" : "\(count) files")
+                    Text(matchesNow.map { $0 == 1 ? "1 file" : "\($0) files" } ?? "Counting…")
                         .font(Theme.mono(10.5).monospacedDigit())
-                        .foregroundStyle(count > 0 ? Theme.orange : Theme.textSecondary)
+                        .foregroundStyle((matchesNow ?? 0) > 0 ? Theme.orange : Theme.textSecondary)
                         .help(script.trigger.sweepsExisting
                               ? "What this rule acts on when it is switched on"
                               : "Files already in the folder that match. The rule acts on new arrivals only")
+                }
+                .task(id: script.trigger) {
+                    if let count = await Self.count(script.trigger) { matchesNow = count }
                 }
             }
             if script.section == .actions {
@@ -401,7 +407,7 @@ private struct AutomationEditor: View {
             .disabled(triggers.progress[script.id] != nil || !script.isComplete)
             if script.section == .rules {
                 Button("Run on files…") {
-                    let files = Pickers.files(title: "Run \(script.name) on…")
+                    let files = Pickers.files(title: "Run \(script.name) on…", prompt: "Run")
                     if !files.isEmpty { triggers.run(script, paths: files, source: "Files") }
                 }
                 .industrialButton(.secondary, compact: true)

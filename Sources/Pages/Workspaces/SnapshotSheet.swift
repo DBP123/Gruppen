@@ -88,16 +88,7 @@ struct SnapshotSheet: View {
     }
 
     private func addOffline() {
-        let panel = NSOpenPanel()
-        panel.title = "Add Applikationen"
-        panel.prompt = "Add"
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        guard panel.runModal() == .OK else { return }
-
-        for entry in panel.urls.compactMap(AppEntry.init(url:)) {
+        for entry in Pickers.apps().compactMap(AppEntry.init(url:)) {
             if !candidates.contains(where: { $0.id == entry.id }) { candidates.append(entry) }
             selected.insert(entry.id)
         }

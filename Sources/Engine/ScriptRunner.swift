@@ -61,7 +61,7 @@ enum ScriptRunner {
             let moving = step.kind == .moveTo
             let placed = try files.map { file -> URL in
                 let target = try subfolder(step.subfolder, for: file, in: folder)
-                let destination = uniqueURL(for: file.lastPathComponent, in: target)
+                let destination = FileName.unique(file.lastPathComponent, in: target)
                 if moving {
                     try FileManager.default.moveItem(at: file, to: destination)
                 } else {
@@ -78,7 +78,7 @@ enum ScriptRunner {
                 let name = step.renameStyle.apply(to: file.lastPathComponent, prefix: step.text,
                                                   date: FileFacts.dateAdded(file) ?? Date())
                 guard name != file.lastPathComponent else { return file }
-                let destination = uniqueURL(for: name, in: file.deletingLastPathComponent())
+                let destination = FileName.unique(name, in: file.deletingLastPathComponent())
                 try FileManager.default.moveItem(at: file, to: destination)
                 return destination
             }
@@ -195,7 +195,7 @@ enum ScriptRunner {
             }
             guard let data else { throw StepError.emptyClipboard }
             let name = RenameStyle.datePrefix.apply(to: "Clipboard.png")
-            let file = uniqueURL(for: name, in: folder)
+            let file = FileName.unique(name, in: folder)
             try data.write(to: file)
             return Outcome(files: [file], message: file.lastPathComponent)
 
@@ -301,9 +301,7 @@ enum ScriptRunner {
         switch style {
         case .none: return folder
         case .month:
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM"
-            name = formatter.string(from: FileFacts.dateAdded(file) ?? Date())
+            name = Stamp.month(FileFacts.dateAdded(file) ?? Date())
         case .site:
             name = FileFacts.whereFroms(file).compactMap { URL(string: $0)?.host }
                 .last.map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? "Other"
@@ -320,7 +318,7 @@ enum ScriptRunner {
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw StepError.failed("\(file.lastPathComponent) is not an image") }
         let isJPEG = ["jpg", "jpeg"].contains(file.pathExtension.lowercased())
-        let output = isJPEG ? file : uniqueURL(for: file.deletingPathExtension().lastPathComponent + ".jpg",
+        let output = isJPEG ? file : FileName.unique(file.deletingPathExtension().lastPathComponent + ".jpg",
                                                in: file.deletingLastPathComponent())
         let staging = output.deletingLastPathComponent().appendingPathComponent(".gruppen-\(UUID().uuidString).jpg")
         guard let destination = CGImageDestinationCreateWithURL(staging as CFURL, "public.jpeg" as CFString, 1, nil)
@@ -360,20 +358,6 @@ enum ScriptRunner {
     private static func isFolder(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
-    }
-
-    /// `name`, or `name 2`, `name 3`… — never over an existing file.
-    static func uniqueURL(for name: String, in folder: URL) -> URL {
-        var candidate = folder.appendingPathComponent(name)
-        let base = (name as NSString).deletingPathExtension
-        let ext = (name as NSString).pathExtension
-        var counter = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let next = ext.isEmpty ? "\(base) \(counter)" : "\(base) \(counter).\(ext)"
-            candidate = folder.appendingPathComponent(next)
-            counter += 1
-        }
-        return candidate
     }
 
     private static func count(_ files: [URL]) -> String {

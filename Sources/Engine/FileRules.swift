@@ -178,9 +178,7 @@ enum RenameStyle: String, Codable, CaseIterable, Identifiable {
         var base = (name as NSString).deletingPathExtension
         switch self {
         case .datePrefix:
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyy-MM-dd"
-            base = "\(formatter.string(from: date)) \(base)"
+            base = "\(Stamp.day(date)) \(base)"
         case .textPrefix:
             let trimmed = prefix.trimmingCharacters(in: .whitespaces)
             if !trimmed.isEmpty { base = "\(trimmed) \(base)" }
@@ -232,12 +230,15 @@ enum TextTools {
         "spm", "yclid", "_hsenc", "_hsmi", "mkt_tok", "vero_id", "oly_anon_id", "oly_enc_id",
     ]
 
+    /// Built once: a detector compiles its patterns when it is made. Shared
+    /// safely — NSRegularExpression, which it is, is documented thread-safe.
+    nonisolated(unsafe) private static let linkDetector =
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     /// Every URL in `text` with its tracking parameters removed; anything that
     /// is not a link is left alone.
     static func cleanLinks(_ text: String) -> String {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return text
-        }
+        guard let detector = linkDetector else { return text }
         var result = text
         let matches = detector.matches(in: text, range: NSRange(text.startIndex..., in: text))
         for match in matches.reversed() {

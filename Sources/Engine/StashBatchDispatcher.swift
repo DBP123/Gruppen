@@ -257,7 +257,7 @@ enum StashBatchDispatcher {
     /// quietly overwrites someone's folder is not recoverable.
     nonisolated static func extract(_ archive: URL, into directory: URL) async throws -> URL {
         let base = archive.deletingPathExtension().lastPathComponent
-        let folder = uniqueFolder(in: directory, named: base.isEmpty ? "Extracted" : base)
+        let folder = FileName.unique(base.isEmpty ? "Extracted" : base, in: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
         // `-x -k`: extract, treating the input as a PKZip archive. The same pair
@@ -275,16 +275,6 @@ enum StashBatchDispatcher {
             throw ExtractionError.dittoFailed(status: result.status, message: result.failure)
         }
         return folder
-    }
-
-    private nonisolated static func uniqueFolder(in directory: URL, named base: String) -> URL {
-        var candidate = directory.appendingPathComponent(base, isDirectory: true)
-        var counter = 2
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = directory.appendingPathComponent("\(base) \(counter)", isDirectory: true)
-            counter += 1
-        }
-        return candidate
     }
 
     enum ExtractionError: LocalizedError {

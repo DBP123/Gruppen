@@ -115,13 +115,15 @@ final class GroupStore: ObservableObject {
     /// every kill goes through here, so the log is the record of who closed
     /// what and when.
     private nonisolated static let logLock = NSLock()
+    /// Only ever used under `logLock`.
+    nonisolated(unsafe) private static let logStamp = ISO8601DateFormatter()
 
     /// Callable from any thread — telemetry samplers log from their own queue.
     /// The lock keeps two writers from interleaving a line.
     nonisolated static func log(_ message: String) {
         logLock.lock()
         defer { logLock.unlock() }
-        let stamp = ISO8601DateFormatter().string(from: Date())
+        let stamp = logStamp.string(from: Date())
         let line = "[\(stamp)] pid \(ProcessInfo.processInfo.processIdentifier) \(message)\n"
         NSLog("Gruppen: %@", message)
         let url = FileManager.default.homeDirectoryForCurrentUser

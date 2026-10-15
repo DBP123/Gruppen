@@ -360,13 +360,6 @@ enum StashFileMerger {
     /// holding six merged documents is a file that lies about itself the next
     /// time you look at it.
     private nonisolated static func destination(for urls: [URL], ext: String) -> URL {
-        let base = "Combined-\(urls.count)-items"
-        var candidate = IngestionManager.scratch.appendingPathComponent("\(base).\(ext)")
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            candidate = IngestionManager.scratch.appendingPathComponent("\(base)-\(counter).\(ext)")
-            counter += 1
-        }
-        return candidate
+        FileName.unique("Combined-\(urls.count)-items.\(ext)", in: IngestionManager.scratch)
     }
 }

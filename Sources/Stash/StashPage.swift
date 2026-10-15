@@ -195,14 +195,8 @@ private struct ExportFolderRow: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose where zips and extractions go"
-        panel.prompt = "Choose"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = settings.exportDirectory
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = Pickers.folder(title: "Choose where zips and extractions go",
+                                       startingAt: settings.exportDirectory) else { return }
         settings.exportPath = url.path
     }
 }

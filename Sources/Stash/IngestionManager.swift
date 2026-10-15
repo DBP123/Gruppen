@@ -232,9 +232,7 @@ enum IngestionManager {
               let png = rep.representation(using: .png, properties: [:])
         else { completion(nil); return }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        let name = "Image-\(formatter.string(from: Date())).png"
+        let name = "Image-\(Stamp.moment()).png"
         let destination = uniqueScratchURL(named: name)
         do {
             try png.write(to: destination)
@@ -247,16 +245,6 @@ enum IngestionManager {
     // MARK: - Naming
 
     static func uniqueScratchURL(named name: String) -> URL {
-        let safe = name.isEmpty ? "Item" : name
-        var candidate = scratch.appendingPathComponent(safe)
-        var counter = 1
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            let base = (safe as NSString).deletingPathExtension
-            let ext = (safe as NSString).pathExtension
-            let next = ext.isEmpty ? "\(base)-\(counter)" : "\(base)-\(counter).\(ext)"
-            candidate = scratch.appendingPathComponent(next)
-            counter += 1
-        }
-        return candidate
+        FileName.unique(name.isEmpty ? "Item" : name, in: scratch)
     }
 }
