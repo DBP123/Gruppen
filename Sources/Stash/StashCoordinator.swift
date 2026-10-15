@@ -32,6 +32,8 @@ final class StashCoordinator: ObservableObject {
     /// The pending "you have left, so I will close" — cancellable, because
     /// coming back within the grace period means you never left.
     private var withdrawalTask: Task<Void, Never>?
+    /// Held while a tray emptied by hand waits for the pointer to move away.
+    private var leaveWatch: PointerLeaveWatch?
 
     private(set) var isEnabled = false
 
@@ -174,9 +176,9 @@ final class StashCoordinator: ObservableObject {
             ),
             registry: registry
         )
-        // Empty tray, pointer gone — and only if it is not pinned: nothing was
-        // ever dropped in it, or it was emptied by hand and is waiting for the
-        // pointer to leave (see `notchEmptied`).
+        // Empty tray, pointer gone — and only if nothing was ever dropped in it.
+        // A tray you have used is closed by its last file leaving, or, emptied
+        // by hand, by the pointer leaving its margin (see `notchEmptied`).
         //
         // Deferred, and cancelled by coming back. Acting on the exit itself is
         // what made the tray flicker: every twitch across the boundary was a
@@ -214,6 +216,8 @@ final class StashCoordinator: ObservableObject {
 
     func closeNotch() {
         cancelNotchWithdrawal()
+        leaveWatch?.cancel()
+        leaveWatch = nil
         guard let panel = notchPanel, let presentation = notchPresentation else { return }
         isNotchOpen = false
         isNotchPinned = false
@@ -267,7 +271,7 @@ final class StashCoordinator: ObservableObject {
         case close
         /// Emptied with the remove keys, so the pointer is still on it: closing
         /// now would pull the tray out from under the hand. It goes once the
-        /// pointer leaves.
+        /// pointer has moved clear of it.
         case closeOnLeaving
         /// Kept out until its close key.
         case stay
@@ -286,10 +290,10 @@ final class StashCoordinator: ObservableObject {
         case .close:
             closeNotch()
         case .closeOnLeaving:
-            // Unpinned, it withdraws as a tray never dropped on does: when the
-            // pointer leaves, after the grace — or now, if it already has.
-            isNotchPinned = false
-            if !isPointerOnNotch { scheduleNotchWithdrawal() }
+            // Stays pinned, so only the margin closes it — not the plain
+            // hover-exit, which fires the moment the pointer crosses the edge.
+            isNotchPinned = true
+            closeWhenPointerLeaves()
         case .stay:
             // Pinned, so the pointer leaving does not withdraw it either: a
             // tray reopened with last time's files starts unpinned.
@@ -297,30 +301,38 @@ final class StashCoordinator: ObservableObject {
         }
     }
 
-    private var isPointerOnNotch: Bool {
-        notchPanel.map { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? false
+    /// How far past the tray's edge the pointer may stray before an emptied
+    /// tray closes: room for a hand that overshoots after clicking a small
+    /// key, without the tray lingering once you have plainly moved on.
+    private static let leaveMargin: CGFloat = 24
+
+    private func closeWhenPointerLeaves() {
+        leaveWatch?.cancel()
+        let watch = PointerLeaveWatch(region: { [weak self] in self?.notchPanel?.frame },
+                                      margin: Self.leaveMargin) { [weak self] in
+            // Something dropped back in meanwhile keeps the tray.
+            guard let self, self.notchShelf.isEmpty, !self.notchShelf.isTargeted else { return }
+            self.closeNotch()
+        }
+        leaveWatch = watch
+        watch.start()
     }
 
     // MARK: Withdrawal
 
-    /// How long the pointer may be gone before the tray follows it. Held for a
-    /// moment rather than acted on, and cancelled if the pointer comes back: a
-    /// boundary crossing is not an intention. Skimming the edge, overshooting
-    /// into the bezel and dropping back, or the few pixels between the tray and
-    /// the buffer all used to read as "gone" and close the tray, which is
-    /// exactly the flicker.
+    /// The pointer or the drag left the notch.
     ///
-    /// Mid-drag, 0.35s: a drag skims the edge fast and comes straight back.
-    /// With the button up — a tray just emptied by hand — 0.6s: a hand that has
-    /// been clicking small keys drifts further off the edge before it settles,
-    /// and the tray should forgive that, yet still visibly answer leaving.
-    private var withdrawalGrace: TimeInterval { dragMonitor?.isDragging == true ? 0.35 : 0.6 }
+    /// Held for a moment rather than acted on, and cancelled if whatever left
+    /// comes back. A boundary crossing is not an intention: skimming the edge,
+    /// overshooting into the bezel and dropping back, or the few pixels between
+    /// the tray and the buffer all used to read as "gone" and close the tray,
+    /// which is exactly the flicker.
+    private static let withdrawalGrace: TimeInterval = 0.35
 
     private func scheduleNotchWithdrawal() {
         withdrawalTask?.cancel()
-        let grace = withdrawalGrace
         withdrawalTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(Self.withdrawalGrace * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             guard self.isNotchOpen, !self.isNotchPinned, self.notchShelf.isEmpty,
                   !self.notchShelf.isTargeted else { return }

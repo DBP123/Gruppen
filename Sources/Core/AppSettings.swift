@@ -87,7 +87,8 @@ final class AppSettings: ObservableObject {
 
     /// Whether the notch stash slides away once its last file is gone: on, an
     /// emptied tray closes itself — at once when its files were dragged out,
-    /// once the pointer leaves it when they were removed with their own keys;
+    /// once the pointer has moved clear of it when they were removed with their
+    /// own keys;
     /// off, it stays out until its close key.
     ///
     /// On by default, because that is what the notch stash has always done.

@@ -103,6 +103,17 @@ func sectionStash() async {
     T.equal("with the setting off, removed by hand: it stays",
             Response.to(.removedByHand, closesWhenEmpty: false), .stay)
 
+    // Moving clear of it is distance, not time: a margin around the tray.
+    let tray24 = NSRect(x: 100, y: 800, width: 300, height: 80)
+    T.check("on the tray, the pointer has not left",
+            !PointerLeaveWatch.hasLeft(NSPoint(x: 250, y: 840), region: tray24, margin: 24))
+    T.check("just past its edge, inside the margin, it has not left",
+            !PointerLeaveWatch.hasLeft(NSPoint(x: 250, y: 790), region: tray24, margin: 24))
+    T.check("beyond the margin below, it has",
+            PointerLeaveWatch.hasLeft(NSPoint(x: 250, y: 770), region: tray24, margin: 24))
+    T.check("beyond the margin to the side, it has",
+            PointerLeaveWatch.hasLeft(NSPoint(x: 430, y: 840), region: tray24, margin: 24))
+
     T.begin("D. Stash — batch extraction planning")
 
     withTempDir { dir in
