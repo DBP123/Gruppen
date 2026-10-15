@@ -139,7 +139,7 @@ struct Sparkline: View, Equatable {
     var tint: Color = Theme.trace
     var height: CGFloat = 26
 
-    static func == (a: Sparkline, b: Sparkline) -> Bool {
+    nonisolated static func == (a: Sparkline, b: Sparkline) -> Bool {
         a.values == b.values && a.floor == b.floor && a.height == b.height
     }
 

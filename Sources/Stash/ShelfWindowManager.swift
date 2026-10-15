@@ -282,7 +282,7 @@ final class FloatingShelfController {
     /// Gentle fade, then close. `scaling` collapses the window toward its own
     /// centre on the way out — used when the last item is dragged off, so the
     /// shelf visibly follows the thing that was on it rather than blinking away.
-    func dismiss(scaling: Bool = false, completion: @escaping () -> Void) {
+    func dismiss(scaling: Bool = false, completion: @escaping @MainActor @Sendable () -> Void) {
         guard let panel else { completion(); return }
         let collapsed = NSRect(x: panel.frame.midX, y: panel.frame.midY,
                                width: 0, height: 0).insetBy(dx: -8, dy: -6)

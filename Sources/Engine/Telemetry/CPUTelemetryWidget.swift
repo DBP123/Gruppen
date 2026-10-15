@@ -11,7 +11,7 @@ import Foundation
 /// not the widget, owns the previous set, and why the first tick after a cold
 /// start reports nothing. Ticks are `natural_t` and wrap, so every subtraction
 /// here is the wrapping kind.
-final class CPUSampler: TelemetrySampler {
+final class CPUSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         /// Fractions of the interval, 0…1, across all cores.
         var user: Double

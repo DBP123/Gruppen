@@ -219,8 +219,11 @@ protocol GruppenWidget: AnyObject {
 /// `Telemetry.queue`. It owns whatever previous counters a rate needs, which is
 /// the whole reason the split exists: those counters must not be main-actor
 /// state, and the published reading must not be anything else.
-protocol TelemetrySampler: AnyObject {
-    associatedtype Reading: Equatable
+/// `Sendable` because every call is made on `Telemetry.queue`, which is serial:
+/// the queue is a sampler's lock. That is why conformers are
+/// `@unchecked Sendable`.
+protocol TelemetrySampler: AnyObject, Sendable {
+    associatedtype Reading: Equatable & Sendable
     /// Called on `Telemetry.queue`. Returns nil when there is nothing to report
     /// yet — typically the first tick of a rate-based module, which has a
     /// baseline but no interval to divide by.
@@ -291,10 +294,10 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
             guard let reading = sampler.sample() else {
                 misses.value += 1
                 guard misses.value == patience else { return nil }
-                return { self?.markUnavailable() }
+                return { [weak self] in self?.markUnavailable() }
             }
             misses.value = 0
-            return { self?.accept(reading) }
+            return { [weak self] in self?.accept(reading) }
         }
     }
 
@@ -381,7 +384,8 @@ struct MenuBarSample: Equatable {
     var condition: PowerFlow.Condition?
 }
 
-/// A counter a sampling closure can carry between ticks.
+/// A counter a sampling closure can carry between ticks. Touched only on the
+/// serial sampling queue, so it needs no lock.
 private final class MissCount: @unchecked Sendable {
     var value = 0
 }

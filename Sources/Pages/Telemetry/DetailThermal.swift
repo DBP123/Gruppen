@@ -107,6 +107,7 @@ struct ThermalDetail: View {
 
 /// The threshold gating, reachable from the shared panel's compact well too, so
 /// one temperature cannot be amber in one place and cyan in another.
+@MainActor
 enum ThermalDetailTint {
     static func heat(_ celsius: Double?) -> Color { ThermalDetail.heatTint(celsius) }
 }

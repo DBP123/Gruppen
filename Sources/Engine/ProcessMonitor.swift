@@ -30,6 +30,8 @@ import Foundation
 /// The alternative was to claim raw-process detection and not deliver it. This
 /// delivers it, states its cost, and charges that cost only to the person who
 /// asked for it by arming such a trigger.
+///
+/// `@unchecked Sendable`: `watched` and `known` are touched only on `queue`.
 final class ProcessMonitor: @unchecked Sendable {
     /// How often the process table is compared, while armed.
     private static let interval: DispatchTimeInterval = .seconds(2)
@@ -37,7 +39,7 @@ final class ProcessMonitor: @unchecked Sendable {
 
     /// Called on the main queue with the executable name and pid of anything
     /// that appeared since the previous scan and matched a watched name.
-    private let onLaunch: (String, pid_t) -> Void
+    private let onLaunch: @MainActor @Sendable (String, pid_t) -> Void
 
     /// Lower-cased names being watched. A `Set` of small strings; the whole
     /// structure is a few hundred bytes.
@@ -50,7 +52,7 @@ final class ProcessMonitor: @unchecked Sendable {
                                       qos: .utility)
     private var timer: DispatchSourceTimer?
 
-    init(onLaunch: @escaping (String, pid_t) -> Void) {
+    init(onLaunch: @escaping @MainActor @Sendable (String, pid_t) -> Void) {
         self.onLaunch = onLaunch
     }
 
@@ -121,8 +123,9 @@ final class ProcessMonitor: @unchecked Sendable {
             guard !matches.isEmpty else { return }
 
             let callback = onLaunch
-            DispatchQueue.main.async {
-                for (name, pid) in matches { callback(name, pid) }
+            let found = matches
+            Task { @MainActor in
+                for (name, pid) in found { callback(name, pid) }
             }
         }
     }

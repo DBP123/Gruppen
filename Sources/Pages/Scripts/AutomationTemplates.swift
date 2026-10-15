@@ -64,10 +64,10 @@ extension Script {
 /// A ready-made automation: a name, an icon, and the script it starts as.
 /// Anything left unset — the destination folder, the workspace — shows amber
 /// on the card and opens the editor at it.
-struct AutomationTemplate: Identifiable {
+struct AutomationTemplate: Identifiable, Sendable {
     let name: String
     let glyph: String
-    let make: () -> Script
+    let make: @Sendable () -> Script
     var id: String { name }
 
     private static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
@@ -143,7 +143,7 @@ struct AutomationTemplate: Identifiable {
     ]
 
     private static func trigger(_ name: String, glyph: String,
-                                _ configure: @escaping (inout ScriptTrigger) -> Void,
+                                _ configure: @escaping @Sendable (inout ScriptTrigger) -> Void,
                                 _ steps: [ScriptStep]) -> AutomationTemplate {
         AutomationTemplate(name: name, glyph: glyph) {
             var script = Script(name: name, isActive: true, steps: steps)

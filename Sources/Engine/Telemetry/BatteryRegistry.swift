@@ -116,6 +116,7 @@ struct BatteryRegistry {
     // MARK: Missing names
 
     private static let missingLock = NSLock()
+    /// Only ever touched under `missingLock`.
     nonisolated(unsafe) private static var reported: Set<String> = []
 
     private static func reportMissing(_ name: String, _ paths: [String]) {

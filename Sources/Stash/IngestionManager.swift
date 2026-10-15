@@ -36,7 +36,7 @@ enum IngestionManager {
     /// Reads a live drag. This is the path that supports file promises, which
     /// never appear as ordinary pasteboard items.
     @MainActor
-    static func ingest(_ info: NSDraggingInfo, into sink: @escaping @MainActor ([StashItem]) -> Void) {
+    static func ingest(_ info: NSDraggingInfo, into sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         let pasteboard = info.draggingPasteboard
 
         // 1. Promises first. Safari, Photos and Mail hand over a receipt rather
@@ -94,7 +94,7 @@ enum IngestionManager {
     /// write it out, and the result is copied into scratch before the source
     /// app reclaims its temporary.
     @MainActor
-    static func ingest(_ providers: [NSItemProvider], into sink: @escaping @MainActor ([StashItem]) -> Void) {
+    static func ingest(_ providers: [NSItemProvider], into sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         for provider in providers {
             if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -126,7 +126,7 @@ enum IngestionManager {
     @MainActor
     private static func claimFileRepresentation(from provider: NSItemProvider,
                                                 typeIdentifier: String,
-                                                sink: @escaping @MainActor ([StashItem]) -> Void) {
+                                                sink: @escaping @MainActor @Sendable ([StashItem]) -> Void) {
         // Read off the provider *here*, on the main actor: the callback runs on
         // an arbitrary queue and NSItemProvider is not Sendable.
         let suggested = provider.suggestedName
@@ -179,7 +179,7 @@ enum IngestionManager {
     /// A remote image becomes a local one; anything else becomes a `.webloc`,
     /// which is the file Finder itself writes when you drag a link to the
     /// desktop, so double-clicking it opens the page.
-    static func materialize(webURL url: URL, completion: @escaping (StashItem) -> Void) {
+    static func materialize(webURL url: URL, completion: @escaping @Sendable (StashItem) -> Void) {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             completion(.link(url))
             return

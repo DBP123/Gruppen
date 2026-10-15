@@ -49,6 +49,7 @@ enum KeyLabels {
 /// Carbon is still the supported route for a global hotkey that works without
 /// Accessibility permission — `NSEvent.addGlobalMonitorForEvents` would demand
 /// one, which is a heavy ask for a launcher.
+@MainActor
 final class HotkeyCenter {
     static let shared = HotkeyCenter()
 
@@ -123,7 +124,7 @@ private let hotkeyEventHandler: EventHandlerUPP = { _, event, _ in
                                    &id)
     guard status == noErr else { return status }
     let hotKeyNumber = id.id
-    DispatchQueue.main.async { HotkeyCenter.shared.fire(id: hotKeyNumber) }
+    DispatchQueue.main.async { MainActor.assumeIsolated { HotkeyCenter.shared.fire(id: hotKeyNumber) } }
     return noErr
 }
 

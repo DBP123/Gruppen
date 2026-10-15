@@ -23,9 +23,9 @@ enum ScriptRunner {
     }
 
     /// The parts of the app a step can reach that are not singletons.
-    struct Hooks {
-        var launchGroup: @MainActor (UUID) -> Bool = { _ in false }
-        var activateWorkspace: @MainActor (UUID) -> Bool = { _ in false }
+    struct Hooks: Sendable {
+        var launchGroup: @MainActor @Sendable (UUID) -> Bool = { _ in false }
+        var activateWorkspace: @MainActor @Sendable (UUID) -> Bool = { _ in false }
     }
 
     enum StepError: LocalizedError {

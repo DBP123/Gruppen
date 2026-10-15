@@ -14,12 +14,11 @@ enum Stamp {
     /// `2026-10-15-134501`
     static func moment(_ date: Date = Date()) -> String { momentFormat.string(from: date) }
 
-    // Shared across threads safely: a DateFormatter only formats once it is
-    // configured (thread-safe since macOS 10.9), and these are never changed
-    // after they are made.
-    nonisolated(unsafe) private static let dayFormat = formatter("yyyy-MM-dd")
-    nonisolated(unsafe) private static let monthFormat = formatter("yyyy-MM")
-    nonisolated(unsafe) private static let momentFormat = formatter("yyyy-MM-dd-HHmmss")
+    // Made once and never changed after; DateFormatter is safe to share for
+    // formatting.
+    private static let dayFormat = formatter("yyyy-MM-dd")
+    private static let monthFormat = formatter("yyyy-MM")
+    private static let momentFormat = formatter("yyyy-MM-dd-HHmmss")
 
     private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()

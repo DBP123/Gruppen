@@ -230,9 +230,8 @@ enum TextTools {
         "spm", "yclid", "_hsenc", "_hsmi", "mkt_tok", "vero_id", "oly_anon_id", "oly_enc_id",
     ]
 
-    /// Built once: a detector compiles its patterns when it is made. Shared
-    /// safely — NSRegularExpression, which it is, is documented thread-safe.
-    nonisolated(unsafe) private static let linkDetector =
+    /// Built once: a detector compiles its patterns when it is made.
+    private static let linkDetector =
         try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
     /// Every URL in `text` with its tracking parameters removed; anything that

@@ -581,14 +581,17 @@ final class ScriptTriggerCoordinator: ObservableObject {
 /// `FSEventStream` is the event-driven route: the kernel posts changes to a
 /// dispatch queue and nothing runs in between. The latency argument is a
 /// coalescing window for bursts, not a polling interval.
-final class FolderWatcher {
+/// `@unchecked Sendable`: `known` is set in `start()` before the stream exists
+/// and from then on touched only on `queue`; the stream is made and torn down
+/// on the main thread.
+final class FolderWatcher: @unchecked Sendable {
     private let path: String
-    private let onNewFiles: ([URL]) -> Void
+    private let onNewFiles: @MainActor ([URL]) -> Void
     private var stream: FSEventStreamRef?
     private var known: Set<String> = []
     private let queue = DispatchQueue(label: "com.dhilanpatel.gruppen.folderwatch")
 
-    init(path: String, onNewFiles: @escaping ([URL]) -> Void) {
+    init(path: String, onNewFiles: @escaping @MainActor ([URL]) -> Void) {
         self.path = path
         self.onNewFiles = onNewFiles
     }
@@ -642,7 +645,7 @@ final class FolderWatcher {
         let arrived = current.filter { !known.contains($0.path) }
         known = currentPaths
         guard !arrived.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in self?.onNewFiles(arrived) }
+        Task { @MainActor [weak self] in self?.onNewFiles(arrived) }
     }
 
     private func currentFiles() -> [URL] {
@@ -665,8 +668,9 @@ final class FolderWatcher {
 /// `UNUserNotificationCenter` throws if the process has no bundle identifier —
 /// which is exactly the case in a test harness — so every call is guarded and
 /// simply does nothing when notifications are unavailable.
+@MainActor
 enum Notifier {
-    static func post(title: String, body: String, report: @escaping (String?) -> Void = { _ in }) {
+    static func post(title: String, body: String, report: @escaping @Sendable (String?) -> Void = { _ in }) {
         guard Bundle.main.bundleIdentifier != nil else {
             report("notifications need a bundled app")
             return

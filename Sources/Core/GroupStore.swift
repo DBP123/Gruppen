@@ -63,7 +63,7 @@ final class GroupStore: ObservableObject {
     /// In-flight sequenced launch/termination, one per Gruppe. Cancelled when
     /// the opposite action is requested so the two can never interleave.
     private var sequenceTasks: [UUID: Task<Void, Never>] = [:]
-    nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
+    private var observers: [NSObjectProtocol] = []
     /// Running state comes from here now — no timer, no process-list walk on a
     /// schedule. See `RunningAppTracker` for why and for the one caveat.
     let tracker = RunningAppTracker()

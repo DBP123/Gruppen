@@ -1,5 +1,5 @@
 import Foundation
-import UserNotifications
+@preconcurrency import UserNotifications
 
 /// The `UserNotifications` call, kept behind its own type.
 ///
@@ -8,16 +8,17 @@ import UserNotifications
 /// notification permission before it has anything to say is an app people say
 /// no to. If permission is refused or the process cannot use the framework at
 /// all, this quietly does nothing: a script's job is the work, not the toast.
+@MainActor
 enum NotifierBridge {
     private static var requested = false
 
     /// `report` receives nil on success and a reason on failure, so a banner
     /// that never appears leaves a trace in the script's own log instead of
     /// being silently swallowed.
-    static func post(title: String, body: String, report: @escaping (String?) -> Void) {
+    static func post(title: String, body: String, report: @escaping @Sendable (String?) -> Void) {
         let center = UNUserNotificationCenter.current()
 
-        let deliver = {
+        let deliver: @Sendable () -> Void = {
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body

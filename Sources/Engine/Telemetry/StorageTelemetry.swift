@@ -15,7 +15,7 @@ import IOKit.storage
 /// - **Throughput** comes from `IOBlockStorageDriver`'s `Statistics`, which
 ///   carries cumulative bytes and operation counts. Both are differenced, so
 ///   bytes give MB/s and operations give IOPS off the same reading.
-final class StorageSampler: TelemetrySampler {
+final class StorageSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         // Capacity, in bytes.
         var total: UInt64

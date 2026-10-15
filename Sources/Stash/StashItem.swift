@@ -199,7 +199,8 @@ enum QuickLook {
         private func handBack() {
             guard let app = handBackTo else { return }
             handBackTo = nil
-            NSApp.deactivate()
+            // Panel delegate calls arrive on the main thread.
+            MainActor.assumeIsolated { NSApp.deactivate() }
             if #available(macOS 14.0, *) {
                 app.activate()
             } else {

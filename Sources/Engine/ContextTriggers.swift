@@ -16,7 +16,7 @@ final class DisplayWatcher {
     private var count = NSScreen.screens.count
 
     /// `true` when a display was added, `false` when one went away.
-    init(onChange: @escaping @MainActor (Bool) -> Void) {
+    init(onChange: @escaping @MainActor @Sendable (Bool) -> Void) {
         observer = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -40,13 +40,16 @@ final class DisplayWatcher {
 /// The Wi-Fi network changing. CoreWLAN reports the change; the network's name
 /// is only shared with apps that have Location Services, so the first watcher
 /// asks for it once.
-final class WiFiWatcher: NSObject, CWEventDelegate {
+///
+/// `@unchecked Sendable`: `last` is set before monitoring starts and then only
+/// on CoreWLAN's callback thread.
+final class WiFiWatcher: NSObject, CWEventDelegate, @unchecked Sendable {
     private let client = CWWiFiClient.shared()
-    private let onJoin: (String) -> Void
+    private let onJoin: @MainActor @Sendable (String) -> Void
     private let location = CLLocationManager()
     private var last: String?
 
-    init(onJoin: @escaping (String) -> Void) {
+    init(onJoin: @escaping @MainActor @Sendable (String) -> Void) {
         self.onJoin = onJoin
         super.init()
         if location.authorizationStatus == .notDetermined { location.requestWhenInUseAuthorization() }
@@ -64,7 +67,8 @@ final class WiFiWatcher: NSObject, CWEventDelegate {
         let name = client.interface(withName: interfaceName)?.ssid()
         defer { last = name }
         guard let name, name != last else { return }
-        DispatchQueue.main.async { self.onJoin(name) }
+        let onJoin = onJoin
+        Task { @MainActor in onJoin(name) }
     }
 }
 

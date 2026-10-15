@@ -112,7 +112,9 @@ struct WindowVisibilityProbe: NSViewRepresentable {
             publish()
         }
 
-        deinit { unhook() }
+        // Removing an observer is safe from any thread, and nothing else can
+        // reach `tokens` once deinit has begun.
+        deinit { tokens.forEach(NotificationCenter.default.removeObserver(_:)) }
 
         private func unhook() {
             let center = NotificationCenter.default

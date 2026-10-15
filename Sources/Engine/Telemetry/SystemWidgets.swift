@@ -12,7 +12,7 @@ import IOKit.ps
 ///
 /// `host_statistics64` reports pages, not bytes, so everything is multiplied by
 /// the host page size (16 KB on Apple Silicon, not the 4 KB people assume).
-final class MemorySampler: TelemetrySampler {
+final class MemorySampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var total: UInt64
         /// Kernel memory that can never be paged out.
@@ -213,7 +213,7 @@ final class MemoryTelemetryWidget: TelemetryModule<MemorySampler> {
 /// `getifaddrs`, because that is the only one of the two that carries 64-bit
 /// byte counts — the `getifaddrs` version wraps every 4 GB and would report
 /// nonsense on any machine that has been up a while.
-final class NetworkSampler: TelemetrySampler {
+final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         /// Bytes per second.
         var down: Double
@@ -361,7 +361,7 @@ final class NetworkTelemetryWidget: TelemetryModule<NetworkSampler> {
 /// one. What the system does tell you is its *thermal pressure*: whether it is
 /// currently throttling to keep cool. That is the number that actually predicts
 /// whether your machine is about to slow down, so it is the one shown here.
-final class ThermalSampler: TelemetrySampler {
+final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var state: ProcessInfo.ThermalState
         var isLowPower: Bool
@@ -524,7 +524,7 @@ final class ThermalTelemetryWidget: TelemetryModule<ThermalSampler> {
 /// that is what this reports: awake or asleep, not a percentage. The load
 /// figures other tools show for those come out of IOReport, which has no public
 /// header, and a made-up percentage is worse than an honest binary.
-final class SiliconSampler: TelemetrySampler {
+final class SiliconSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var gpu: Double
         var renderer: Double
@@ -603,7 +603,7 @@ final class SiliconTelemetryWidget: TelemetryModule<SiliconSampler> {
 /// is a difference — the sampler holds the previous pass. A full sweep of ~190
 /// processes measures at 0.6 ms, which at the panel's 2 Hz is around a tenth of
 /// one percent of one core.
-final class ProcessSampler: TelemetrySampler {
+final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
     struct Row: Equatable, Identifiable {
         var pid: pid_t
         var name: String
@@ -728,7 +728,7 @@ final class ProcessTelemetryWidget: TelemetryModule<ProcessSampler> {
 /// The same three figures the old menu bar readout carried, on the same
 /// demand-driven footing as everything else. Not hideable: a monitor that will
 /// not report on itself is not worth trusting.
-final class FootprintSampler: TelemetrySampler {
+final class FootprintSampler: TelemetrySampler, @unchecked Sendable {
     struct Reading: Equatable {
         var cpu: Double
         var resident: UInt64

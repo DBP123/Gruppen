@@ -28,8 +28,8 @@ import IOKit
 /// once, and neither should pay the discovery cost twice, but the last one to
 /// let go must still close the connection. Every method is called on
 /// `Telemetry.queue`, which is serial — that is what makes the counting safe
-/// without a lock.
-final class AppleSiliconTelemetry {
+/// without a lock, and the queue is why this is `@unchecked Sendable`.
+final class AppleSiliconTelemetry: @unchecked Sendable {
     static let shared = AppleSiliconTelemetry()
 
     private init() {}

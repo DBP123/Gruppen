@@ -23,7 +23,10 @@ import Foundation
 /// rest of the module — interface throughput, which is entirely public —
 /// carries on. That is the trade being made, and it is worth making: a
 /// throughput figure that cannot say *who* is a number you can do nothing with.
-final class NetworkTalkers {
+// `@unchecked Sendable`: `flows` is behind `lock`; `manager` is set in
+// `start()` before any work is queued, read only on `queue`, and cleared inside
+// `queue.sync`; `started` is touched only from the telemetry queue.
+final class NetworkTalkers: @unchecked Sendable {
     /// A process holding network connections, and what those connections have
     /// carried since Gruppen started watching them.
     ///

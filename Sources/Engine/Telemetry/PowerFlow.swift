@@ -417,7 +417,7 @@ struct PowerFlow: Equatable {
 /// It is also much cheaper alone. Thermal costs 2.5 ms a tick because it walks a
 /// dozen SMC keys; this reads one IORegistry node at 0.23 ms, so pinning the
 /// battery to the menu bar no longer drags the sensor sweep along with it.
-final class PowerSampler: TelemetrySampler {
+final class PowerSampler: TelemetrySampler, @unchecked Sendable {
     /// One quantity, four ways of reading it.
     ///
     /// The averages are over a *time* window rather than a sample count, because
