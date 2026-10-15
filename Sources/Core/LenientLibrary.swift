@@ -85,4 +85,30 @@ enum LenientLibrary {
         }
         return result.items
     }
+
+    /// The other direction: writes `value` as readable JSON, atomically.
+    ///
+    /// A failed save is logged with its reason — a full disk or a folder whose
+    /// permissions changed would otherwise lose the edit at the next launch
+    /// with no trace of why.
+    @discardableResult
+    static func save<T: Encodable>(_ value: T, to url: URL,
+                                   encoder: JSONEncoder = readableEncoder(),
+                                   label: String) -> Bool {
+        do {
+            try encoder.encode(value).write(to: url, options: .atomic)
+            return true
+        } catch {
+            GroupStore.log("\(label): not saved to \(url.lastPathComponent) — \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Pretty-printed with sorted keys, so a saved file diffs cleanly and reads
+    /// by hand.
+    static func readableEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
 }

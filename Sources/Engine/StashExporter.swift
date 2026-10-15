@@ -30,7 +30,7 @@ enum StashExporter {
     /// Writes `<destination>/Stash-<timestamp>.zip`. Returns its URL.
     @discardableResult
     nonisolated static func export(items: [(name: String, url: URL?, text: String?)],
-                                   to destination: URL) throws -> URL {
+                                   to destination: URL) async throws -> URL {
         guard !items.isEmpty else { throw ExportError.nothingToExport }
         // Checked before any work, because these are the two failures with a
         // reason worth naming — left to `zip`, both come back as "could not
@@ -74,9 +74,6 @@ enum StashExporter {
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         let archive = uniqueArchive(in: destination, named: "Stash-\(formatter.string(from: Date()))")
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.currentDirectoryURL = staging
         // Compression level, chosen by what is actually on the shelf.
         //
         // Measured on 240MB of media: `-6` (the default) took 3.08s and produced
@@ -92,16 +89,9 @@ enum StashExporter {
         //
         // `-y` stores symlinks rather than following them.
         let level = items.allSatisfy { isPrecompressed($0.url) } ? "-0" : "-6"
-        process.arguments = ["-r", "-q", level, "-y", archive.path, "."]
-        let errorPipe = Pipe()
-        process.standardError = errorPipe
-        process.standardOutput = Pipe()
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw ExportError.zipFailed(message.trimmingCharacters(in: .whitespacesAndNewlines))
+        let result = try await Tool.run("/usr/bin/zip", ["-r", "-q", level, "-y", archive.path, "."], in: staging)
+        guard result.succeeded else {
+            throw ExportError.zipFailed(result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return archive
     }

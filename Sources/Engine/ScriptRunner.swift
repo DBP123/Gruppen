@@ -219,14 +219,14 @@ enum ScriptRunner {
             let folder = step.folder.isEmpty
                 ? await MainActor.run { AppSettings.shared.exportDirectory }
                 : URL(fileURLWithPath: step.folder, isDirectory: true)
-            let archive = try StashExporter.export(
+            let archive = try await StashExporter.export(
                 items: files.map { (name: $0.lastPathComponent, url: $0, text: nil) }, to: folder)
             return Outcome(files: [archive], message: archive.lastPathComponent)
 
         case .convert:
             guard !files.isEmpty else { throw StepError.noFiles }
             let target = FileConverter.Target(label: step.format.uppercased(), ext: step.format)
-            let results = try FileConverter.convert(files, to: target)
+            let results = try await FileConverter.convert(files, to: target)
             return Outcome(files: results, message: "Converted \(count(results)) to \(target.label)")
 
         case .combinePDF:
@@ -351,26 +351,10 @@ enum ScriptRunner {
         if let failure { throw StepError.failed(failure) }
     }
 
-    /// Runs a system tool and waits for it without parking a thread.
+    /// Runs a system tool; a failure carries the tool's own words.
     private static func tool(_ path: String, _ arguments: [String]) async throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = Pipe()
-        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-            do { try process.run() } catch {
-                process.terminationHandler = nil
-                continuation.resume(throwing: error)
-            }
-        }
-        guard status == 0 else {
-            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw StepError.failed(message.isEmpty ? "\((path as NSString).lastPathComponent) failed" : message)
-        }
+        let result = try await Tool.run(path, arguments)
+        guard result.succeeded else { throw StepError.failed(result.failure) }
     }
 
     private static func isFolder(_ url: URL) -> Bool {

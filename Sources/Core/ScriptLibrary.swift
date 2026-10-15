@@ -136,9 +136,7 @@ final class ScriptLibrary: ObservableObject {
     ]
 
     nonisolated static func exportData(_ script: Script) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(ScriptFile(script: script))
+        try LenientLibrary.readableEncoder().encode(ScriptFile(script: script))
     }
 
     /// Adds the script in `url` to the library and returns it.
@@ -209,17 +207,10 @@ final class ScriptLibrary: ObservableObject {
     }
 
     private func save() {
-        write(scripts, to: fileURL)
+        LenientLibrary.save(scripts, to: fileURL, label: "SCRIPTS")
     }
 
     private func saveRuns() {
-        write(runs, to: runsURL)
-    }
-
-    private func write<Value: Encodable>(_ value: Value, to url: URL) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(value) else { return }
-        try? data.write(to: url, options: .atomic)
+        LenientLibrary.save(runs, to: runsURL, label: "SCRIPT RUNS")
     }
 }

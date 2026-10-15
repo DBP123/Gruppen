@@ -9,8 +9,9 @@ struct Suite {
         await sectionScriptSteps()
         await sectionScriptTransfer()
         await sectionAutomationEngine()
+        await sectionTools()
         sectionTelemetry()
-        await MainActor.run { sectionStash() }
+        await sectionStash()
         await sectionWorkspaces()
         await MainActor.run { sectionPortability() }
         sectionMerge()

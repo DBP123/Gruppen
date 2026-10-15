@@ -96,10 +96,7 @@ final class WorkspaceEngine: ObservableObject {
     }
 
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(profiles) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        LenientLibrary.save(profiles, to: fileURL, label: "WORKSPACES")
     }
 
     // MARK: Editing

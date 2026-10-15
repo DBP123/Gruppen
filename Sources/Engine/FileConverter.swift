@@ -93,33 +93,33 @@ enum FileConverter {
 
     /// Converts each file and returns the results. Off the main actor: every
     /// path here is either a subprocess or a render.
-    nonisolated static func convert(_ urls: [URL], to target: Target) throws -> [URL] {
-        // One pool per file: converting a folder of images otherwise piles up
-        // every intermediate until the whole batch finishes.
-        try urls.map { url in
-            try autoreleasepool { try convert(url, to: target) }
-        }
+    nonisolated static func convert(_ urls: [URL], to target: Target) async throws -> [URL] {
+        var results: [URL] = []
+        for url in urls { results.append(try await convert(url, to: target)) }
+        return results
     }
 
-    nonisolated static func convert(_ url: URL, to target: Target) throws -> URL {
+    nonisolated static func convert(_ url: URL, to target: Target) async throws -> URL {
         let output = destination(for: url, ext: target.ext)
         switch family(of: url) {
         case .image:
             if target.ext == "pdf" {
-                try imageToPDF(url, output: output)
+                // One pool per render: a folder of images otherwise piles up
+                // every intermediate until the whole batch finishes.
+                try autoreleasepool { try imageToPDF(url, output: output) }
             } else {
-                try run("/usr/bin/sips",
+                try await run("/usr/bin/sips",
                         ["-s", "format", sipsFormat(for: target.ext), url.path, "--out", output.path])
             }
         case .document:
             if target.ext == "pdf" {
-                try documentToPDF(url, output: output)
+                try autoreleasepool { try documentToPDF(url, output: output) }
             } else {
-                try run("/usr/bin/textutil",
+                try await run("/usr/bin/textutil",
                         ["-convert", target.ext, url.path, "-output", output.path])
             }
         case .audio:
-            try run("/usr/bin/afconvert",
+            try await run("/usr/bin/afconvert",
                     ["-f", audioContainer(for: target.ext), "-d", audioFormat(for: target.ext),
                      url.path, output.path])
         case .unsupported:
@@ -212,20 +212,10 @@ enum FileConverter {
 
     // MARK: - Tools
 
-    private nonisolated static func run(_ tool: String, _ arguments: [String]) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: tool)
-        process.arguments = arguments
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = Pipe()
-        try process.run()
-        let data = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
-            throw ConversionError.toolFailed((tool as NSString).lastPathComponent,
-                                             message.trimmingCharacters(in: .whitespacesAndNewlines))
+    private nonisolated static func run(_ tool: String, _ arguments: [String]) async throws {
+        let result = try await Tool.run(tool, arguments)
+        guard result.succeeded else {
+            throw ConversionError.toolFailed(result.tool, result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
 

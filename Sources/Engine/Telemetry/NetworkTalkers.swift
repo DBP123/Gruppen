@@ -225,7 +225,14 @@ final class NetworkTalkers {
         // On `queue`, for the same reason the queries are: nothing may be
         // asking a source while the manager that owns it is torn down.
         queue.sync {
-            if let manager { destroyManager(manager) }
+            // Destroy only invalidates; the manager came from a Create call and
+            // is ours to release. Without this every stop leaked one, with its
+            // XPC connection (checked under `leaks --atExit`: five cycles, five
+            // leaked managers before, none after).
+            if let manager {
+                destroyManager(manager)
+                Unmanaged<AnyObject>.fromOpaque(manager).release()
+            }
             manager = nil
             lock.lock()
             flows.removeAll()

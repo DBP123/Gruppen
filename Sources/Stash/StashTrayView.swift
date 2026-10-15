@@ -110,7 +110,7 @@ struct StashTrayView: View {
         Task { @MainActor in
             do {
                 let archive = try await Task.detached(priority: .userInitiated) {
-                    try StashExporter.export(items: payload, to: destination)
+                    try await StashExporter.export(items: payload, to: destination)
                 }.value
                 zip = .saved(archive.lastPathComponent)
                 FinderUtility.revealAndFocus(url: archive)

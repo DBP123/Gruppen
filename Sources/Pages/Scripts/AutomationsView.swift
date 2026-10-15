@@ -433,9 +433,15 @@ private struct AutomationEditor: View {
         let panel = NSSavePanel()
         panel.title = "Export \(script.name)"
         panel.nameFieldStringValue = "\(script.name).gruppenscript"
-        guard panel.runModal() == .OK, let url = panel.url,
-              let data = try? ScriptLibrary.exportData(script) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try ScriptLibrary.exportData(script).write(to: url, options: .atomic)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't export \(script.name)"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 }
 

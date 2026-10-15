@@ -80,18 +80,15 @@ enum DockManager {
     ///
     /// Called before the first write and never again: a second capture taken
     /// after a profile is active would record *Gruppen's* Dock as the original,
-    /// and the way back would be gone.
-    @discardableResult
-    static func captureOriginalIfNeeded() -> Bool {
-        guard !hasBackup else { return false }
+    /// and the way back would be gone. Throws when the copy cannot be written,
+    /// so the Dock is never replaced without one.
+    static func captureOriginalIfNeeded() throws {
+        guard !hasBackup else { return }
         let tiles = currentTiles()
-        guard !tiles.isEmpty else { return false }
-        guard let data = try? PropertyListSerialization.data(fromPropertyList: tiles,
-                                                             format: .xml,
-                                                             options: 0) else { return false }
-        try? data.write(to: backupURL, options: .atomic)
+        guard !tiles.isEmpty else { return }
+        let data = try PropertyListSerialization.data(fromPropertyList: tiles, format: .xml, options: 0)
+        try data.write(to: backupURL, options: .atomic)
         GroupStore.log("DOCK captured original — \(tiles.count) tile(s) -> \(backupURL.lastPathComponent)")
-        return true
     }
 
     /// Puts the Dock back to what it was before any profile touched it.
@@ -118,7 +115,12 @@ enum DockManager {
     static func apply(_ apps: [AppEntry]) -> WorkspaceActivationReport.Outcome {
         guard !apps.isEmpty else { return .skipped("no apps configured") }
 
-        captureOriginalIfNeeded()
+        do {
+            try captureOriginalIfNeeded()
+        } catch {
+            GroupStore.log("DOCK not changed — the original could not be saved: \(error.localizedDescription)")
+            return .failed("couldn't save your current Dock first — \(error.localizedDescription)")
+        }
 
         let existing = apps.filter { FileManager.default.fileExists(atPath: $0.path) }
         guard !existing.isEmpty else { return .failed("none of the \(apps.count) apps exist on disk") }

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 @MainActor
-func sectionStash() {
+func sectionStash() async {
     T.begin("D. Stash — item classification")
 
     let zip = StashItem.file(URL(fileURLWithPath: "/tmp/a/report.zip"))
@@ -147,12 +147,12 @@ func sectionStash() {
 
     T.begin("D. Stash — export naming")
 
-    withTempDir { dir in
+    await withTempDirAsync { dir in
         let a = dir.appendingPathComponent("one.txt")
         try? Data("a".utf8).write(to: a)
         do {
-            let first = try StashExporter.export(items: [("one.txt", a, nil)], to: dir)
-            let second = try StashExporter.export(items: [("one.txt", a, nil)], to: dir)
+            let first = try await StashExporter.export(items: [("one.txt", a, nil)], to: dir)
+            let second = try await StashExporter.export(items: [("one.txt", a, nil)], to: dir)
             T.check("two exports do not overwrite each other",
                     first != second, "\(first.lastPathComponent) then \(second.lastPathComponent)")
             T.check("the archive exists and is not empty",
@@ -160,24 +160,24 @@ func sectionStash() {
         } catch { T.check("exporting a file works", false, "\(error)") }
 
         do {
-            _ = try StashExporter.export(items: [], to: dir)
+            _ = try await StashExporter.export(items: [], to: dir)
             T.check("an empty export is refused", false, "it produced an archive")
         } catch { T.check("an empty export is refused", true, "\(error.localizedDescription)") }
 
         // The failures the shelf has to put into words, read back the way the
         // shelf reads them.
-        func failure(_ destination: URL) -> String? {
-            do { _ = try StashExporter.export(items: [("one.txt", a, nil)], to: destination); return nil }
+        func failure(_ destination: URL) async -> String? {
+            do { _ = try await StashExporter.export(items: [("one.txt", a, nil)], to: destination); return nil }
             catch { return (error as? StashExporter.ExportError)?.errorDescription }
         }
         let missing = dir.appendingPathComponent("Nowhere", isDirectory: true)
         T.equal("a missing folder is named, not left to zip's stderr",
-                failure(missing), "Nowhere folder not found")
+                await failure(missing), "Nowhere folder not found")
 
         let locked = dir.appendingPathComponent("Locked", isDirectory: true)
         try? FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
         try? FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: locked.path)
-        T.equal("a read-only folder says so", failure(locked), "Can't write to Locked")
+        T.equal("a read-only folder says so", await failure(locked), "Can't write to Locked")
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
 
         let messages = [StashExporter.ExportError.nothingToExport, .folderMissing("Downloads"),

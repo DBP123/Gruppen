@@ -38,9 +38,8 @@ enum UnzipDestinationMode: Equatable {
 /// `withTaskGroup`, bounded to four at a time. Unbounded would launch one
 /// `ditto` per archive — fifty archives is fifty processes competing for the
 /// same disk, which finishes no sooner and makes the machine unusable while it
-/// does. Each extraction waits on a `terminationHandler` through a continuation
-/// rather than `waitUntilExit()`: blocking inside a task group parks a thread
-/// from the cooperative pool, and four parked threads is most of it.
+/// does. Each extraction runs through `Tool`, which waits without parking a
+/// thread: four blocked threads would be most of the cooperative pool.
 @MainActor
 enum StashBatchDispatcher {
     /// How many extractions run at once.
@@ -261,8 +260,6 @@ enum StashBatchDispatcher {
         let folder = uniqueFolder(in: directory, named: base.isEmpty ? "Extracted" : base)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
         // `-x -k`: extract, treating the input as a PKZip archive. The same pair
         // Archive Utility uses. `unzip` would also work and is not equivalent —
         // it drops resource forks and extended attributes that ditto preserves.
@@ -270,45 +267,14 @@ enum StashBatchDispatcher {
         // Quarantine is deliberately *not* stripped. `--noqtn` would make
         // extracted files launch without Gatekeeper ever asking, which is not a
         // decision a shelf gets to make on the user's behalf.
-        process.arguments = ["-x", "-k", archive.path, folder.path]
-        let errors = Pipe()
-        process.standardError = errors
-        process.standardOutput = Pipe()
-
-        let status = try await terminationStatus(of: process)
-        guard status == 0 else {
+        let result = try await Tool.run("/usr/bin/ditto", ["-x", "-k", archive.path, folder.path])
+        guard result.succeeded else {
             // Clean up the empty folder, or a failed batch litters the
             // destination with directories containing nothing.
             try? FileManager.default.removeItem(at: folder)
-            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(),
-                                 encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            throw ExtractionError.dittoFailed(status: status,
-                                              message: message.isEmpty ? "exit \(status)" : message)
+            throw ExtractionError.dittoFailed(status: result.status, message: result.failure)
         }
         return folder
-    }
-
-    /// Awaits a process without parking a cooperative thread.
-    ///
-    /// `waitUntilExit()` blocks whichever thread it is called on. Inside a task
-    /// group that is a thread from the cooperative pool, which is sized to the
-    /// core count — four concurrent extractions would hold four of them for the
-    /// duration. The termination handler hands the wait back to the runtime.
-    private nonisolated static func terminationStatus(of process: Process) async throws -> Int32 {
-        try await withCheckedThrowingContinuation { continuation in
-            // Set before `run()`: a process that exits immediately can call this
-            // back before the call to run returns.
-            process.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
-            do {
-                try process.run()
-            } catch {
-                // `run()` throwing means nothing launched, so the handler will
-                // never fire and this is the only resume.
-                process.terminationHandler = nil
-                continuation.resume(throwing: error)
-            }
-        }
     }
 
     private nonisolated static func uniqueFolder(in directory: URL, named base: String) -> URL {

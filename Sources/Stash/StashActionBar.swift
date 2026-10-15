@@ -218,7 +218,7 @@ struct StashActionBar: View {
         Task { @MainActor in
             do {
                 let results = try await Task.detached(priority: .userInitiated) {
-                    try FileConverter.convert(urls, to: target)
+                    try await FileConverter.convert(urls, to: target)
                 }.value
                 // Added before the originals go, so the shelf is never empty
                 // in between — an emptied shelf closes itself.

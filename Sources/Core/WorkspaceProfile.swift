@@ -188,7 +188,6 @@ struct WorkspaceActivationReport {
 
     var profileName: String
     var lines: [Line] = []
-    var startedAt = Date()
     var duration: TimeInterval = 0
 
     mutating func add(_ stage: String, _ outcome: Outcome) {
@@ -196,7 +195,6 @@ struct WorkspaceActivationReport {
     }
 
     var failures: [Line] { lines.filter(\.outcome.isFailure) }
-    var didAnything: Bool { lines.contains { if case .done = $0.outcome { return true }; return false } }
 
     /// The line written to `~/Library/Logs/Gruppen.log`.
     var transcript: String {

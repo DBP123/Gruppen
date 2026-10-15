@@ -193,10 +193,7 @@ final class GroupStore: ObservableObject {
     }
 
     private func save() {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(groups) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        LenientLibrary.save(groups, to: fileURL, label: "GROUPS")
     }
 
     // MARK: - Editing

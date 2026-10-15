@@ -180,10 +180,8 @@ final class HardwareProfileStore: ObservableObject {
     }
 
     private nonisolated static func save(_ profile: MacHardwareProfile, to url: URL) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let encoder = LenientLibrary.readableEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(profile) else { return }
-        try? data.write(to: url, options: .atomic)
+        LenientLibrary.save(profile, to: url, encoder: encoder, label: "HARDWARE")
     }
 }

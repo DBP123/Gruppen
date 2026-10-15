@@ -156,8 +156,10 @@ final class ShelfWindowManager: ObservableObject {
                                                  onHide: { [weak self] id in self?.hide(id) })
         // Emptying a shelf closes it: an empty shelf you have already used is
         // just a box in the way.
-        state.onEmptied = { [weak self] in
-            Task { @MainActor in self?.destroyShelf(id: state.id, scaling: true) }
+        // The id, not the state: the state owns this closure, and capturing it
+        // here would keep every closed shelf alive.
+        state.onEmptied = { [weak self, id = state.id] in
+            Task { @MainActor in self?.destroyShelf(id: id, scaling: true) }
         }
         activeShelves[state.id] = controller
         controller.present(store: store)
