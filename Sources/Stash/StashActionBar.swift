@@ -56,6 +56,17 @@ struct StashActionBar: View {
 
     private var hasSelection: Bool { !selected.isEmpty }
 
+    private var convertTitle: String {
+        Self.convertTitle(hasSelection: hasSelection, files: convertible.count)
+    }
+
+    /// "Convert all" only when it reaches every file of several with nothing
+    /// picked out, so the scope is never a guess — and a single file is never
+    /// "all".
+    nonisolated static func convertTitle(hasSelection: Bool, files: Int) -> String {
+        hasSelection || files <= 1 ? "Convert" : "Convert all"
+    }
+
     var body: some View {
         if hasSelection || !targets.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
@@ -118,15 +129,14 @@ struct StashActionBar: View {
         }
     }
 
-    /// Convert, as one key whose menu lists the formats. "Convert all" when
-    /// nothing is selected, so the scope is never a guess.
+    /// Convert, as one key whose menu lists the formats.
     private var convertKey: some View {
         Menu {
             ForEach(targets) { target in
                 Button("To \(target.label)") { convert(to: target) }
             }
         } label: {
-            MenuKeyLabel(title: working ? "Converting…" : (hasSelection ? "Convert" : "Convert all"))
+            MenuKeyLabel(title: working ? "Converting…" : convertTitle)
         }
         .menuKey(compact: true)
         .disabled(working)

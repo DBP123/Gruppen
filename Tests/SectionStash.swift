@@ -215,6 +215,13 @@ func sectionStash() async {
 
     T.begin("D. Stash — conversion targets")
 
+    T.equal("one file on the shelf converts, not converts all",
+            StashActionBar.convertTitle(hasSelection: false, files: 1), "Convert")
+    T.equal("several with nothing picked out convert all",
+            StashActionBar.convertTitle(hasSelection: false, files: 3), "Convert all")
+    T.equal("a selection converts just itself",
+            StashActionBar.convertTitle(hasSelection: true, files: 3), "Convert")
+
     T.check("a png offers conversions",
             !FileConverter.targets(for: [URL(fileURLWithPath: "/tmp/a.png")]).isEmpty,
             FileConverter.targets(for: [URL(fileURLWithPath: "/tmp/a.png")]).map(\.label).description)
