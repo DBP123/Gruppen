@@ -108,7 +108,7 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
     /// task at a time and no more, so Activity Monitor's thread count is a
     /// sweep, and so is this one. `PROC_PIDTASKINFO` is the cheap half of
     /// `proc_pidinfo`: it does not touch the process's memory maps, which is
-    /// what makes ~190 of them affordable at 2 Hz. Measured at 0.4 ms.
+    /// what makes ~190 of them affordable every second. Measured at 0.4 ms.
     private static func census() -> (threads: Int, processes: Int) {
         var pids = [pid_t](repeating: 0, count: 8192)
         let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))

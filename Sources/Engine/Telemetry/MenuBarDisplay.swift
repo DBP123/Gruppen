@@ -101,7 +101,7 @@ extension WidgetKind {
 /// sparkline in a panel, so the same reading cannot be drawn two different
 /// shapes in two places.
 enum PlotScale {
-    /// Points across a plot: sixty samples, which is thirty seconds at 2 Hz.
+    /// Points across a plot: sixty samples, which is a minute at 1 Hz.
     static let window = 60
 
     /// `(value − min) / (max − min)` across the window, with the denominator

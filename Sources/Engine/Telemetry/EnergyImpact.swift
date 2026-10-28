@@ -173,8 +173,8 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
 final class EnergyImpactMonitor: ObservableObject {
     @Published private(set) var rows: [EnergyImpactRow] = []
 
-    /// 1 Hz. The panel itself runs at 2 Hz, but a per-second rate resampled
-    /// twice a second is mostly noise, and this sweep is the heavier one.
+    /// 1 Hz, the panel's own rate: a per-second rate resampled faster is mostly
+    /// noise, and this sweep is the heavier one.
     static let interval: TimeInterval = 1
 
     private let sampler = EnergyImpactSampler()

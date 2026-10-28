@@ -13,7 +13,7 @@ import Foundation
 /// | telemetry | in dropdown | pinned | dropdown open | module           |
 /// |-----------|-------------|--------|---------------|------------------|
 /// | off       | –           | –      | –             | does not exist   |
-/// | on        | yes         | –      | yes           | alive at 2 Hz    |
+/// | on        | yes         | –      | yes           | alive at 1 Hz    |
 /// | on        | –           | yes    | no            | alive at 0.5 Hz  |
 /// | on        | no          | no     | –             | does not exist   |
 ///
@@ -406,9 +406,8 @@ final class WidgetManager: ObservableObject {
             module.isMenuBarPinned = barPinned
             // Open dropdown wins: a pinned module the user is looking at should
             // move at the speed they are looking at it.
-            // Fastest live surface wins. The dropdown and a module's own popover
-            // are glances, so they get 2 Hz; the dashboard is a page you leave
-            // open, so on its own it gets 1 Hz.
+            // Fastest live surface wins. The dropdown, a module's own popover
+            // and the focused dashboard all run at 1 Hz; see `Telemetry.panelRate`.
             let rate: TimeInterval
             if inSharedPanel || inOwnPopover { rate = Telemetry.panelRate }
             else if onDashboard { rate = isDashboardFocused ? Telemetry.dashboardRate

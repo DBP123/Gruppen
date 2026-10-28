@@ -423,8 +423,8 @@ final class AppPowerMonitor: ObservableObject {
     @Published private(set) var reading: AppPowerSampler.Reading?
 
     /// 1.5 s, which is the window the attribution is averaged over. Slower than
-    /// the panel's 2 Hz on purpose: this is the heaviest sweep in the app, and a
-    /// per-app wattage resampled twice a second is mostly noise.
+    /// the panel's 1 Hz on purpose: this is the heaviest sweep in the app, and a
+    /// per-app wattage resampled every second is mostly noise.
     static let interval: TimeInterval = 1.5
 
     private let sampler = AppPowerSampler()

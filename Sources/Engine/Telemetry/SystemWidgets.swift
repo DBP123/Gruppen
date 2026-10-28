@@ -601,8 +601,8 @@ final class SiliconTelemetryWidget: TelemetryModule<SiliconSampler> {
 ///
 /// `proc_pid_rusage` gives cumulative CPU nanoseconds per process, so the rate
 /// is a difference — the sampler holds the previous pass. A full sweep of ~190
-/// processes measures at 0.6 ms, which at the panel's 2 Hz is around a tenth of
-/// one percent of one core.
+/// processes measures at 0.6 ms, which at the panel's 1 Hz is well under a
+/// tenth of one percent of one core.
 final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
     struct Row: Equatable, Identifiable {
         var pid: pid_t

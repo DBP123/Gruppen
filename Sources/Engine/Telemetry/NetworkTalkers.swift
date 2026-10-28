@@ -268,7 +268,7 @@ final class NetworkTalkers: @unchecked Sendable {
     ///
     /// Called on `Telemetry.queue`. The query is asynchronous, so what this
     /// returns is the result of the *previous* tick's query — one tick of lag,
-    /// which at 2 Hz is half a second and is invisible next to the fact that
+    /// which at 1 Hz is a second and is invisible next to the fact that
     /// these are averages over the interval anyway.
     func sample() -> [Talker] {
         guard started else { return [] }

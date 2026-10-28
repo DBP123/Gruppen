@@ -323,7 +323,7 @@ final class MenuBarManager: NSObject {
 extension MenuBarManager: NSPopoverDelegate {
     /// A popover dismissed by clicking away never runs through `toggleDetail`,
     /// so this is the only place that reliably hears about it — and without it
-    /// the module would keep sampling at 2 Hz behind a closed popover, which is
+    /// the module would keep sampling at the panel's rate behind a closed popover, which is
     /// exactly the leak the demand-driven rule exists to prevent.
     func popoverDidClose(_ notification: Notification) {
         guard let popover = notification.object as? NSPopover,

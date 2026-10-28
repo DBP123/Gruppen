@@ -422,9 +422,9 @@ final class PowerSampler: TelemetrySampler, @unchecked Sendable {
     ///
     /// The averages are over a *time* window rather than a sample count, because
     /// the module's rate changes with what is looking at it — 1 Hz on the
-    /// dashboard, 2 Hz in a popover, 0.5 Hz pinned. "The last sixty samples"
-    /// would mean sixty seconds, thirty seconds or two minutes depending on
-    /// where you happened to be looking.
+    /// dashboard or in a popover, 0.5 Hz pinned. "The last sixty samples" would
+    /// mean a minute or two minutes depending on where you happened to be
+    /// looking.
     ///
     /// Worth knowing before trusting the pack row's averages: the pack's flow
     /// comes from a controller that republishes once a minute, so averaging it

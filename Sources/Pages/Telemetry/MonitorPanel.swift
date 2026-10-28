@@ -7,7 +7,7 @@ import SwiftUI
 /// instrument and a frozen one: while an `NSMenu` tracks the mouse it does not
 /// let SwiftUI run an update pass, so anything inside it shows whatever it was
 /// built with and nothing after. A window keeps a normal view hierarchy, which
-/// is what lets the plots move at 2 Hz while you are looking at them.
+/// is what lets the plots move every second while you are looking at them.
 ///
 /// `MonitorPanelController` owns the window and gives `WidgetManager` the open
 /// and close signals the whole demand-driven rule hangs off — not this view,

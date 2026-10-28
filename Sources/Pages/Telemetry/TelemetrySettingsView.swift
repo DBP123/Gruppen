@@ -6,8 +6,8 @@ import SwiftUI
 ///
 /// - **The switch** is whether the module exists at all. Off means no timer,
 ///   no IORegistry handle, no SMC connection.
-/// - **Panel** puts it in the dropdown, which refreshes at 2 Hz only while it
-///   is open.
+/// - **Panel** puts it in the dropdown, which refreshes once a second only
+///   while it is open.
 /// - **Menu bar** gives it an item of its own — the one choice that costs
 ///   anything while the dropdown is shut — with its style key beside it.
 ///

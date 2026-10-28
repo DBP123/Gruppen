@@ -348,7 +348,7 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
     /// How many sensors to keep per cluster.
     ///
     /// A read is 0.15 ms, so this is the whole cost knob. Nine keys is about
-    /// 1.4 ms a tick — 0.28% of one core at the panel's 2 Hz. Keeping *all* 157
+    /// 1.4 ms a tick — 0.14% of one core at the panel's 1 Hz. Keeping *all* 157
     /// candidates this machine offers would be 24 ms a tick, which is a monitor
     /// you can feel.
     private static let sensorsPerCluster = 2

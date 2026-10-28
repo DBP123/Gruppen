@@ -21,12 +21,19 @@ enum Telemetry {
     static let queue = DispatchQueue(label: "com.dhilanpatel.gruppen.telemetry", qos: .utility)
 
     /// Points kept for a sparkline: sixty, which is the window the plots
-    /// normalise across and thirty seconds at the panel's 2 Hz.
+    /// normalise across and a minute at the panel's 1 Hz.
     static let historyLength = 60
 
-    /// The dropdown is open: 2 Hz. It holds a handful of compact wells and it is
-    /// open for seconds at a time.
-    static let panelRate: TimeInterval = 0.5
+    /// The dropdown is open: 1 Hz, the dashboard's rate.
+    ///
+    /// It was 2 Hz, and that doubled the cost of looking: rendering, not
+    /// sampling, is what the panel costs — measured, about 60% of its main
+    /// thread is SwiftUI turning eight wells of bars and plots into layers —
+    /// and every tick redraws all of them. With the panel hosted on its own,
+    /// 2 Hz averaged 1.8–3.7% of a core with spikes to 9%; 1 Hz, 0.7–1.2% with
+    /// none. It also stopped an open dropdown dragging a visible dashboard up to
+    /// 2 Hz with it, since a module runs at the fastest rate anything wants.
+    static let panelRate: TimeInterval = 1.0
     /// The dashboard is open: 1 Hz.
     ///
     /// Half the dropdown's rate, because it is a page of eight dense cards you
