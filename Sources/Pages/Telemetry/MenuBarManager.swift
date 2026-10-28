@@ -673,7 +673,16 @@ private final class MonitorPanelController {
         window = panel
 
         WidgetManager.shared.panelDidOpen()
-        panel.makeKeyAndOrderFront(nil)
+        // Ordered onto the desktop you are on, *then* made key — not
+        // `makeKeyAndOrderFront`, which goes through the app's key-window path
+        // and, with Gruppen's main window on another desktop, put the panel on
+        // that desktop instead: a click that showed nothing until you switched
+        // back. Ordering regardless is what the stash panels do, on every desktop.
+        panel.orderFrontRegardless()
+        panel.makeKey()
+        if !panel.isOnActiveSpace {
+            GroupStore.log("MENU BAR panel opened off the current desktop")
+        }
         installMonitors()
     }
 
@@ -752,13 +761,14 @@ private final class DropdownPanel: NSPanel {
                    styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered,
                    defer: false)
-        level = .popUpMenu
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         backgroundColor = .clear
         isOpaque = false
         hasShadow = true
         hidesOnDeactivate = false
         isFloatingPanel = true
+        // After `isFloatingPanel`, which rewrites `level` to `.floating`.
+        level = .popUpMenu
         animationBehavior = .none
         isMovable = false
     }
