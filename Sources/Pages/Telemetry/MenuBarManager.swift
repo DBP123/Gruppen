@@ -24,7 +24,7 @@ final class MenuBarManager: NSObject {
     /// When each popover last closed, so the click that dismissed one cannot
     /// also reopen it.
     private var dismissedAt: [WidgetKind: Date] = [:]
-    private static let reopenGuard: TimeInterval = 0.35
+    fileprivate static let reopenGuard: TimeInterval = 0.35
     private var outsideClick: Any?
     private var insideClick: Any?
 
@@ -647,10 +647,23 @@ private final class MonitorPanelController {
     /// runs, the panel is still open and this reads as a toggle rather than as
     /// a close followed immediately by an open.
     func toggle(from button: NSStatusBarButton?) {
-        guard isOpen else { open(from: button); return }
-        let sameItem = button == nil || window?.anchorButton === button
-        sameItem ? close() : open(from: button)
+        if isOpen {
+            let sameItem = button == nil || window?.anchorButton === button
+            sameItem ? close() : open(from: button)
+        } else if let lastClose, lastClose.button === button,
+                  Date().timeIntervalSince(lastClose.at) < MenuBarManager.reopenGuard {
+            // The click that just closed the panel, arriving as the button's
+            // action on mouse-up — the same guard the module popovers use.
+            self.lastClose = nil
+        } else {
+            open(from: button)
+        }
     }
+
+    /// When the panel last closed, and from which item. A click on an open
+    /// item can close the panel on mouse-down, before the button's action runs
+    /// on mouse-up; without this, that action reopened it at once.
+    private var lastClose: (button: NSStatusBarButton?, at: Date)?
 
     func open(from button: NSStatusBarButton?) {
         guard let store, let navigation, let settings, let scripts, let triggers else { return }
@@ -689,6 +702,7 @@ private final class MonitorPanelController {
     func close() {
         removeMonitors()
         guard let window, window.isVisible else { return }
+        lastClose = (window.anchorButton, Date())
         window.orderOut(nil)
         // Ordering a window out does not run SwiftUI's `onDisappear`, so the
         // close signal is given by hand — otherwise every module would keep
