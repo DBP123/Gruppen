@@ -3,7 +3,7 @@
 # build/sweep/ — read them, don't act on them blindly: every line is a
 # candidate with evidence, not a verdict.
 #
-#   Tools/sweep.sh            compiler, references, patterns, coverage
+#   Tools/sweep.sh            compiler, references, patterns, structure, coverage
 #   Tools/sweep.sh --quick    without coverage (no test run)
 #
 # Run in a normal shell: coverage runs the test suite, which needs the window
@@ -47,6 +47,8 @@ echo "3/4 Patterns — weak and repeated-work code"
     grep -rnE 'TODO|FIXME|HACK|XXX' Sources
 } > "$OUT/patterns.txt" 2>/dev/null
 echo "    → $OUT/patterns.txt"
+python3 -I Tools/structure.py . > "$OUT/structure.txt"
+echo "    long functions, large types, repeated blocks, per-tick allocation → $OUT/structure.txt"
 
 if [ "${1:-}" = "--quick" ]; then exit 0; fi
 
