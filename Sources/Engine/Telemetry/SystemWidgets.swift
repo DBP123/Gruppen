@@ -1,6 +1,5 @@
 import Darwin
 import Foundation
-import IOKit.ps
 
 // Every sampler below follows `CPUSampler`: pure C and Mach entry points, no
 // subprocess anywhere, and any counter a rate needs is held by the sampler and
@@ -442,25 +441,11 @@ final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
             reading.fans = zones.fans
         }
 
-        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
-        else { return reading }
-
-        for source in sources {
-            guard let description = IOPSGetPowerSourceDescription(blob, source)?
-                .takeUnretainedValue() as? [String: Any] else { continue }
-            guard description[kIOPSTypeKey] as? String == kIOPSInternalBatteryType else { continue }
-
-            let current = description[kIOPSCurrentCapacityKey] as? Int ?? 0
-            let maximum = description[kIOPSMaxCapacityKey] as? Int ?? 100
-            reading.batteryPercent = maximum > 0 ? Int((Double(current) / Double(maximum) * 100).rounded()) : nil
-            reading.isCharging = description[kIOPSIsChargingKey] as? Bool ?? false
-            reading.onExternalPower = (description[kIOPSPowerSourceStateKey] as? String) == kIOPSACPowerValue
-            // -1 means "still working it out", which is not worth showing.
-            let key = reading.isCharging ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey
-            if let minutes = description[key] as? Int, minutes > 0 { reading.minutesRemaining = minutes }
-            break
-        }
+        let power = PowerSource.current()
+        reading.batteryPercent = power.percent
+        reading.isCharging = power.isCharging
+        reading.onExternalPower = power.onExternalPower
+        reading.minutesRemaining = power.minutesRemaining
         return reading
     }
 }

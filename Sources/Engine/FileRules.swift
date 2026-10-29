@@ -123,6 +123,14 @@ enum FileFamily: String, Codable, CaseIterable, Identifiable {
 
 /// What the file system knows about a file beyond its name.
 enum FileFacts {
+    /// The files directly in `folder` — not folders, not hidden files. What a
+    /// rule's folder holds, for the watcher, the sweep and the editor's count.
+    static func regularFiles(in folder: URL) -> [URL] {
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
+        return contents.filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
+    }
+
     /// Where a download came from: the page and file URLs the browser wrote
     /// into `com.apple.metadata:kMDItemWhereFroms` as it saved it.
     ///

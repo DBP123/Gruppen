@@ -60,6 +60,26 @@ func sectionSequencing() async {
         await MainActor.run { coordinator.disarm() }
     }
 
+    T.begin("C. Automations — power edges")
+
+    // macOS posts a power-source change every time the charge moves, so the
+    // adapter triggers must fire on the edge, not on the notification.
+    let charging = PowerSource(percent: 60, isCharging: true, onExternalPower: true)
+    let higher = PowerSource(percent: 61, isCharging: true, onExternalPower: true)
+    let unplugged = PowerSource(percent: 61, isCharging: false, onExternalPower: false)
+    T.check("the charge moving is not the power being connected", higher.adapterEvent(since: charging) == nil)
+    T.equal("unplugging is a disconnection", unplugged.adapterEvent(since: higher), .powerDisconnected)
+    T.equal("plugging back in is a connection", higher.adapterEvent(since: unplugged), .powerConnected)
+    T.check("nothing on the first reading", charging.adapterEvent(since: nil) == nil)
+
+    let at20 = PowerSource(percent: 20, onExternalPower: false)
+    let at19 = PowerSource(percent: 19, onExternalPower: false)
+    let at18 = PowerSource(percent: 18, onExternalPower: false)
+    T.check("falling past the threshold fires", at19.fell(below: 20, since: at20))
+    T.check("sitting under it does not fire again", !at18.fell(below: 20, since: at19))
+    T.check("a Mac without a battery never falls below anything",
+            !PowerSource().fell(below: 20, since: at20))
+
     T.begin("B. Gruppen — closing order")
 
     let apps = ["Calculator", "TextEdit", "Notes"].compactMap {

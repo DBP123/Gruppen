@@ -186,9 +186,7 @@ enum ScriptRunner {
             return Outcome(files: files, message: step.kind.label)
 
         case .saveClipboardImage:
-            let folder = step.folder.isEmpty
-                ? await MainActor.run { AppSettings.shared.exportDirectory }
-                : URL(fileURLWithPath: step.folder, isDirectory: true)
+            let folder = await outputFolder(for: step)
             let data = await MainActor.run { () -> Data? in
                 guard let image = NSImage(pasteboard: .general), let tiff = image.tiffRepresentation else { return nil }
                 return NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
@@ -216,9 +214,7 @@ enum ScriptRunner {
 
         case .zip:
             guard !files.isEmpty else { throw StepError.noFiles }
-            let folder = step.folder.isEmpty
-                ? await MainActor.run { AppSettings.shared.exportDirectory }
-                : URL(fileURLWithPath: step.folder, isDirectory: true)
+            let folder = await outputFolder(for: step)
             let archive = try await StashExporter.export(
                 items: files.map { (name: $0.lastPathComponent, url: $0, text: nil) }, to: folder)
             return Outcome(files: [archive], message: archive.lastPathComponent)
@@ -293,6 +289,13 @@ enum ScriptRunner {
     }
 
     // MARK: Helpers
+
+    /// Where a step writes what it makes: the folder it names, or the stash's
+    /// export folder when it names none.
+    private static func outputFolder(for step: ScriptStep) async -> URL {
+        guard step.folder.isEmpty else { return URL(fileURLWithPath: step.folder, isDirectory: true) }
+        return await MainActor.run { AppSettings.shared.exportDirectory }
+    }
 
     /// The folder inside `folder` a file goes into: itself, a month folder
     /// (`2026-10`), or one named after the site it was downloaded from.

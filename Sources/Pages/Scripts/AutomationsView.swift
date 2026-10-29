@@ -302,15 +302,12 @@ private struct AutomationEditor: View {
     @State private var matchesNow: Int?
 
     private nonisolated static func count(_ trigger: ScriptTrigger) async -> Int? {
-        let folder = URL(fileURLWithPath: trigger.watchedFolder, isDirectory: true)
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? []
+        let files = FileFacts.regularFiles(in: URL(fileURLWithPath: trigger.watchedFolder, isDirectory: true))
         var count = 0
         for file in files {
             // Superseded by a newer edit: that count is the one to show.
             if Task.isCancelled { return nil }
-            if (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
-               trigger.admits(file) { count += 1 }
+            if trigger.admits(file) { count += 1 }
         }
         return count
     }

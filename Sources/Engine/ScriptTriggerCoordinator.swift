@@ -31,9 +31,9 @@ final class ScriptTriggerCoordinator: ObservableObject {
     /// Workspace and power observers, torn down with the arming.
     private var observers: [NSObjectProtocol] = []
     private var powerSource: CFRunLoopSource?
-    /// Last battery reading, so "below 20%" fires on the way down and not on
-    /// every notification while it sits there.
-    private var lastBatteryPercent: Int?
+    /// The last power reading, so the adapter and "battery below" triggers
+    /// fire on a change and not on every notification.
+    private var lastPower: PowerSource?
     private var isArmed = false
 
     /// Exit watchers, keyed by the pid and the script that wanted it.
@@ -151,7 +151,7 @@ final class ScriptTriggerCoordinator: ObservableObject {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), powerSource, .defaultMode)
             self.powerSource = nil
         }
-        lastBatteryPercent = nil
+        lastPower = nil
         displayWatcher?.stop(); displayWatcher = nil
         wifiWatcher?.stop(); wifiWatcher = nil
         audioWatcher?.stop(); audioWatcher = nil
@@ -191,10 +191,7 @@ final class ScriptTriggerCoordinator: ObservableObject {
     private func sweep(_ id: UUID) {
         guard let script = library.scripts.first(where: { $0.id == id }) else { return }
         let folder = URL(fileURLWithPath: script.trigger.watchedFolder, isDirectory: true)
-        let files = ((try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])) ?? [])
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
-            .filter { script.trigger.admits($0) }
+        let files = FileFacts.regularFiles(in: folder).filter { script.trigger.admits($0) }
         guard !files.isEmpty else { return }
         run(script, paths: files, source: "Rule")
     }
@@ -409,7 +406,7 @@ final class ScriptTriggerCoordinator: ObservableObject {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
             powerSource = source
         }
-        lastBatteryPercent = Self.batteryPercent()
+        lastPower = PowerSource.current()
     }
 
     private func fireSystem(_ event: ScriptTrigger.SystemEvent) {
@@ -420,22 +417,20 @@ final class ScriptTriggerCoordinator: ObservableObject {
         }
     }
 
+    /// Every power-source notification lands here, and macOS posts one each
+    /// time the charge moves — so both triggers fire on an edge, not on the
+    /// notification. "Power connected" used to fire every few minutes for as
+    /// long as the Mac was charging.
     private func handlePowerChange() {
-        let onAC = Self.isOnAC()
-        if onAC { fireSystem(.powerConnected) } else { fireSystem(.powerDisconnected) }
-
-        guard let percent = Self.batteryPercent() else { return }
-        let previous = lastBatteryPercent
-        lastBatteryPercent = percent
-        // Edge-triggered: only on the way down past the threshold, so a machine
-        // sitting at 19% does not fire on every power notification.
+        let now = PowerSource.current()
+        let before = lastPower
+        lastPower = now
+        if let event = now.adapterEvent(since: before) { fireSystem(event) }
         for script in library.scripts where script.isArmable
             && script.trigger.kind == .systemState
-            && script.trigger.systemEvent == .batteryBelow {
-            let threshold = script.trigger.threshold
-            if percent < threshold, (previous ?? threshold + 1) >= threshold {
-                fire(script.id, paths: [])
-            }
+            && script.trigger.systemEvent == .batteryBelow
+            && now.fell(below: script.trigger.threshold, since: before) {
+            fire(script.id, paths: [])
         }
     }
 
@@ -519,39 +514,6 @@ final class ScriptTriggerCoordinator: ObservableObject {
             }
         }
     }
-
-    // MARK: Power helpers
-
-    private nonisolated static func batteryPercent() -> Int? {
-        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
-        else { return nil }
-        for source in sources {
-            guard let description = IOPSGetPowerSourceDescription(blob, source)?
-                .takeUnretainedValue() as? [String: Any],
-                  let current = description[kIOPSCurrentCapacityKey] as? Int,
-                  let max = description[kIOPSMaxCapacityKey] as? Int, max > 0
-            else { continue }
-            return Int((Double(current) / Double(max)) * 100)
-        }
-        return nil
-    }
-
-    /// Read from the power source's own state rather than
-    /// `IOPSGetProvidingPowerType`, which has no Swift overlay in this SDK.
-    private nonisolated static func isOnAC() -> Bool {
-        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
-        else { return false }
-        for source in sources {
-            guard let description = IOPSGetPowerSourceDescription(blob, source)?
-                .takeUnretainedValue() as? [String: Any],
-                  let state = description[kIOPSPowerSourceStateKey] as? String
-            else { continue }
-            return state == kIOPSACPowerValue
-        }
-        return false
-    }
 }
 
 // MARK: - Folder watching
@@ -628,16 +590,7 @@ final class FolderWatcher: @unchecked Sendable {
         Task { @MainActor [weak self] in self?.onNewFiles(arrived) }
     }
 
-    private func currentFiles() -> [URL] {
-        let url = URL(fileURLWithPath: path)
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles])) ?? []
-        return contents.filter {
-            (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
-        }
-    }
+    private func currentFiles() -> [URL] { FileFacts.regularFiles(in: URL(fileURLWithPath: path)) }
 }
 
 // MARK: - Notifications
