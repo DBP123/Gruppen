@@ -31,11 +31,13 @@ struct NetworkDetail: View {
                             .foregroundStyle(Theme.orange)
                     }
                 }
+                // One scale for both, or the smaller would look like the larger.
+                let both = widget.history + widget.upHistory
                 ZStack {
                     Sparkline(values: widget.history, floor: WidgetKind.network.plotFloor,
-                              height: 30).equatable()
+                              height: 30, scale: both).equatable()
                     Sparkline(values: widget.upHistory, floor: WidgetKind.network.plotFloor,
-                              tint: Theme.orange, height: 30).equatable()
+                              tint: Theme.orange, height: 30, scale: both).equatable()
                 }
                 StatRow(label: "INTERFACES", value: "\(reading.interfaces)",
                         detail: "↓\(Format.bytes(reading.downTotal)) ↑\(Format.bytes(reading.upTotal))")

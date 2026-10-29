@@ -138,15 +138,19 @@ struct Sparkline: View, Equatable {
     var floor: Double = 0.03
     var tint: Color = Theme.trace
     var height: CGFloat = 26
+    /// What the vertical scale is taken across: `values` unless two plots are
+    /// drawn over each other, which must share one scale or the smaller would
+    /// be stretched to look like the larger.
+    var scale: [Double]? = nil
 
     nonisolated static func == (a: Sparkline, b: Sparkline) -> Bool {
-        a.values == b.values && a.floor == b.floor && a.height == b.height
+        a.values == b.values && a.floor == b.floor && a.height == b.height && a.scale == b.scale
     }
 
     var body: some View {
         GeometryReader { geometry in
             let size = geometry.size
-            let scaled = PlotScale.normalise(values, floor: floor)
+            let scaled = PlotScale.normalise(values, floor: floor, across: scale)
             let slots = max(PlotScale.window - 1, 1)
             let step = size.width / CGFloat(slots)
             // Right-aligned: a half-filled history occupies the right-hand part
@@ -203,8 +207,10 @@ private struct GridRules: View {
 
 /// A proportional bar split into labelled parts — wired, app, compressed.
 struct SegmentedBar: View {
-    struct Segment: Identifiable {
-        let id = UUID()
+    /// Identified by position: a segment is "the second part of the bar", and
+    /// a fresh id each time the bar is built made every segment look new on
+    /// every tick.
+    struct Segment {
         var fraction: Double
         var tint: Color
     }
@@ -215,7 +221,8 @@ struct SegmentedBar: View {
     var body: some View {
         GeometryReader { geometry in
             HStack(spacing: 1) {
-                ForEach(segments) { segment in
+                ForEach(segments.indices, id: \.self) { index in
+                    let segment = segments[index]
                     Rectangle()
                         .fill(segment.tint)
                         .frame(width: max(geometry.size.width * CGFloat(min(max(segment.fraction, 0), 1)), 0))

@@ -60,7 +60,7 @@ def strip_comments(text):
 
 
 DECL = re.compile(
-    r"^(?P<indent>\s*)(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|fileprivate|internal|public|open|static|final|"
+    r"^(?P<indent>[ \t]*)(?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|fileprivate|internal|public|open|static|final|"
     r"override|nonisolated|mutating|lazy|weak|unowned|convenience|required|@objc|class)\s+)*"
     r"(?P<kind>struct|class|enum|protocol|actor|func|var|let|case|typealias)\s+(?P<name>[A-Za-z_]\w*)",
     re.M)
@@ -99,8 +99,11 @@ for path, original in sources.items():
         if kind in ("var", "let") and indent > 4:
             continue
         line = text[:match.start()].count("\n") + 1
-        declared = len(re.findall(rf"\b(?:struct|class|enum|protocol|actor|func|var|let|case|typealias)\s+{name}\b", corpus))
-        uses = counts.get(name, 0) - declared
+        # A private declaration can only be used in its own file, so only that
+        # file counts — a name common elsewhere would otherwise hide it.
+        scope = text if re.match(r"\s*(?:@\w+\s+)*(?:\w+\s+)*(?:private|fileprivate)\s", match.group(0)) else corpus
+        declared = len(re.findall(rf"\b(?:struct|class|enum|protocol|actor|func|var|let|case|typealias)\s+{name}\b", scope))
+        uses = len(re.findall(rf"\b{name}\b", scope)) - declared if scope is text else counts.get(name, 0) - declared
         if uses <= 0:
             candidates.append((os.path.relpath(path, ROOT), line, kind, name))
 

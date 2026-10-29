@@ -105,9 +105,12 @@ enum PlotScale {
     static let window = 60
 
     /// `(value − min) / (max − min)` across the window, with the denominator
-    /// held at `floor` when the real range is smaller. Returns 0…1.
-    static func normalise(_ values: [Double], floor: Double) -> [Double] {
-        guard let low = values.min(), let high = values.max() else { return [] }
+    /// held at `floor` when the real range is smaller. Returns 0…1. `across`
+    /// takes the minimum and maximum from another set — two plots sharing one
+    /// scale — and defaults to `values` itself.
+    static func normalise(_ values: [Double], floor: Double, across scale: [Double]? = nil) -> [Double] {
+        let scale = scale ?? values
+        guard !values.isEmpty, let low = scale.min(), let high = scale.max() else { return [] }
         let span = max(high - low, floor)
         guard span > 0 else { return values.map { _ in 0 } }
         return values.map { min(max(($0 - low) / span, 0), 1) }

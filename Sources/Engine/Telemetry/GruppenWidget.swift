@@ -200,6 +200,9 @@ protocol GruppenWidget: AnyObject {
     var isPanelActive: Bool { get set }
     /// This module keeps a live readout in the menu bar itself.
     var isMenuBarPinned: Bool { get set }
+    /// The module's own popover is open — the one place that shows the figures
+    /// a sampler only gathers on request.
+    var isDetailOpen: Bool { get set }
     /// The menu bar one-liner, or nil while nothing has been read yet.
     var pinnedSummary: String? { get }
     /// The two figures a stacked menu bar item shows, top over bottom.
@@ -241,11 +244,20 @@ protocol TelemetrySampler: AnyObject, Sendable {
     /// them here. Without this, "unchecked means destroyed" would be a claim
     /// about a Swift object and not about the hardware.
     func teardown()
+
+    /// Called on `Telemetry.queue` when the module's own popover opens or
+    /// closes. For figures only the popover shows that cost something to
+    /// gather — per-app network traffic, a census of every process — so they
+    /// are not gathered for a panel well or a menu bar item that never shows
+    /// them.
+    func setDetailed(_ detailed: Bool)
 }
 
 extension TelemetrySampler {
     /// Most samplers hold nothing but numbers.
     func teardown() {}
+    /// And show the same figures everywhere.
+    func setDetailed(_ detailed: Bool) {}
 }
 
 /// Everything a module does that is not specific to what it measures: hold the
@@ -275,6 +287,13 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
 
     var isPanelActive = false
     var isMenuBarPinned = false
+    var isDetailOpen = false {
+        didSet {
+            guard isDetailOpen != oldValue else { return }
+            let sampler = self.sampler, detailed = isDetailOpen
+            Telemetry.queue.async { sampler.setDetailed(detailed) }
+        }
+    }
 
     private let sampler: S
     private(set) var rate: TimeInterval?

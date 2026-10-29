@@ -483,10 +483,13 @@ private struct NetworkWell: View {
                         }
                         .frame(width: 100, alignment: .leading)
 
+                        // One scale for both, or the smaller would look like the larger.
+                        let both = widget.history + widget.upHistory
                         ZStack {
-                            Sparkline(values: widget.history, floor: WidgetKind.network.plotFloor, height: 30).equatable()
+                            Sparkline(values: widget.history, floor: WidgetKind.network.plotFloor,
+                                      height: 30, scale: both).equatable()
                             Sparkline(values: widget.upHistory, floor: WidgetKind.network.plotFloor,
-                                      tint: Theme.orange, height: 30).equatable()
+                                      tint: Theme.orange, height: 30, scale: both).equatable()
                         }
                     }
                     HStack(spacing: 10) {
@@ -499,12 +502,6 @@ private struct NetworkWell: View {
                 Placeholder()
             }
         }
-    }
-
-    /// Both plots share a scale, or the smaller of the two would look like the
-    /// larger. A floor of 64 KB/s stops idle noise filling the well.
-    private var ceiling: Double {
-        max((widget.history + widget.upHistory).max() ?? 0, 64_000)
     }
 }
 

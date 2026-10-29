@@ -221,8 +221,9 @@ final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
         var downTotal: UInt64
         var upTotal: UInt64
         var interfaces: Int
-        /// Who is actually using it, busiest first. Empty when per-process
-        /// attribution is unavailable — see `NetworkTalkers`.
+        /// Who is actually using it, busiest first. Gathered only while the
+        /// module's popover is open, the one place it is shown; empty otherwise,
+        /// and when per-process attribution is unavailable — see `NetworkTalkers`.
         var talkers: [NetworkTalkers.Talker] = []
     }
 
@@ -239,15 +240,19 @@ final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
     static let talkerCount = 10
 
     private var previous: (down: UInt64, up: UInt64, at: Date)?
-    /// The per-process subscription is opened on the first sample and closed by
-    /// `teardown`, on the same terms as every other kernel object here.
+    /// The per-process subscription: open only while the popover shows it, and
+    /// closed with it or by `teardown`, on the same terms as every other kernel
+    /// object here. It was the costliest thing the network module did, and the
+    /// panel well and the menu bar item never show it.
     private var attribution = false
 
-    func teardown() {
-        guard attribution else { return }
-        attribution = false
-        NetworkTalkers.shared?.stop()
+    func setDetailed(_ detailed: Bool) {
+        guard detailed != attribution else { return }
+        attribution = detailed
+        detailed ? NetworkTalkers.shared?.start() : NetworkTalkers.shared?.stop()
     }
+
+    func teardown() { setDetailed(false) }
 
     deinit {
         guard attribution else { return }
@@ -256,11 +261,7 @@ final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
 
     func sample() -> Reading? {
         guard let (down, up, interfaces) = Self.counters() else { return nil }
-        if !attribution {
-            attribution = true
-            NetworkTalkers.shared?.start()
-        }
-        let talkers = NetworkTalkers.shared?.sample() ?? []
+        let talkers = attribution ? NetworkTalkers.shared?.sample() ?? [] : []
         let now = Date()
         defer { previous = (down, up, now) }
         guard let previous else { return nil }

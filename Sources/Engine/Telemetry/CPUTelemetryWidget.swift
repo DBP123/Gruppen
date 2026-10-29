@@ -27,6 +27,8 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
         var performanceCores: [Double] = []
         var efficiencyCores: [Double] = []
         /// Threads and processes alive right now, across the whole machine.
+        /// Counted only while the module's popover is open, the one place they
+        /// are shown; zero otherwise.
         var threads: Int
         var processes: Int
 
@@ -45,6 +47,11 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
     }
 
     private var previous: [Ticks] = []
+    /// The census walks every process on the machine, so it runs only for the
+    /// popover that shows it.
+    private var detailed = false
+
+    func setDetailed(_ detailed: Bool) { self.detailed = detailed }
 
     func sample() -> Reading? {
         guard let current = Self.read() else { return nil }
@@ -90,7 +97,7 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
             values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
         }
 
-        let census = Self.census()
+        let census = detailed ? Self.census() : (threads: 0, processes: 0)
         return Reading(user: userTicks / allTicks,
                        system: systemTicks / allTicks,
                        cores: cores,

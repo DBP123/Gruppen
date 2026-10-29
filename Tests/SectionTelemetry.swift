@@ -10,8 +10,10 @@ private func onQueue<R>(_ body: @escaping () -> R) -> R {
 func sectionTelemetry() {
     T.begin("E. Telemetry — every sampler answers on this machine")
 
-    // CPU: a rate, so the first tick has no interval to divide by.
+    // CPU: a rate, so the first tick has no interval to divide by. Detailed,
+    // as its popover is, so the census is counted too.
     let cpu = CPUSampler()
+    onQueue { cpu.setDetailed(true) }
     let first = onQueue { cpu.sample() }
     T.check("CPU reports nothing on the first tick", first == nil,
             "a rate needs two samples")
@@ -263,6 +265,25 @@ func sectionTelemetry() {
             "\(fired) ticks in 0.55 s at 0.1 s")
     Thread.sleep(forTimeInterval: 0.3)
     T.equal("unregistering stops it dead", box.value, fired)
+
+    T.begin("B. Telemetry — popover-only figures")
+
+    // The census walks every process, so only the CPU popover pays for it.
+    let census = CPUSampler()
+    _ = census.sample()
+    Thread.sleep(forTimeInterval: 0.05)
+    let plain = census.sample()
+    T.check("without the popover, no process census", plain.map { $0.threads == 0 && $0.processes == 0 } ?? true,
+            "\(plain?.threads ?? -1) threads")
+    census.setDetailed(true)
+    Thread.sleep(forTimeInterval: 0.05)
+    let detailed = census.sample()
+    T.check("with it, the census is counted", detailed.map { $0.threads > 0 && $0.processes > 0 } ?? false,
+            "\(detailed?.threads ?? -1) threads, \(detailed?.processes ?? -1) processes")
+
+    // Two plots drawn over each other share one scale.
+    T.equal("a plot scales across its own values", PlotScale.normalise([0, 5, 10], floor: 1), [0, 0.5, 1])
+    T.equal("or across a shared set", PlotScale.normalise([0, 5], floor: 1, across: [0, 5, 10]), [0, 0.5])
 }
 
 /// Thread-safe tick counter for the clock test.

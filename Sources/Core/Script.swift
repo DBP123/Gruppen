@@ -883,9 +883,6 @@ struct ScriptAction: Codable, Hashable {
     /// writes over it.
     var isCustomised: Bool = false
 
-    /// Whether this action runs a subprocess at all.
-    var isProcess: Bool { kind != .webhook }
-
     /// The interpreter that will actually be used.
     ///
     /// A shell command *is* zsh, whatever the stored interpreter says. Without
