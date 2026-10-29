@@ -54,9 +54,8 @@ final class GroupStore: ObservableObject {
     }
 
     private var isLoading = false
-    private var hotkeySignature: [UUID: Shortcut] = [:]
     private var settleTask: Task<Void, Never>?
-    private var hotkeysSuspended = false
+    private let hotkeys = HotkeyBindings(owner: "gruppen")
     /// Group id -> token for a force quit that is waiting out its grace
     /// period. Reactivating a group clears its token, which cancels the kill.
     private var pendingKills: [UUID: Set<UUID>] = [:]
@@ -267,53 +266,27 @@ final class GroupStore: ObservableObject {
     /// drive one Gruppe, so it is taken off any group already holding it.
     func setShortcut(_ shortcut: Shortcut?, for group: AppGroup) {
         guard let index = index(of: group) else { return }
-        if let shortcut {
-            for other in groups.indices where other != index && groups[other].shortcut == shortcut {
-                groups[other].shortcut = nil
-            }
-        }
-        groups[index].shortcut = shortcut
+        HotkeyBindings.assign(shortcut, at: index, in: &groups, \.shortcut)
     }
 
     /// Releases every hotkey while the recorder is listening, so pressing a
     /// combination that is already bound records it instead of firing it.
-    func suspendHotkeys() {
-        hotkeysSuspended = true
-        HotkeyCenter.shared.unregisterAll(owner: "gruppen")
-        hotkeySignature = [:]
-    }
+    func suspendHotkeys() { hotkeys.suspend() }
 
     func resumeHotkeys() {
-        hotkeysSuspended = false
+        hotkeys.resume()
         syncHotkeys()
     }
 
-    /// Re-registers global hotkeys, but only when the bindings actually
-    /// changed — `groups` publishes on every keystroke of a rename.
     func syncHotkeys() {
-        guard !hotkeysSuspended else { return }
-        let signature = Dictionary(uniqueKeysWithValues: groups.compactMap { group in
-            group.shortcut.map { (group.id, $0) }
-        })
-        guard signature != hotkeySignature else { return }
-        hotkeySignature = signature
-
-        HotkeyCenter.shared.unregisterAll(owner: "gruppen")
-        var unavailable: Set<UUID> = []
-        for group in groups {
-            guard let shortcut = group.shortcut else { continue }
-            let groupID = group.id
-            let claimed = HotkeyCenter.shared.register(shortcut, owner: "gruppen") { [weak self] in
-                Task { @MainActor in
-                    guard let self, let live = self.groups.first(where: { $0.id == groupID }) else { return }
-                    Self.log("HOTKEY \(shortcut.display) -> \"\(live.name)\"")
-                    self.toggle(live)
-                }
-            }
-            if !claimed {
-                unavailable.insert(groupID)
-                Self.log("shortcut \(shortcut.display) unavailable for \"\(group.name)\"")
-            }
+        let bindings = Dictionary(uniqueKeysWithValues: groups.compactMap { group in group.shortcut.map { (group.id, $0) } })
+        guard let unavailable = hotkeys.sync(bindings, press: { [weak self] id in
+            guard let self, let live = self.groups.first(where: { $0.id == id }) else { return }
+            Self.log("HOTKEY \(live.shortcut?.display ?? "?") -> \"\(live.name)\"")
+            self.toggle(live)
+        }) else { return }
+        for group in groups where unavailable.contains(group.id) {
+            Self.log("shortcut \(group.shortcut?.display ?? "?") unavailable for \"\(group.name)\"")
         }
         unavailableShortcuts = unavailable
     }

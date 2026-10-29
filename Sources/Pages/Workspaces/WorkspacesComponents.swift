@@ -227,3 +227,22 @@ struct NoResults: View {
         .padding(.vertical, 60)
     }
 }
+
+/// An app as a row names it: its icon and its name, with the bundle it
+/// resolves to on hover.
+struct AppLabel: View {
+    let app: AppEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(nsImage: app.icon)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 22, height: 22)
+            Text(app.name)
+                .font(Theme.sans(13))
+                .foregroundStyle(Theme.textPrimary)
+                .help(app.bundleID.isEmpty ? app.path : app.bundleID)
+        }
+    }
+}

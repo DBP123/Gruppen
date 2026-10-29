@@ -128,6 +128,57 @@ private let hotkeyEventHandler: EventHandlerUPP = { _, event, _ in
     return noErr
 }
 
+/// One subsystem's hotkeys — the Gruppen, or the workspace profiles — kept
+/// in step with its items.
+///
+/// Re-registered only when the bindings actually change, because the items
+/// publish on every keystroke of a rename; released while the recorder
+/// listens, so pressing a combination that is already bound records it rather
+/// than firing it.
+@MainActor
+final class HotkeyBindings {
+    private let owner: String
+    private var registered: [UUID: Shortcut] = [:]
+    private var suspended = false
+
+    init(owner: String) { self.owner = owner }
+
+    func suspend() {
+        suspended = true
+        HotkeyCenter.shared.unregisterAll(owner: owner)
+        registered = [:]
+    }
+
+    func resume() { suspended = false }
+
+    /// Registers `bindings` if they differ from what is registered, calling
+    /// `press` with an item's id when its combination is pressed. Returns the
+    /// items whose combination macOS or another app already holds — or nil
+    /// when nothing needed doing, so the caller's published state is left alone.
+    func sync(_ bindings: [UUID: Shortcut], press: @escaping @MainActor (UUID) -> Void) -> Set<UUID>? {
+        guard !suspended, bindings != registered else { return nil }
+        registered = bindings
+        HotkeyCenter.shared.unregisterAll(owner: owner)
+        var unavailable: Set<UUID> = []
+        for (id, shortcut) in bindings where !HotkeyCenter.shared.register(shortcut, owner: owner, handler: { press(id) }) {
+            unavailable.insert(id)
+        }
+        return unavailable
+    }
+
+    /// A combination drives one item: binding it to the item at `index` takes
+    /// it off any other.
+    static func assign<Item>(_ shortcut: Shortcut?, at index: Int, in items: inout [Item],
+                             _ keyPath: WritableKeyPath<Item, Shortcut?>) {
+        if let shortcut {
+            for other in items.indices where other != index && items[other][keyPath: keyPath] == shortcut {
+                items[other][keyPath: keyPath] = nil
+            }
+        }
+        items[index][keyPath: keyPath] = shortcut
+    }
+}
+
 /// Captures the next key press for the shortcut recorder.
 ///
 /// A *local* monitor is enough — the recorder only runs while our own window

@@ -68,8 +68,7 @@ final class WorkspaceEngine: ObservableObject {
     var scriptRunner: ((UUID) -> Bool)?
 
     private var isLoading = false
-    private var hotkeySignature: [UUID: Shortcut] = [:]
-    private var hotkeysSuspended = false
+    private let hotkeys = HotkeyBindings(owner: "workspace")
     private var activation: Task<Void, Never>?
 
     private let fileURL: URL
@@ -156,45 +155,20 @@ final class WorkspaceEngine: ObservableObject {
 
     // MARK: Hotkeys
 
-    /// Same ownership convention as the Gruppe store and the script coordinator:
-    /// a subsystem re-registering its own bindings must never drop anyone else's.
-    private static let hotkeyOwner = "workspace"
-
-    func suspendHotkeys() {
-        hotkeysSuspended = true
-        HotkeyCenter.shared.unregisterAll(owner: Self.hotkeyOwner)
-        hotkeySignature = [:]
-    }
+    func suspendHotkeys() { hotkeys.suspend() }
 
     func resumeHotkeys() {
-        hotkeysSuspended = false
+        hotkeys.resume()
         syncHotkeys()
     }
 
-    /// Re-registers, but only when the bindings actually changed — `profiles`
-    /// publishes on every keystroke of a rename.
     func syncHotkeys() {
-        guard !hotkeysSuspended else { return }
-        let signature = Dictionary(uniqueKeysWithValues: profiles.compactMap { profile in
-            profile.shortcut.map { (profile.id, $0) }
-        })
-        guard signature != hotkeySignature else { return }
-        hotkeySignature = signature
-
-        HotkeyCenter.shared.unregisterAll(owner: Self.hotkeyOwner)
-        var unavailable: Set<UUID> = []
-        for profile in profiles {
-            guard let shortcut = profile.shortcut else { continue }
-            let id = profile.id
-            let claimed = HotkeyCenter.shared.register(shortcut, owner: Self.hotkeyOwner) { [weak self] in
-                Task { @MainActor in
-                    guard let self, let live = self.profiles.first(where: { $0.id == id }) else { return }
-                    GroupStore.log("HOTKEY \(shortcut.display) -> profile \"\(live.name)\"")
-                    self.activate(live)
-                }
-            }
-            if !claimed { unavailable.insert(id) }
-        }
+        let bindings = Dictionary(uniqueKeysWithValues: profiles.compactMap { profile in profile.shortcut.map { (profile.id, $0) } })
+        guard let unavailable = hotkeys.sync(bindings, press: { [weak self] id in
+            guard let self, let live = self.profiles.first(where: { $0.id == id }) else { return }
+            GroupStore.log("HOTKEY \(live.shortcut?.display ?? "?") -> profile \"\(live.name)\"")
+            self.activate(live)
+        }) else { return }
         unavailableShortcuts = unavailable
     }
 
@@ -204,12 +178,7 @@ final class WorkspaceEngine: ObservableObject {
     /// that is what `unavailableShortcuts` reports.
     func setShortcut(_ shortcut: Shortcut?, for profile: WorkspaceProfile) {
         guard let index = profiles.firstIndex(where: { $0.id == profile.id }) else { return }
-        if let shortcut {
-            for other in profiles.indices where other != index && profiles[other].shortcut == shortcut {
-                profiles[other].shortcut = nil
-            }
-        }
-        profiles[index].shortcut = shortcut
+        HotkeyBindings.assign(shortcut, at: index, in: &profiles, \.shortcut)
     }
 
     // MARK: Activation
