@@ -78,4 +78,29 @@ func sectionTools() async {
     T.equal("a day", Stamp.day(date), "2026-03-07")
     T.equal("a month", Stamp.month(date), "2026-03")
     T.equal("a moment, 24-hour", Stamp.moment(date), "2026-03-07-140509")
+
+    T.begin("H. Tools — the whole machine, and who shows the detail")
+
+    // proc_listallpids counts pids, not bytes: read as bytes, every sweep saw
+    // the first quarter of the machine. The oldest process and this one sit at
+    // opposite ends of the list, so both are only there when all of it is.
+    let pids = allProcesses()
+    T.check("every process is listed, launchd included", pids.contains(1), "\(pids.count) pids")
+    T.check("and this one", pids.contains(getpid()))
+    T.check("each once", Set(pids).count == pids.count)
+
+    // The dashboard's cards show a module's full detail, as its popover does,
+    // so a visible dashboard must ask for the detail-only figures too.
+    let detail = await MainActor.run { () -> (Bool?, Bool?) in
+        let widgets = WidgetManager.shared
+        widgets.setArmed(.network, true)
+        widgets.dashboardDidAppear()
+        let shown = widgets.module(NetworkTelemetryWidget.self, .network)?.showsDetail
+        widgets.dashboardDidDisappear()
+        let hidden = widgets.module(NetworkTelemetryWidget.self, .network)?.showsDetail
+        widgets.shutdown()
+        return (shown, hidden)
+    }
+    T.check("a visible dashboard shows a module's detail", detail.0 == true, "\(String(describing: detail.0))")
+    T.check("and stops when it goes", detail.1 != true, "\(String(describing: detail.1))")
 }

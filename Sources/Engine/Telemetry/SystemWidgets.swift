@@ -34,7 +34,8 @@ final class MemorySampler: TelemetrySampler, @unchecked Sendable {
         var decompressRate: Double
         /// Pages the kernel had to take back from a process, per second.
         var faultRate: Double
-        /// The five processes holding the most memory, largest first.
+        /// The processes holding the most memory, largest first. Built only
+        /// while the module's detail is on screen, where it is shown.
         var consumers: [MemoryConsumer] = []
 
         var used: UInt64 { wired &+ app &+ compressed }
@@ -78,6 +79,14 @@ final class MemorySampler: TelemetrySampler, @unchecked Sendable {
     /// pressure figures above it still move every tick; only the table waits.
     private var consumersCache: (rows: [MemoryConsumer], at: Date)?
     private static let consumersInterval: TimeInterval = 5
+    private var detailed = false
+
+    /// Off, the table goes with it, so coming back rebuilds it rather than
+    /// showing rows from whenever the detail was last open.
+    func setDetailed(_ detailed: Bool) {
+        self.detailed = detailed
+        if !detailed { consumersCache = nil }
+    }
     /// Rows the consumers table holds; it shows four and scrolls the rest.
     /// Names are paid for only for these, about a microsecond each.
     static let consumerCount = 10
@@ -94,20 +103,16 @@ final class MemorySampler: TelemetrySampler, @unchecked Sendable {
     /// Monitor's "Memory" column shows, and the one that actually corresponds to
     /// pressure on the machine.
     private static func consumers() -> [MemoryConsumer] {
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        guard bytes > 0 else { return [] }
-
+        let pids = allProcesses()
         // Footprints first, names afterwards. `proc_name` is the most expensive
         // call in this sweep — about 0.18 ms across every pid — and nearly all
         // of those names would be sorted straight off the end of the list.
         // Collecting the cheap number for everyone and paying for the string
         // only for the rows kept is the same trick `EnergyImpactSampler` uses.
         var weights: [(pid: pid_t, footprint: UInt64)] = []
-        weights.reserveCapacity(Int(bytes) / MemoryLayout<pid_t>.size)
-        for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
-            let pid = pids[index]
-            guard pid > 0, let usage = processUsage(of: pid), usage.ri_phys_footprint > 0 else { continue }
+        weights.reserveCapacity(pids.count)
+        for pid in pids {
+            guard let usage = processUsage(of: pid), usage.ri_phys_footprint > 0 else { continue }
             weights.append((pid, usage.ri_phys_footprint))
         }
         weights.sort { $0.footprint > $1.footprint }
@@ -168,8 +173,7 @@ final class MemorySampler: TelemetrySampler, @unchecked Sendable {
             }
         }
 
-        if consumersCache == nil
-            || now.timeIntervalSince(consumersCache!.at) >= Self.consumersInterval {
+        if detailed, consumersCache.map({ now.timeIntervalSince($0.at) >= Self.consumersInterval }) ?? true {
             consumersCache = (Self.consumers(), now)
         }
 
@@ -222,8 +226,8 @@ final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
         var upTotal: UInt64
         var interfaces: Int
         /// Who is actually using it, busiest first. Gathered only while the
-        /// module's popover is open, the one place it is shown; empty otherwise,
-        /// and when per-process attribution is unavailable — see `NetworkTalkers`.
+        /// module's detail is on screen, where it is shown; empty otherwise, and
+        /// when per-process attribution is unavailable — see `NetworkTalkers`.
         var talkers: [NetworkTalkers.Talker] = []
     }
 
@@ -240,10 +244,10 @@ final class NetworkSampler: TelemetrySampler, @unchecked Sendable {
     static let talkerCount = 10
 
     private var previous: (down: UInt64, up: UInt64, at: Date)?
-    /// The per-process subscription: open only while the popover shows it, and
-    /// closed with it or by `teardown`, on the same terms as every other kernel
-    /// object here. It was the costliest thing the network module did, and the
-    /// panel well and the menu bar item never show it.
+    /// The per-process subscription: open only while the module's detail shows
+    /// it, and closed with it or by `teardown`, on the same terms as every
+    /// other kernel object here. It was the costliest thing the network module
+    /// did, and the panel well and the menu bar item never show it.
     private var attribution = false
 
     func setDetailed(_ detailed: Bool) {
@@ -376,10 +380,8 @@ final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
         var efficiencyCores: AppleSiliconTelemetry.Zone?
         var gpuDie: AppleSiliconTelemetry.Zone?
         var batteryDie: AppleSiliconTelemetry.Zone?
-        /// Watts drawn by the whole machine.
         /// Actual against commanded speed, per fan.
         var fans: [AppleSiliconTelemetry.Fan] = []
-
 
         var stateLabel: String {
             switch state {
@@ -417,22 +419,10 @@ final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
 
     /// The SMC is opened on the first sample rather than at init, so a module
     /// that is created and never started never touches the hardware.
-    private var hardware = false
+    private let smc = SMCClaim()
 
-    func teardown() {
-        guard hardware else { return }
-        hardware = false
-        AppleSiliconTelemetry.shared.release()
-    }
+    func teardown() { smc.release() }
 
-    /// A safety net. `stopFetching` always tears a sampler down, but one that is
-    /// dropped without it would hold the SMC connection open for the life of
-    /// the process. The release goes back to the sampling queue, because that
-    /// serial queue is what makes the reference count safe.
-    deinit {
-        guard hardware else { return }
-        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
-    }
 
     func sample() -> Reading? {
         let process = ProcessInfo.processInfo
@@ -443,10 +433,7 @@ final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
                               onExternalPower: true,
                               minutesRemaining: nil)
 
-        if !hardware {
-            hardware = true
-            AppleSiliconTelemetry.shared.acquire()
-        }
+        smc.take()
         if let zones = AppleSiliconTelemetry.shared.thermal() {
             reading.cpuDie = zones.cpuDie
             reading.efficiencyCores = zones.efficiencyCores
@@ -454,7 +441,6 @@ final class ThermalSampler: TelemetrySampler, @unchecked Sendable {
             reading.batteryDie = zones.battery
             reading.fans = zones.fans
         }
-
 
         guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
@@ -537,7 +523,7 @@ final class SiliconSampler: TelemetrySampler, @unchecked Sendable {
         var imageEngine: AppleSiliconTelemetry.EngineState?
     }
 
-    private var hardware = false
+    private let smc = SMCClaim()
 
     /// Apple Silicon has no separate video memory — the GPU allocates from the
     /// same unified pool as everything else, so the ceiling a VRAM figure should
@@ -547,26 +533,11 @@ final class SiliconSampler: TelemetrySampler, @unchecked Sendable {
     /// GPU core count, read once from the device tree.
     static let cores: Int = AppleSiliconTelemetry.graphicsCoreCount
 
-    func teardown() {
-        guard hardware else { return }
-        hardware = false
-        AppleSiliconTelemetry.shared.release()
-    }
+    func teardown() { smc.release() }
 
-    /// A safety net. `stopFetching` always tears a sampler down, but one that is
-    /// dropped without it would hold the SMC connection open for the life of
-    /// the process. The release goes back to the sampling queue, because that
-    /// serial queue is what makes the reference count safe.
-    deinit {
-        guard hardware else { return }
-        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
-    }
 
     func sample() -> Reading? {
-        if !hardware {
-            hardware = true
-            AppleSiliconTelemetry.shared.acquire()
-        }
+        smc.take()
         let silicon = AppleSiliconTelemetry.shared
         guard let graphics = silicon.graphics() else { return nil }
         return Reading(gpu: graphics.utilization,
@@ -601,9 +572,9 @@ final class SiliconTelemetryWidget: TelemetryModule<SiliconSampler> {
 /// The processes using the most CPU, without asking `ps` or `top`.
 ///
 /// `proc_pid_rusage` gives cumulative CPU nanoseconds per process, so the rate
-/// is a difference — the sampler holds the previous pass. A full sweep of ~190
-/// processes measures at 0.6 ms, which at the panel's 1 Hz is well under a
-/// tenth of one percent of one core.
+/// is a difference — the sampler holds the previous pass. A full sweep — 1,069
+/// processes here — measures at 1.2 ms, about a tenth of one percent of one
+/// core at the panel's 1 Hz.
 final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
     struct Row: Equatable, Identifiable {
         var pid: pid_t
@@ -626,22 +597,19 @@ final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
     private var previousAt: Date?
 
     func sample() -> Reading? {
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        guard bytes > 0 else { return nil }
-        let count = Int(bytes) / MemoryLayout<pid_t>.size
+        let pids = allProcesses()
+        guard !pids.isEmpty else { return nil }
 
         let now = Date()
         let elapsed = previousAt.map { now.timeIntervalSince($0) } ?? 0
         var current: [pid_t: Double] = [:]
-        current.reserveCapacity(count)
+        current.reserveCapacity(pids.count)
         var candidates: [(pid: pid_t, cpu: Double, footprint: UInt64)] = []
-        candidates.reserveCapacity(count)
+        candidates.reserveCapacity(pids.count)
         var live = 0
 
-        for index in 0..<count {
-            let pid = pids[index]
-            guard pid > 0, let usage = processUsage(of: pid) else { continue }
+        for pid in pids {
+            guard let usage = processUsage(of: pid) else { continue }
             live += 1
             let cpuTime = processCPUSeconds(usage)
             current[pid] = cpuTime
@@ -658,7 +626,7 @@ final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
 
         candidates.sort { $0.cpu > $1.cpu }
 
-        // Naming happens *after* the sort, for five pids instead of all ~190 —
+        // Naming happens *after* the sort, for five pids instead of all of them —
         // the same trick `EnergyImpactSampler` and `MemorySampler.consumers()`
         // use. `proc_name` is the single most expensive call in this sweep, and
         // nine tenths of those names would be sorted straight off the end of
@@ -675,6 +643,25 @@ final class ProcessSampler: TelemetrySampler, @unchecked Sendable {
         }
         return rows.isEmpty ? nil : Reading(top: rows, total: live)
     }
+}
+
+/// Every process on the machine, by pid.
+///
+/// `proc_listallpids` returns how many pids it wrote — its header says bytes,
+/// and the kernel does not. Measured: 1,075 on a machine running 1,074
+/// processes. Five sweeps here read it as bytes and divided by four, so every
+/// one of them looked at the first 268 pids and missed three quarters of the
+/// machine: the process list, the thread census, the memory and energy tables.
+/// Sized by asking first, with headroom for anything launched in between.
+func allProcesses() -> [pid_t] {
+    let capacity = proc_listallpids(nil, 0)
+    guard capacity > 0 else { return [] }
+    var buffer = [pid_t](repeating: 0, count: Int(capacity) + 64)
+    let written = buffer.withUnsafeMutableBufferPointer {
+        proc_listallpids($0.baseAddress, Int32($0.count * MemoryLayout<pid_t>.size))
+    }
+    guard written > 0 else { return [] }
+    return buffer.prefix(min(Int(written), buffer.count)).filter { $0 > 0 }
 }
 
 /// Cumulative CPU time and memory footprint for a process.
@@ -791,10 +778,7 @@ enum Format {
     /// characters more than there is room for on a menu bar panel, and calls
     /// zero "Zero KB".
     static func bytes(_ value: UInt64) -> String {
-        let units: [(UInt64, String)] = [
-            (1 << 40, "TB"), (1 << 30, "GB"), (1 << 20, "MB"), (1 << 10, "KB"),
-        ]
-        for (scale, suffix) in units where value >= scale {
+        for (scale, suffix) in byteUnits where value >= scale {
             let scaled = Double(value) / Double(scale)
             return scaled >= 100
                 ? String(format: "%.0f %@", scaled, suffix)
@@ -802,6 +786,10 @@ enum Format {
         }
         return "\(value) B"
     }
+
+    private static let byteUnits: [(UInt64, String)] = [
+        (1 << 40, "TB"), (1 << 30, "GB"), (1 << 20, "MB"), (1 << 10, "KB"),
+    ]
 
     /// Throughput. Deliberately short — this has to fit in a menu bar.
     static func rate(_ bytesPerSecond: Double) -> String {
@@ -820,9 +808,7 @@ enum Format {
 
     /// Thousands separated, because a four-digit RPM reads as a year otherwise.
     static func rpm(_ value: Double) -> String {
-        let rounded = Int(max(value, 0).rounded())
-        guard rounded >= 1000 else { return "\(rounded)" }
-        return "\(rounded / 1000),\(String(format: "%03d", rounded % 1000))"
+        count(Int(max(value, 0).rounded()))
     }
 
     static func percent(_ fraction: Double, decimals: Int = 0) -> String {

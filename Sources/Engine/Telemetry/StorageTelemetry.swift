@@ -152,8 +152,8 @@ final class StorageSampler: TelemetrySampler, @unchecked Sendable {
     /// two capacity keys together, because the system walks caches and snapshots
     /// to answer it rather than reading a number APFS already has. At 2 Hz that
     /// one key was costing more than the entire rest of the app's telemetry
-    /// combined, which is why it is on a fifteen-second clock instead of the
-    /// sampling tick.
+    /// combined, which is why it is on its own slow clock (`purgeableInterval`)
+    /// instead of the sampling tick.
     private static func purgeable(freeNow free: UInt64) -> UInt64 {
         guard let values = try? URL(fileURLWithPath: "/")
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),

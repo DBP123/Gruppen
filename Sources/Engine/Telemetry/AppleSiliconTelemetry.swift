@@ -141,17 +141,9 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
         case performance = "P"
         case efficiency = "E"
 
-        var label: String { self == .performance ? "P" : "E" }
+        var label: String { rawValue }
     }
 
-    /// Which cluster each logical CPU belongs to, indexed by the same number
-    /// `host_processor_info` uses.
-    ///
-    /// Read once from the device tree and kept: the layout of a Mac does not
-    /// change while it is running. Apple labels the cluster "P" for performance
-    /// and either "E" or "M" for the efficiency cluster depending on the
-    /// generation — this machine says "M" — so anything that is not "P" is the
-    /// efficiency side.
     /// GPU cores, from the accelerator's own device-tree node. Read once.
     static let graphicsCoreCount: Int = {
         let service = IOServiceGetMatchingService(kIOMainPortDefault,
@@ -167,6 +159,14 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
         return 0
     }()
 
+    /// Which cluster each logical CPU belongs to, indexed by the same number
+    /// `host_processor_info` uses.
+    ///
+    /// Read once from the device tree and kept: the layout of a Mac does not
+    /// change while it is running. Apple labels the cluster "P" for performance
+    /// and either "E" or "M" for the efficiency cluster depending on the
+    /// generation — this machine says "M" — so anything that is not "P" is the
+    /// efficiency side.
     static let coreLayout: [CoreKind] = {
         let root = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/cpus")
         guard root != 0 else { return [] }
@@ -284,7 +284,7 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
         func hottest(_ keys: [SMCKey]) -> Zone? {
             keys.compactMap { key -> Zone? in
                 guard let value = read(key), value > 5, value < 130 else { return nil }
-                return Zone(key: Self.name(of: key.code), celsius: value)
+                return Zone(key: key.name, celsius: value)
             }
             .max { $0.celsius < $1.celsius }
         }
@@ -311,7 +311,7 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
             efficiencyCores: hottest(sensors.efficiency),
             gpuDie: hottest(sensors.graphics),
             battery: sensors.battery.flatMap { key in
-                read(key).flatMap { $0 > 5 && $0 < 130 ? Zone(key: Self.name(of: key.code), celsius: $0) : nil }
+                read(key).flatMap { $0 > 5 && $0 < 130 ? Zone(key: key.name, celsius: $0) : nil }
             },
             fans: fans)
         // A machine that answered nothing at all is worth reporting as nothing,
@@ -323,10 +323,60 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
     // MARK: SMC plumbing
 
     /// A key whose type and size have already been looked up, so reading it is
-    /// one call instead of two.
+    /// one call instead of two — and whose name and value format are worked out
+    /// then too, rather than as strings on every read of every tick.
     private struct SMCKey {
         var code: UInt32
         var info: SMCKeyInfoData
+        var name: String
+        var format: ValueFormat?
+    }
+
+    /// The encodings these keys use. The SMC's integers are big-endian while
+    /// its floats are not, which is the sort of thing that looks like it works:
+    /// reading the key count the wrong way round turned 3,486 into
+    /// 2,651,750,400 and sent the discovery walk off for the rest of the
+    /// afternoon.
+    private enum ValueFormat {
+        case float, fixed48_16, uint8, uint16, uint32
+
+        init?(type: String) {
+            switch type.trimmingCharacters(in: .whitespaces) {
+            case "flt": self = .float
+            case "ioft": self = .fixed48_16
+            case "ui8", "si8": self = .uint8
+            case "ui16": self = .uint16
+            case "ui32": self = .uint32
+            default: return nil
+            }
+        }
+
+        /// Bytes this format needs before it can be read at all.
+        var width: Int {
+            switch self {
+            case .uint8: return 1
+            case .uint16: return 2
+            case .float, .uint32: return 4
+            case .fixed48_16: return 8
+            }
+        }
+
+        func decode(_ bytes: UnsafeRawBufferPointer) -> Double? {
+            guard bytes.count >= width else { return nil }
+            func little(_ count: Int) -> UInt64 {
+                (0..<count).reversed().reduce(0) { ($0 << 8) | UInt64(bytes[$1]) }
+            }
+            func big(_ count: Int) -> UInt64 {
+                (0..<count).reduce(0) { ($0 << 8) | UInt64(bytes[$1]) }
+            }
+            switch self {
+            case .float: return Double(Float(bitPattern: UInt32(little(4))))
+            case .fixed48_16: return Double(little(8)) / 65536
+            case .uint8: return Double(bytes[0])
+            case .uint16: return Double(big(2))
+            case .uint32: return Double(big(4))
+            }
+        }
     }
 
     private struct SensorSet {
@@ -401,13 +451,13 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
     }
 
     private func sensorNames(_ set: SensorSet) -> [String] {
-        set.performance.map { "p:\(Self.name(of: $0.code))" }
-            + set.efficiency.map { "e:\(Self.name(of: $0.code))" }
-            + set.graphics.map { "g:\(Self.name(of: $0.code))" }
-            + set.fansActual.map { "f:\(Self.name(of: $0.code))" }
-            + set.fansTarget.map { "t:\(Self.name(of: $0.code))" }
-            + (set.battery.map { ["b:\(Self.name(of: $0.code))"] } ?? [])
-            + (set.power.map { ["w:\(Self.name(of: $0.code))"] } ?? [])
+        set.performance.map { "p:\($0.name)" }
+            + set.efficiency.map { "e:\($0.name)" }
+            + set.graphics.map { "g:\($0.name)" }
+            + set.fansActual.map { "f:\($0.name)" }
+            + set.fansTarget.map { "t:\($0.name)" }
+            + (set.battery.map { ["b:\($0.name)"] } ?? [])
+            + (set.power.map { ["w:\($0.name)"] } ?? [])
     }
 
     /// Walks every key the SMC has and keeps the few that matter.
@@ -467,7 +517,7 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
         func ordered(_ group: Int) -> [SMCKey] {
             candidates.filter { $0.prefixGroup == group }
                 .map(\.key)
-                .sorted { Self.name(of: $0.code) < Self.name(of: $1.code) }
+                .sorted { $0.name < $1.name }
         }
         set.fansActual = ordered(3)
         set.fansTarget = ordered(6)
@@ -498,49 +548,21 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
         input.key = Self.code(for: name)
         input.data8 = Self.commandReadKeyInfo
         guard let output = call(&input) else { return nil }
-        return SMCKey(code: input.key, info: output.keyInfo)
+        return SMCKey(code: input.key, info: output.keyInfo, name: name,
+                      format: ValueFormat(type: Self.name(of: output.keyInfo.dataType)))
     }
 
     /// Reads a key whose type is already known. This is the only SMC call that
     /// happens inside the sampling loop.
     private func read(_ key: SMCKey) -> Double? {
+        guard let format = key.format else { return nil }
         var input = SMCParamStruct()
         input.key = key.code
         input.keyInfo = key.info
         input.data8 = Self.commandReadBytes
         guard let output = call(&input) else { return nil }
-
-        let size = Int(key.info.dataSize)
-        let bytes = withUnsafeBytes(of: output.bytes) { Array($0.prefix(min(size, 32))) }
-        switch Self.name(of: key.info.dataType).trimmingCharacters(in: .whitespaces) {
-        case "flt":
-            guard bytes.count >= 4 else { return nil }
-            var pattern: UInt32 = 0
-            for offset in (0..<4).reversed() { pattern = (pattern << 8) | UInt32(bytes[offset]) }
-            return Double(Float(bitPattern: pattern))
-        case "ioft":
-            // 48.16 fixed point, little endian.
-            guard bytes.count >= 8 else { return nil }
-            var raw: UInt64 = 0
-            for offset in (0..<8).reversed() { raw = (raw << 8) | UInt64(bytes[offset]) }
-            return Double(raw) / 65536
-        // The SMC's integers are big-endian while its floats are not, which is
-        // the sort of thing that looks like it works: reading the key count the
-        // wrong way round turned 3,486 into 2,651,750,400 and sent the
-        // discovery walk off for the rest of the afternoon.
-        case "ui8", "si8":
-            return bytes.first.map(Double.init)
-        case "ui16":
-            guard bytes.count >= 2 else { return nil }
-            return Double((UInt16(bytes[0]) << 8) | UInt16(bytes[1]))
-        case "ui32":
-            guard bytes.count >= 4 else { return nil }
-            var raw: UInt32 = 0
-            for byte in bytes.prefix(4) { raw = (raw << 8) | UInt32(byte) }
-            return Double(raw)
-        default:
-            return nil
-        }
+        let size = min(Int(key.info.dataSize), 32)
+        return withUnsafeBytes(of: output.bytes) { format.decode(UnsafeRawBufferPointer(rebasing: $0.prefix(size))) }
     }
 
     private func call(_ input: inout SMCParamStruct) -> SMCParamStruct? {
@@ -573,6 +595,35 @@ final class AppleSiliconTelemetry: @unchecked Sendable {
     private static let commandReadBytes: UInt8 = 5
     private static let commandKeyByIndex: UInt8 = 8
     private static let commandReadKeyInfo: UInt8 = 9
+}
+
+// MARK: - A sampler's claim on it
+
+/// One sampler's claim on the shared connection. Taken on the first sample, so
+/// a module that is built and never started never touches the hardware; given
+/// back on teardown. A sampler dropped without one would hold the SMC open for
+/// the life of the process, so `deinit` gives it back too — through the
+/// sampling queue, whose serial order is what keeps the count safe without a
+/// lock, and why `held` needs none either.
+final class SMCClaim: @unchecked Sendable {
+    private var held = false
+
+    func take() {
+        guard !held else { return }
+        held = true
+        AppleSiliconTelemetry.shared.acquire()
+    }
+
+    func release() {
+        guard held else { return }
+        held = false
+        AppleSiliconTelemetry.shared.release()
+    }
+
+    deinit {
+        guard held else { return }
+        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
+    }
 }
 
 // MARK: - The SMC's wire format

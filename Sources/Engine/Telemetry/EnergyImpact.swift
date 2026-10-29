@@ -20,9 +20,8 @@ struct EnergyImpactRow: Equatable, Identifiable {
 /// cost a `fork`, an `exec`, a dynamic-link pass and a page-in of a whole binary
 /// per sample — far more energy than the thing being measured, which is a
 /// ridiculous way to run a battery monitor. This reads the same kernel counters
-/// `top` reads, in-process: measured at 0.6 ms over ~190 processes on a quiet
-/// machine and 2.0 ms with three browsers working, once per second, and only
-/// while the panel is open.
+/// `top` reads, in-process: measured at 1.0 ms over 1,069 processes, once per
+/// second, and only while the panel is open.
 ///
 /// ## The arithmetic
 ///
@@ -86,10 +85,9 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
     private var previousAt: Date?
 
     func sample() -> Reading? {
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        guard bytes > 0 else { return nil }
-        let count = Int(bytes) / MemoryLayout<pid_t>.size
+        let pids = allProcesses()
+        guard !pids.isEmpty else { return nil }
+        let count = pids.count
 
         let now = Date()
         let elapsed = previousAt.map { now.timeIntervalSince($0) } ?? 0
@@ -98,10 +96,9 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
         var scored: [(pid: pid_t, cpu: Double, wakeups: Double, score: Double)] = []
         scored.reserveCapacity(count)
 
-        for index in 0..<count {
-            let pid = pids[index]
+        for pid in pids {
             // Processes owned by another user refuse; there are always a few.
-            guard pid > 0, let usage = processUsage(of: pid) else { continue }
+            guard let usage = processUsage(of: pid) else { continue }
             let cpuTime = processCPUSeconds(usage)
             let wakeups = usage.ri_pkg_idle_wkups
             current[pid] = Baseline(cpu: cpuTime, wakeups: wakeups)
@@ -129,7 +126,7 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
 
         scored.sort { $0.score > $1.score }
 
-        // Naming happens *after* the sort, for ten pids instead of all ~190.
+        // Naming happens *after* the sort, for ten pids instead of all of them.
         // `proc_name` is the single most expensive call in the sweep — 0.18 ms
         // across every pid, against 0.56 ms for the rusage walk itself — and
         // nine out of ten of those names would be sorted straight off the end

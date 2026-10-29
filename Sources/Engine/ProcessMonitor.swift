@@ -131,21 +131,7 @@ final class ProcessMonitor: @unchecked Sendable {
     }
 
     /// Every pid on the system, as a set of `Int32`.
-    static func currentPids() -> Set<pid_t> {
-        let capacity = proc_listallpids(nil, 0)
-        guard capacity > 0 else { return [] }
-        var buffer = [pid_t](repeating: 0, count: Int(capacity) + 32)
-        let filled = buffer.withUnsafeMutableBufferPointer { pointer -> Int32 in
-            proc_listallpids(pointer.baseAddress,
-                             Int32(pointer.count * MemoryLayout<pid_t>.size))
-        }
-        guard filled > 0 else { return [] }
-        // Measured: the fill call reports a *count* on this platform, but the
-        // header documents bytes. Clamping to the buffer makes both readings
-        // safe, and the zero filter drops the slack either way.
-        let usable = min(Int(filled), buffer.count)
-        return Set(buffer.prefix(usable).filter { $0 > 0 })
-    }
+    static func currentPids() -> Set<pid_t> { Set(allProcesses()) }
 
     /// Whether a process answers to `name`, by either of the two names it has.
     ///

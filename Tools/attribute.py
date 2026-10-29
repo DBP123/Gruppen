@@ -19,6 +19,17 @@ BINARY = sys.argv[2] if len(sys.argv) > 2 else "gruppen-bench"
 
 IDLE = ("mach_msg2_trap", "__workq_kernreturn", "__psynch_cvwait", "__semwait_signal",
         "kevent", "__select", "__ulock_wait", "start_wqthread", "thread_start")
+# A Mach message is a wait when a run loop or a queue is parked in it — and
+# work when it is a synchronous call into a kernel driver, which is every SMC
+# and IORegistry read. Those are charged to the calling thread, so they count.
+DRIVER_CALL = ("IOConnectCall", "io_connect_method", "IORegistryEntry", "IOServiceGetMatching",
+               "io_registry", "io_service")
+
+
+def is_idle(path):
+    if not name(path[-1]).startswith(IDLE):
+        return False
+    return not any(marker in frame for frame in path for marker in DRIVER_CALL)
 # Innermost ancestor wins, so these read from most to least specific.
 MAIN_BUCKETS = [
     ("RunningAppTracker", "running-app refresh"),
@@ -73,14 +84,14 @@ per_thread, main, ours = {}, {}, {}
 for thread, entries in threads(lines):
     label = re.sub(r"Thread_\d+:?\s*", "", thread) or thread
     for count, path in leaves(entries):
-        if name(path[-1]).startswith(IDLE):
+        if is_idle(path):
             continue
         per_thread[label] = per_thread.get(label, 0) + count
         own = [name(f) for f in path if f"(in {BINARY})" in f
                and not re.search(r"thunk|partial apply|deduplicated|\.main\(\)|^main\b", name(f))]
         if own:
             ours[own[-1]] = ours.get(own[-1], 0) + count
-        if "Main Thread" in thread:
+        if "Main Thread" in thread or "com.apple.main-thread" in thread:
             bucket = next((b for f in reversed(path) for key, b in MAIN_BUCKETS if key in f), "other")
             main[bucket] = main.get(bucket, 0) + count
 

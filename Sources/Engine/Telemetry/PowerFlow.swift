@@ -224,22 +224,6 @@ struct PowerFlow: Equatable {
         return Int((hours * 60).rounded())
     }
 
-    /// Reads the pack. Nil on a machine with no battery.
-    ///
-    /// One `IORegistryEntryCreateCFProperties` rather than a property at a time:
-    /// the whole node comes back in a single round trip, and picking eight keys
-    /// out of it individually costs eight.
-    /// What the wall is actually supplying.
-    ///
-    /// `SystemPowerIn` is metered by the battery controller, and it stops
-    /// reporting once the pack is full: a plugged-in Mac that has finished
-    /// charging reads 0 while the adapter is quite happily carrying the whole
-    /// machine. Taken literally that printed "+0.0 W" next to a running laptop,
-    /// which is the one figure on this panel that was plainly wrong.
-    ///
-    /// So on mains, when the reported number is absent or zero, the input is
-    /// reconstructed from what it must be: everything the system is burning,
-    /// plus anything going into the cell.
     /// What the adapter is supplying.
     ///
     /// **Measured, not derived — and that is a correction of a mistake.**
@@ -317,6 +301,11 @@ struct PowerFlow: Equatable {
         return max(reportedSystem ?? ((reportedInput ?? 0) - pack), 0)
     }
 
+    /// Reads the pack. Nil on a machine with no battery.
+    ///
+    /// One `IORegistryEntryCreateCFProperties` rather than a property at a time:
+    /// the whole node comes back in a single round trip, and picking eight keys
+    /// out of it individually costs eight.
     static func read(liveDraw: Double? = liveSystemDraw()) -> PowerFlow? {
         BatteryRegistry.read().flatMap { flow(from: $0, liveDraw: liveDraw) }
     }
@@ -379,10 +368,7 @@ struct PowerFlow: Equatable {
         return PowerFlow(
             systemLoad: load,
             batteryPower: batteryWatts,
-            // Derived from the live draw rather than read, so the three rows of
-            // the power tree add up on screen. `SystemPowerIn` is the controller's
-            // own figure for the same thing and would disagree with the live one
-            // by however much the machine's load has changed in the last minute.
+            // Measured where the controller reports it; see `adapterInput`.
             adapterInput: Self.adapterInput(reported: inputWatts, system: load,
                                             battery: batteryWatts, plugged: plugged),
             adapterRating: (adapter["Watts"] as? NSNumber)?.doubleValue,
@@ -464,9 +450,9 @@ final class PowerSampler: TelemetrySampler, @unchecked Sendable {
 
     /// The last read of the pack controller, and when it was taken.
     ///
-    /// Two IORegistry property fetches — `read()` and `condition()` — against a
-    /// node that republishes once a minute. At the panel's 2 Hz that was 240
-    /// fetches per change. Held for `controllerTTL` instead.
+    /// A fetch of the battery node, which republishes once a minute. Read every
+    /// tick at the panel's old 2 Hz that was 120 fetches per change; held for
+    /// `controllerTTL` instead.
     private var cachedFlow: PowerFlow?
     private var cachedExtras: (cycles: Int?, health: Double?, celsius: Double?)?
     private var cachedAt: Date?
@@ -490,21 +476,21 @@ final class PowerSampler: TelemetrySampler, @unchecked Sendable {
     ///
     /// Opened on the first sample rather than at init, so a module that is
     /// built and never started never touches the hardware.
-    private var hardware = false
+    private let smc = SMCClaim()
 
     func sample() -> Reading? {
-        if !hardware {
-            hardware = true
-            AppleSiliconTelemetry.shared.acquire()
-        }
+        smc.take()
         // The live half, every tick: this is the figure that actually moves.
         let draw = PowerFlow.liveSystemDraw()
 
         let stale = cachedAt.map { Date().timeIntervalSince($0) >= PowerFlow.controllerTTL } ?? true
         if stale || cachedFlow == nil {
-            guard let flow = PowerFlow.read(liveDraw: draw) else { return nil }
+            // One read of the node for both: the flow and the pack's condition
+            // come off the same properties, and fetching them is the cost.
+            guard let battery = BatteryRegistry.read(),
+                  let flow = PowerFlow.flow(from: battery, liveDraw: draw) else { return nil }
             cachedFlow = flow
-            cachedExtras = PowerFlow.condition()
+            cachedExtras = PowerFlow.condition(of: battery)
             cachedAt = Date()
         }
         guard var flow = cachedFlow, let extras = cachedExtras else { return nil }
@@ -566,26 +552,14 @@ final class PowerSampler: TelemetrySampler, @unchecked Sendable {
         history.removeAll(keepingCapacity: false)
         peakDraw = 0
         peakPack = 0
-        guard hardware else { return }
-        hardware = false
-        AppleSiliconTelemetry.shared.release()
+        smc.release()
     }
 
-    /// A safety net, the same one the thermal and GPU samplers carry.
-    /// `stopFetching` always tears a sampler down, but one dropped without it
-    /// would hold the SMC connection open for the life of the process. The
-    /// release goes back to the sampling queue, because that serial queue is
-    /// what makes the reference count safe without a lock.
-    deinit {
-        guard hardware else { return }
-        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
-    }
 }
 
 extension PowerFlow {
     /// Cycle count, state of health, and cell temperature.
-    static func condition() -> (cycles: Int?, health: Double?, celsius: Double?) {
-        guard let battery = BatteryRegistry.read() else { return (nil, nil, nil) }
+    static func condition(of battery: BatteryRegistry) -> (cycles: Int?, health: Double?, celsius: Double?) {
         // Health is what the pack can still hold against what it shipped with.
         let health = battery.designmAh.flatMap { design in
             battery.capacitymAh.map { min($0 / design, 1) }

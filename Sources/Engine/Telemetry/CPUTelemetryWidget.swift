@@ -27,8 +27,8 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
         var performanceCores: [Double] = []
         var efficiencyCores: [Double] = []
         /// Threads and processes alive right now, across the whole machine.
-        /// Counted only while the module's popover is open, the one place they
-        /// are shown; zero otherwise.
+        /// Counted only while the module's detail is on screen, where they are
+        /// shown; zero otherwise.
         var threads: Int
         var processes: Int
 
@@ -47,8 +47,8 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
     }
 
     private var previous: [Ticks] = []
-    /// The census walks every process on the machine, so it runs only for the
-    /// popover that shows it.
+    /// The census walks every process on the machine, so it runs only while
+    /// the detail that shows it is on screen.
     private var detailed = false
 
     func setDetailed(_ detailed: Bool) { self.detailed = detailed }
@@ -114,19 +114,14 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
     /// There is no single call for this — the kernel will tell you about one
     /// task at a time and no more, so Activity Monitor's thread count is a
     /// sweep, and so is this one. `PROC_PIDTASKINFO` is the cheap half of
-    /// `proc_pidinfo`: it does not touch the process's memory maps, which is
-    /// what makes ~190 of them affordable every second. Measured at 0.4 ms.
+    /// `proc_pidinfo`: it does not touch the process's memory maps. Still, it
+    /// is one call per process — 3.3 ms over 1,069 — which is why it runs only
+    /// while the detail that shows it is on screen.
     private static func census() -> (threads: Int, processes: Int) {
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        guard bytes > 0 else { return (0, 0) }
-
         var threads = 0, processes = 0
         var info = proc_taskinfo()
         let size = Int32(MemoryLayout<proc_taskinfo>.size)
-        for index in 0..<(Int(bytes) / MemoryLayout<pid_t>.size) {
-            let pid = pids[index]
-            guard pid > 0 else { continue }
+        for pid in allProcesses() {
             processes += 1
             // Anything owned by another user simply refuses; it still counts as
             // a process, it just cannot be asked how many threads it has.

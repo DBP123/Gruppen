@@ -16,8 +16,12 @@
 #                   Tools/attribute.py
 #
 # Run in a normal shell: it needs the window server, `top` and `sample`.
-# Why medians: the same build measures 0.7% one minute and 1.9% the next, and
-# `top`'s one-second windows show 5–8% seconds that `sample` does not back up.
+# How a run is scored: the mean of its seconds with the highest tenth dropped.
+# Not the median — 1 Hz work lands in alternate one-second windows of `top`, so
+# half the seconds read 0 and a median says nothing happened. Not the plain
+# mean either — `top` shows 5–8% seconds that `sample` does not back up, and
+# trimming the top tenth removes them. Runs are then compared by median,
+# because the same build scores 0.7% one minute and 1.9% the next.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source sdk.sh
@@ -53,7 +57,7 @@ measure() {
     kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null || true
 }
 
-echo "building $A and $B…"
+echo "building ${A} and ${B}…"
 BIN_A=$(build "$A")
 BIN_B=$([ "$B" = "$A" ] && echo "$BIN_A" || build "$B")
 
@@ -63,17 +67,21 @@ for round in $(seq 1 "$ROUNDS"); do
         profile=""
         [ -n "${SAMPLE:-}" ] && [ "$round" = 1 ] && profile="$OUT/sample-$SURFACE-$side.txt"
         measure "$binary" "$OUT/run-$side-$round.txt" "$profile"
-        printf "  round %d %s  median %s%%\n" "$round" "$side" \
-            "$(sort -n "$OUT/run-$side-$round.txt" | awk '{v[NR]=$1} END {print v[int((NR+1)/2)]}')"
+        printf "  round %d %s  %s%%\n" "$round" "$side" "$(python3 -I -c '
+import sys; v = sorted(float(x) for x in open(sys.argv[1]).read().split())
+v = v[:max(1, len(v) - len(v) // 10)]; print(f"{sum(v) / len(v):.2f}")' "$OUT/run-$side-$round.txt")"
     done
 done
 
 python3 -I - "$OUT" "$ROUNDS" "$SURFACE" "$A" "$B" <<'EOF'
 import statistics, sys
 out, rounds, surface, a, b = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
+def score(path):
+    values = sorted(float(x) for x in open(path).read().split())
+    kept = values[:max(1, len(values) - len(values) // 10)]
+    return sum(kept) / len(kept)
 def runs(side):
-    return [statistics.median(float(x) for x in open(f"{out}/run-{side}-{r}.txt").read().split())
-            for r in range(1, rounds + 1)]
+    return [score(f"{out}/run-{side}-{r}.txt") for r in range(1, rounds + 1)]
 ra, rb = runs("a"), runs("b")
 ma, mb = statistics.median(ra), statistics.median(rb)
 overlap = max(min(ra), min(rb)) <= min(max(ra), max(rb))

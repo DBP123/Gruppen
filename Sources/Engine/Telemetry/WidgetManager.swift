@@ -404,7 +404,9 @@ final class WidgetManager: ObservableObject {
             modules[kind] = module
             module.isPanelActive = panelActive
             module.isMenuBarPinned = barPinned
-            module.isDetailOpen = inOwnPopover
+            // The popover and the dashboard card are the two views of a
+            // module's full detail.
+            module.showsDetail = inOwnPopover || onDashboard
             // Open dropdown wins: a pinned module the user is looking at should
             // move at the speed they are looking at it.
             // Fastest live surface wins. The dropdown, a module's own popover

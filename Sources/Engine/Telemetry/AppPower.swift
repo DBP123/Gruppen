@@ -185,7 +185,7 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
     /// labelled "(live)" was the controller's once-a-minute figure the whole time
     /// whenever the power card ran on its own. This fold can be opened with
     /// nothing else alive beside it, so it acquires too.
-    private var hardware = false
+    private let smc = SMCClaim()
 
     /// Cached pack reading for the `packMeter` path, on the same TTL
     /// `PowerSampler` uses: the controller node republishes about once a minute,
@@ -200,15 +200,11 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
     }
 
     func sample() -> Reading? {
-        if !hardware {
-            hardware = true
-            AppleSiliconTelemetry.shared.acquire()
-        }
+        smc.take()
 
-        var pids = [pid_t](repeating: 0, count: 8192)
-        let bytes = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        guard bytes > 0 else { return nil }
-        let count = Int(bytes) / MemoryLayout<pid_t>.size
+        let pids = allProcesses()
+        guard !pids.isEmpty else { return nil }
+        let count = pids.count
 
         let now = Date()
         let elapsed = previousAt.map { now.timeIntervalSince($0) } ?? 0
@@ -220,10 +216,9 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
         busy.reserveCapacity(count)
         var total = 0.0
 
-        for slot in 0..<count {
-            let pid = pids[slot]
+        for pid in pids {
             // Anything owned by another user refuses; there are always a few.
-            guard pid > 0, let usage = processUsage(of: pid) else { continue }
+            guard let usage = processUsage(of: pid) else { continue }
             let cpuTime = processCPUSeconds(usage)
             current[pid] = cpuTime
             if let parent = Self.parent(of: pid) { parents[pid] = parent }
@@ -289,19 +284,9 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
         previousAt = nil
         cachedFlow = nil
         cachedAt = nil
-        guard hardware else { return }
-        hardware = false
-        AppleSiliconTelemetry.shared.release()
+        smc.release()
     }
 
-    /// The safety net every SMC-holding sampler in this app carries: a sampler
-    /// dropped without `teardown()` would hold the connection open for the life
-    /// of the process. The release goes back to the serial queue, because that is
-    /// what makes the reference count safe without a lock.
-    deinit {
-        guard hardware else { return }
-        Telemetry.queue.async { AppleSiliconTelemetry.shared.release() }
-    }
 
     // MARK: - The package figure
 
@@ -376,7 +361,7 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
     ///
     /// `PROC_PIDTBSDINFO` is the cheap half of `proc_pidinfo` for this purpose —
     /// like `PROC_PIDTASKINFO` it does not walk the process's memory maps, which
-    /// is what makes ~190 of them affordable at this rate. A short read is
+    /// is what makes a thousand of them affordable at this rate. A short read is
     /// treated as no answer rather than as a zero parent: `proc_pidinfo` returns
     /// the bytes it wrote, and anything less than the whole struct means the
     /// fields were not all filled in.
