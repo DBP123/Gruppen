@@ -26,6 +26,38 @@ final class ShelfState: ObservableObject, Identifiable {
         case removedByHand
     }
 
+    /// What a stash does on losing its last file — the notch tray and the
+    /// floating stashes alike.
+    enum EmptiedResponse: Equatable {
+        /// The files went somewhere, and the stash goes with them.
+        case close
+        /// Emptied with the remove keys, so the pointer is still on it: closing
+        /// now would pull the stash out from under the hand. It goes once the
+        /// pointer has moved clear of it.
+        case closeOnLeaving
+        /// Kept until its close key.
+        case stay
+
+        /// How far past the stash's edge the pointer may stray before an
+        /// emptied stash closes: room for a hand that overshoots after clicking
+        /// a small key, without the stash lingering once you have plainly
+        /// moved on.
+        static let leaveMargin: CGFloat = 24
+
+        static func to(_ emptying: Emptying, closesWhenEmpty: Bool) -> Self {
+            guard closesWhenEmpty else { return .stay }
+            switch emptying {
+            case .filesLeft: return .close
+            case .removedByHand: return .closeOnLeaving
+            }
+        }
+    }
+
+    /// Whether anything has ever been put on this shelf. One that never held
+    /// anything was opened for a drop that may not come, and goes when the
+    /// drag ends; one that has is only closed by emptying or its close key.
+    private(set) var hasBeenFilled: Bool
+
     /// Called when the shelf goes from holding something to holding nothing.
     /// Not called for a shelf that was never filled, which is what lets a
     /// speculatively-opened shelf sit there waiting for a drop instead of
@@ -35,6 +67,7 @@ final class ShelfState: ObservableObject, Identifiable {
     init(id: UUID = UUID(), items: [StashItem] = []) {
         self.id = id
         self.items = items
+        hasBeenFilled = !items.isEmpty
     }
 
     var isEmpty: Bool { items.isEmpty }
@@ -42,6 +75,7 @@ final class ShelfState: ObservableObject, Identifiable {
     func add(_ newItems: [StashItem]) {
         guard !newItems.isEmpty else { return }
         items.append(contentsOf: newItems)
+        hasBeenFilled = true
     }
 
     /// Takes `item` off the shelf. `byHand` is for a file deleted with its own
@@ -122,9 +156,10 @@ final class ShelfState: ObservableObject, Identifiable {
 /// Owns every floating shelf on screen.
 ///
 /// A shake spawns a *new* shelf with its own window, its own state and its own
-/// identity, so you can carry several piles at once. A shelf destroys itself
-/// when it is emptied, when it is closed, or when it was opened speculatively
-/// and the drag ended without anything being dropped on it.
+/// identity, so you can carry several piles at once. A shelf goes when it is
+/// closed, when it is emptied and the "Close stash when empty" setting is on,
+/// or when it was opened speculatively and the drag ended without anything
+/// being dropped on it.
 @MainActor
 final class ShelfWindowManager: ObservableObject {
     static let shared = ShelfWindowManager()
@@ -160,16 +195,25 @@ final class ShelfWindowManager: ObservableObject {
         let controller = FloatingShelfController(state: state, anchor: point,
                                                  onDestroy: { [weak self] id in self?.destroyShelf(id: id) },
                                                  onHide: { [weak self] id in self?.hide(id) })
-        // Emptying a shelf closes it, however it emptied: an empty shelf you
-        // have already used is just a box in the way.
         // The id, not the state: the state owns this closure, and capturing it
         // here would keep every closed shelf alive.
-        state.onEmptied = { [weak self, id = state.id] _ in
-            Task { @MainActor in self?.destroyShelf(id: id, scaling: true) }
+        state.onEmptied = { [weak self, id = state.id] emptying in
+            Task { @MainActor in self?.shelfEmptied(id, emptying) }
         }
         activeShelves[state.id] = controller
         controller.present(store: store)
         return state.id
+    }
+
+    /// Read at the moment the shelf empties, so a change to the setting
+    /// applies at once.
+    private func shelfEmptied(_ id: UUID, _ emptying: ShelfState.Emptying) {
+        guard let controller = activeShelves[id] else { return }
+        switch ShelfState.EmptiedResponse.to(emptying, closesWhenEmpty: AppSettings.shared.stashClosesWhenEmpty) {
+        case .close: destroyShelf(id: id, scaling: true)
+        case .closeOnLeaving: controller.closeWhenPointerLeaves()
+        case .stay: break
+        }
     }
 
     func destroyShelf(id: UUID, scaling: Bool = false) {
@@ -215,10 +259,12 @@ final class ShelfWindowManager: ObservableObject {
     }
 
     /// Called when a drag session ends. A shelf that was opened by a shake but
-    /// never received anything fades out rather than lingering.
+    /// never received anything fades out rather than lingering. One that has
+    /// been used and emptied is not speculative: whether it stays is the
+    /// setting's call, made when it emptied.
     func dismissEmptySpeculativeShelves() {
         for (id, controller) in activeShelves
-        where controller.state.isEmpty && !controller.state.isTargeted && !hiddenIDs.contains(id) {
+        where !controller.state.hasBeenFilled && !controller.state.isTargeted && !hiddenIDs.contains(id) {
             destroyShelf(id: id)
         }
     }
@@ -237,6 +283,8 @@ final class FloatingShelfController {
     private let onDestroy: (UUID) -> Void
     private let onHide: (UUID) -> Void
     private var isHidden = false
+    /// Held while a shelf emptied by hand waits for the pointer to move away.
+    private var leaveWatch: PointerLeaveWatch?
 
     init(state: ShelfState, anchor: NSPoint,
          onDestroy: @escaping (UUID) -> Void, onHide: @escaping (UUID) -> Void) {
@@ -289,6 +337,8 @@ final class FloatingShelfController {
     /// centre on the way out — used when the last item is dragged off, so the
     /// shelf visibly follows the thing that was on it rather than blinking away.
     func dismiss(scaling: Bool = false, completion: @escaping @MainActor @Sendable () -> Void) {
+        leaveWatch?.cancel()
+        leaveWatch = nil
         guard let panel else { completion(); return }
         let collapsed = NSRect(x: panel.frame.midX, y: panel.frame.midY,
                                width: 0, height: 0).insetBy(dx: -8, dy: -6)
@@ -304,6 +354,19 @@ final class FloatingShelfController {
                 completion()
             }
         }
+    }
+
+    /// Closes the shelf once the pointer has moved clear of it — unless
+    /// something was dropped back on it meanwhile.
+    func closeWhenPointerLeaves() {
+        leaveWatch?.cancel()
+        let watch = PointerLeaveWatch(region: { [weak self] in self?.panel?.frame },
+                                      margin: ShelfState.EmptiedResponse.leaveMargin) { [weak self] in
+            guard let self, self.state.isEmpty, !self.state.isTargeted else { return }
+            self.onDestroy(self.state.id)
+        }
+        leaveWatch = watch
+        watch.start()
     }
 
     /// Fades the window out and orders it off screen, keeping it — frame,

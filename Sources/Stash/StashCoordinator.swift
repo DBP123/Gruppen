@@ -265,28 +265,8 @@ final class StashCoordinator: ObservableObject {
 
     // MARK: Emptied
 
-    /// What the notch tray does on losing its last file.
-    enum EmptiedResponse: Equatable {
-        /// The files went somewhere, and the tray goes with them.
-        case close
-        /// Emptied with the remove keys, so the pointer is still on it: closing
-        /// now would pull the tray out from under the hand. It goes once the
-        /// pointer has moved clear of it.
-        case closeOnLeaving
-        /// Kept out until its close key.
-        case stay
-
-        static func to(_ emptying: ShelfState.Emptying, closesWhenEmpty: Bool) -> Self {
-            guard closesWhenEmpty else { return .stay }
-            switch emptying {
-            case .filesLeft: return .close
-            case .removedByHand: return .closeOnLeaving
-            }
-        }
-    }
-
     private func notchEmptied(_ emptying: ShelfState.Emptying) {
-        switch EmptiedResponse.to(emptying, closesWhenEmpty: AppSettings.shared.notchClosesWhenEmpty) {
+        switch ShelfState.EmptiedResponse.to(emptying, closesWhenEmpty: AppSettings.shared.stashClosesWhenEmpty) {
         case .close:
             closeNotch()
         case .closeOnLeaving:
@@ -301,15 +281,10 @@ final class StashCoordinator: ObservableObject {
         }
     }
 
-    /// How far past the tray's edge the pointer may stray before an emptied
-    /// tray closes: room for a hand that overshoots after clicking a small
-    /// key, without the tray lingering once you have plainly moved on.
-    private static let leaveMargin: CGFloat = 24
-
     private func closeWhenPointerLeaves() {
         leaveWatch?.cancel()
         let watch = PointerLeaveWatch(region: { [weak self] in self?.notchPanel?.frame },
-                                      margin: Self.leaveMargin) { [weak self] in
+                                      margin: ShelfState.EmptiedResponse.leaveMargin) { [weak self] in
             // Something dropped back in meanwhile keeps the tray.
             guard let self, self.notchShelf.isEmpty, !self.notchShelf.isTargeted else { return }
             self.closeNotch()

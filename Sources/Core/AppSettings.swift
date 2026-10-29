@@ -85,16 +85,15 @@ final class AppSettings: ObservableObject {
         didSet { persist(notchCloseClearsStash, oldValue, Keys.notchCloseClears) }
     }
 
-    /// Whether the notch stash slides away once its last file is gone: on, an
-    /// emptied tray closes itself — at once when its files were dragged out,
-    /// once the pointer has moved clear of it when they were removed with their
-    /// own keys;
-    /// off, it stays out until its close key.
+    /// Whether a stash — the notch tray or a floating one — goes away once its
+    /// last file is gone: on, at once when its files were dragged out, and
+    /// once the pointer has moved clear of it when they were removed with
+    /// their own keys; off, it stays until its close key.
     ///
-    /// On by default, because that is what the notch stash has always done.
-    /// Read at the moment the tray empties, so a change applies at once.
-    @Published var notchClosesWhenEmpty: Bool {
-        didSet { persist(notchClosesWhenEmpty, oldValue, Keys.notchClosesWhenEmpty) }
+    /// On by default, because that is what stashes have always done. Read at
+    /// the moment a stash empties, so a change applies at once.
+    @Published var stashClosesWhenEmpty: Bool {
+        didSet { persist(stashClosesWhenEmpty, oldValue, Keys.stashClosesWhenEmpty) }
     }
 
     /// Where "Export as Zip" writes to.
@@ -170,6 +169,8 @@ final class AppSettings: ObservableObject {
         static let stashShake = "stashShakeEnabled"
         static let stashMoveOnDragOut = "stashMovesOnDragOut"
         static let notchCloseClears = "notchCloseClearsStash"
+        static let stashClosesWhenEmpty = "stashClosesWhenEmpty"
+        /// The same choice from when it covered only the notch (1.55–1.68).
         static let notchClosesWhenEmpty = "notchClosesWhenEmpty"
         static let performanceMonitor = "showPerformanceMonitor"
         static let exportPath = "stashExportPath"
@@ -183,6 +184,12 @@ final class AppSettings: ObservableObject {
     private let defaults = UserDefaults.standard
 
     init() {
+        // Moved, not merged: the old key is only ever written by 1.55–1.68,
+        // and is gone once read.
+        if let earlier = defaults.object(forKey: Keys.notchClosesWhenEmpty) {
+            defaults.set(earlier, forKey: Keys.stashClosesWhenEmpty)
+            defaults.removeObject(forKey: Keys.notchClosesWhenEmpty)
+        }
         defaults.register(defaults: [
             Keys.showMenuBar: true,
             Keys.showDockIcon: true,
@@ -193,7 +200,7 @@ final class AppSettings: ObservableObject {
             Keys.stashShake: true,
             Keys.stashMoveOnDragOut: false,
             Keys.notchCloseClears: false,
-            Keys.notchClosesWhenEmpty: true,
+            Keys.stashClosesWhenEmpty: true,
             Keys.performanceMonitor: true,
         ])
         showMenuBar = defaults.bool(forKey: Keys.showMenuBar)
@@ -205,7 +212,7 @@ final class AppSettings: ObservableObject {
         stashShakeEnabled = defaults.bool(forKey: Keys.stashShake)
         stashMovesOnDragOut = defaults.bool(forKey: Keys.stashMoveOnDragOut)
         notchCloseClearsStash = defaults.bool(forKey: Keys.notchCloseClears)
-        notchClosesWhenEmpty = defaults.bool(forKey: Keys.notchClosesWhenEmpty)
+        stashClosesWhenEmpty = defaults.bool(forKey: Keys.stashClosesWhenEmpty)
         showPerformanceMonitor = defaults.bool(forKey: Keys.performanceMonitor)
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
         stashShortcut = Self.shortcut(forKey: Keys.stashShortcut)

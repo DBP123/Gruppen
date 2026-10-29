@@ -231,7 +231,7 @@ struct StashActionBar: View {
                     try await FileConverter.convert(urls, to: target)
                 }.value
                 // Added before the originals go, so the shelf is never empty
-                // in between — an emptied shelf closes itself.
+                // in between — an emptied shelf may close itself.
                 state.add(results.map { StashItem.virtual(file: $0, kind: .file,
                                                           title: $0.lastPathComponent) })
                 subjects.forEach { state.remove($0) }

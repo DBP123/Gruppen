@@ -60,9 +60,9 @@ func sectionStash() async {
             shelf.dragBatch(for: shelf.items[0]).map(\.title), ["b"])
     T.equal("actionable is everything when nothing is selected", shelf.actionable.count, 2)
 
-    T.begin("D. Stash — emptying, which closes the notch tray")
+    T.begin("D. Stash — emptying, which can close a stash")
 
-    // The notch tray closes on `onEmptied`, so when it fires, and why, is the
+    // Stashes close on `onEmptied`, so when it fires, and why, is the
     // behaviour.
     let tray = ShelfState()
     var emptied = 0
@@ -70,6 +70,7 @@ func sectionStash() async {
     tray.onEmptied = { emptied += 1; lastEmptying = $0 }
     tray.clear()
     T.equal("a tray that never held anything does not close itself", emptied, 0)
+    T.check("and counts as speculative", !tray.hasBeenFilled)
 
     let three = ["x", "y", "z"].map { StashItem.file(URL(fileURLWithPath: "/tmp/\($0)")) }
     tray.add(three)
@@ -78,6 +79,9 @@ func sectionStash() async {
     tray.remove(Array(three.dropFirst()))
     T.equal("the last items leaving together close it exactly once", emptied, 1)
     T.check("as files that left", lastEmptying == .filesLeft)
+    T.check("an emptied tray is still one that was used, not speculative", tray.hasBeenFilled)
+    T.check("so is a shelf opened with files on it",
+            ShelfState(items: [three[0]]).hasBeenFilled)
 
     tray.add([three[0]])
     tray.clear()
@@ -92,9 +96,9 @@ func sectionStash() async {
     T.check("deleting the last one by hand empties it, by hand",
             emptied == 3 && lastEmptying == .removedByHand, "emptied \(emptied) time(s), \(String(describing: lastEmptying))")
 
-    T.begin("D. Stash — what an emptied notch tray does")
+    T.begin("D. Stash — what an emptied stash does, notch or floating")
 
-    typealias Response = StashCoordinator.EmptiedResponse
+    typealias Response = ShelfState.EmptiedResponse
     T.equal("files dragged out: it closes", Response.to(.filesLeft, closesWhenEmpty: true), .close)
     T.equal("files removed by hand: it closes once the pointer leaves",
             Response.to(.removedByHand, closesWhenEmpty: true), .closeOnLeaving)
@@ -322,13 +326,20 @@ func sectionStash() async {
     if let savedClose { defaults.set(savedClose, forKey: "notchCloseClearsStash") }
     else { defaults.removeObject(forKey: "notchCloseClearsStash") }
 
-    // Closing when emptied is what the notch stash has always done.
-    let savedEmpty = defaults.object(forKey: "notchClosesWhenEmpty")
-    defaults.removeObject(forKey: "notchClosesWhenEmpty")
-    T.check("an emptied notch stash closes by default", AppSettings().notchClosesWhenEmpty)
+    // Closing when emptied is what stashes have always done.
+    let savedEmpty = defaults.object(forKey: "stashClosesWhenEmpty")
+    defaults.removeObject(forKey: "stashClosesWhenEmpty")
+    T.check("an emptied stash closes by default", AppSettings().stashClosesWhenEmpty)
     let emptySettings = AppSettings()
-    emptySettings.notchClosesWhenEmpty = false
-    T.check("keeping it open survives a relaunch", AppSettings().notchClosesWhenEmpty == false)
-    if let savedEmpty { defaults.set(savedEmpty, forKey: "notchClosesWhenEmpty") }
-    else { defaults.removeObject(forKey: "notchClosesWhenEmpty") }
+    emptySettings.stashClosesWhenEmpty = false
+    T.check("keeping it open survives a relaunch", AppSettings().stashClosesWhenEmpty == false)
+
+    // The setting once covered only the notch; a choice made then carries over.
+    defaults.removeObject(forKey: "stashClosesWhenEmpty")
+    defaults.set(false, forKey: "notchClosesWhenEmpty")
+    T.check("keeping the notch stash open carries over to every stash",
+            AppSettings().stashClosesWhenEmpty == false)
+    T.check("and the old key is gone", defaults.object(forKey: "notchClosesWhenEmpty") == nil)
+    if let savedEmpty { defaults.set(savedEmpty, forKey: "stashClosesWhenEmpty") }
+    else { defaults.removeObject(forKey: "stashClosesWhenEmpty") }
 }
