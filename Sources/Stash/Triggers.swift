@@ -316,11 +316,15 @@ final class DragMonitor {
         // page while fully occluded: 5.07% of a core with Stash on against
         // 0.36% with it off. Clicks outnumber drags by orders of magnitude, and
         // a click that never moves needs no drop targets.
+        //
+        // AppKit calls these on the main thread, so they run there directly:
+        // a `Task` per event was an allocation and a run-loop turn for every
+        // click, and for every one of the ~120 drag events a second.
         downMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] _ in
-            Task { @MainActor in self?.arm() }
+            MainActor.assumeIsolated { self?.arm() }
         }
         upMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] _ in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 let announced = self.begun
                 self.disarm()
@@ -345,7 +349,7 @@ final class DragMonitor {
         guard dragMonitor == nil else { return }
         resetShakeState()
         dragMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDragged]) { [weak self] event in
-            Task { @MainActor in
+            MainActor.assumeIsolated {
                 guard let self else { return }
                 // First movement of this gesture: now it is a drag, so the drop
                 // targets go up. Once per gesture, not once per event.
