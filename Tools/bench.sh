@@ -5,8 +5,10 @@
 #   Tools/bench.sh <surface> <a> <b> [rounds]
 #
 #   surface   panel | popover | dashboard | pinned | idle   (see Tools/bench/Harness.swift)
-#   a, b      a git ref (HEAD, HEAD~1, a tag) or "work" for the working tree;
-#             the same ref twice measures the noise band
+#   a, b      a git ref (HEAD, HEAD~1, a tag), "work" for the working tree, or
+#             a directory holding a Sources/ tree — a patched copy, for an
+#             experiment that should not touch the real one; the same build
+#             twice measures the noise band
 #   rounds    a/b pairs, default 3
 #
 #   KIND=network    which module's popover
@@ -35,10 +37,11 @@ mkdir -p "$OUT"
 # defaults domain and start from the same preferences.
 build() {
     local ref=$1 name dir
-    name=$(echo "$ref" | tr '/~^' '___')
+    name=$(echo "$ref" | tr '/~^.' '____')
     dir="$OUT/$name"
     rm -rf "$dir" && mkdir -p "$dir/src"
     if [ "$ref" = work ]; then cp -R Sources "$dir/src/"
+    elif [ -d "$ref/Sources" ]; then cp -R "$ref/Sources" "$dir/src/"
     else git archive "$ref" Sources | tar -x -C "$dir/src"; fi
     xcrun swiftc -parse-as-library -O -whole-module-optimization -sdk "$SDK" \
         -target "$(uname -m)-apple-macos13.0" -o "$dir/gruppen-bench" \

@@ -159,31 +159,35 @@ final class EnergyImpactSampler: TelemetrySampler, @unchecked Sendable {
     }
 }
 
-/// Drives `EnergyImpactSampler` while — and only while — something is watching.
+/// The running half of a fold inside a detail — energy impact, app power: a
+/// sampler on the shared clock while the fold is open, destroyed rather than
+/// paused when it closes. That is the rule the whole app is built on.
 ///
-/// Not a `TelemetryModule`: this is a section inside the battery panel rather
+/// Not a `TelemetryModule`: a fold is a section of the battery detail rather
 /// than a module of its own, so it has no `WidgetKind`, never appears in
-/// telemetry settings and can never be pinned to the menu bar. What it shares is the
-/// rule the rest of the app is built on — the timer exists only while the view
-/// is on screen, and closing the fold destroys it rather than pausing it.
+/// telemetry settings and can never be pinned to the menu bar.
+///
+/// `ObservableObject` rather than the `@Observable` macro: the app ships to
+/// macOS 13 and that macro needs 14, and it is what every other monitor uses.
 @MainActor
-final class EnergyImpactMonitor: ObservableObject {
-    @Published private(set) var rows: [EnergyImpactRow] = []
-
-    /// 1 Hz, the panel's own rate: a per-second rate resampled faster is mostly
-    /// noise, and this sweep is the heavier one.
-    static let interval: TimeInterval = 1
-
-    private let sampler = EnergyImpactSampler()
+class FoldMonitor<S: TelemetrySampler>: ObservableObject {
+    let sampler: S
+    private let interval: TimeInterval
     private var running = false
+
+    init(sampler: S, interval: TimeInterval) {
+        self.sampler = sampler
+        self.interval = interval
+    }
 
     deinit { TelemetryClock.shared.unregister(ObjectIdentifier(self)) }
 
     func start() {
         guard !running else { return }
         running = true
+        willStart()
         let sampler = self.sampler
-        TelemetryClock.shared.register(ObjectIdentifier(self), period: Self.interval) { [weak self] in
+        TelemetryClock.shared.register(ObjectIdentifier(self), period: interval) { [weak self] in
             guard let reading = sampler.sample() else { return nil }
             return { [weak self] in self?.accept(reading) }
         }
@@ -193,14 +197,35 @@ final class EnergyImpactMonitor: ObservableObject {
         guard running else { return }
         running = false
         TelemetryClock.shared.unregister(ObjectIdentifier(self))
-        rows = []
+        didStop()
         // On the sampling queue: a cancelled timer can still have a tick in
         // flight behind us, and the sampler's contract is one thread only.
         let sampler = self.sampler
         Telemetry.queue.async { sampler.teardown() }
     }
 
-    private func accept(_ reading: EnergyImpactSampler.Reading) {
+    /// On the main actor, before the first tick.
+    func willStart() {}
+    /// Each reading, on the main actor.
+    func accept(_ reading: S.Reading) {}
+    /// Clear what the fold shows, so reopening it never starts on old figures.
+    func didStop() {}
+}
+
+/// Drives `EnergyImpactSampler` while — and only while — the fold is open.
+@MainActor
+final class EnergyImpactMonitor: FoldMonitor<EnergyImpactSampler> {
+    @Published private(set) var rows: [EnergyImpactRow] = []
+
+    /// 1 Hz, the panel's own rate: a per-second rate resampled faster is mostly
+    /// noise, and this sweep is the heavier one.
+    static let interval: TimeInterval = 1
+
+    init() { super.init(sampler: EnergyImpactSampler(), interval: Self.interval) }
+
+    override func accept(_ reading: EnergyImpactSampler.Reading) {
         if rows != reading.top { rows = reading.top }
     }
+
+    override func didStop() { rows = [] }
 }

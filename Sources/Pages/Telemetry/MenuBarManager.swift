@@ -498,9 +498,9 @@ struct MenuBarWidgetView: View {
             // label. "PWR" in front of a picture of a battery is the caption on
             // a photograph of a cat.
             if !showsBattery {
-                // Every style gets the badge. An unlabelled number in a menu bar is
-            // a number you have to remember the meaning of, and a bare line
-            // graph is worse — two of them side by side are indistinguishable.
+                // An unlabelled number in a menu bar is a number you have to
+                // remember the meaning of, and a bare line graph is worse — two
+                // of them side by side are indistinguishable.
                 Text(readout.kind.badge)
                     .font(.system(size: MenuBarMetrics.badgeSize, weight: .semibold, design: .monospaced))
                     .foregroundStyle(tint)

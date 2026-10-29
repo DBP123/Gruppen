@@ -116,11 +116,11 @@ enum ThermalDetailTint {
 
 /// One fan: a rotor that turns at the speed the fan is actually turning.
 ///
-/// RPM sets the animation's *duration*, so a fan at 4,000 rpm visibly outruns
-/// one at 2,300. That is the whole cost — SwiftUI interpolates the angle on the
-/// render thread, so a spinning rotor and a still one cost the view system the
-/// same. The blade count is deliberately five, not the real seven: at this size
-/// the real count aliases into a grey disc and strobes.
+/// RPM sets the turn's *period*, so a fan at 4,000 rpm visibly outruns one at
+/// 2,300. The turning runs on Core Animation's clock — see `SpinningShape` for
+/// what it cost as a SwiftUI animation. The blade count is deliberately five,
+/// not the real seven: at this size the real count aliases into a grey disc
+/// and strobes.
 private struct FanGauge: View {
     let name: String
     let fan: AppleSiliconTelemetry.Fan
@@ -159,30 +159,16 @@ private struct Rotor: View {
     let period: Double
     let tint: Color
 
-    @State private var angle: Double = 0
-
     var body: some View {
         ZStack {
             Circle().strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
-            Blades()
-                .fill(tint.opacity(spinning ? 0.85 : 0.5))
+            SpinningShape(shape: Blades(), period: spinning ? period : 0,
+                          color: tint.opacity(spinning ? 0.85 : 0.5))
                 .padding(4)
-                .rotationEffect(.degrees(angle))
             Circle().fill(Theme.housing)
                 .frame(width: 7, height: 7)
                 .overlay(Circle().strokeBorder(tint.opacity(0.6), lineWidth: 1))
         }
-        .onAppear { restart() }
-        .onChange(of: spinning) { _ in restart() }
-        .onChange(of: period) { _ in restart() }
-    }
-
-    private func restart() {
-        // Reset to a known angle first, or changing the animation mid-flight
-        // makes the rotor jump backwards.
-        withAnimation(.linear(duration: 0)) { angle = 0 }
-        guard spinning, period > 0 else { return }
-        withAnimation(.linear(duration: period).repeatForever(autoreverses: false)) { angle = 360 }
     }
 }
 

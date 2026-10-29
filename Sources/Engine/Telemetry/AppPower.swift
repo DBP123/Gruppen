@@ -392,19 +392,8 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
 }
 
 /// Drives `AppPowerSampler` while — and only while — the breakdown is on screen.
-///
-/// `ObservableObject` rather than the `@Observable` macro: the app ships to
-/// macOS 13 and that macro needs 14. It is also what every other monitor here
-/// uses, and one object in a different observation model would be the odd one
-/// out for no gain.
-///
-/// Not a `TelemetryModule`: this is a section inside the power panel rather than
-/// a module of its own, so it has no `WidgetKind`, never appears in telemetry
-/// settings and cannot be pinned to the menu bar. What it does share is the rule
-/// the rest of the app is built on — the timer exists only while the view is on
-/// screen, and closing the fold destroys it rather than pausing it.
 @MainActor
-final class AppPowerMonitor: ObservableObject {
+final class AppPowerMonitor: FoldMonitor<AppPowerSampler> {
     @Published private(set) var reading: AppPowerSampler.Reading?
 
     /// 1.5 s, which is the window the attribution is averaged over. Slower than
@@ -412,40 +401,17 @@ final class AppPowerMonitor: ObservableObject {
     /// per-app wattage resampled every second is mostly noise.
     static let interval: TimeInterval = 1.5
 
-    private let sampler = AppPowerSampler()
-    private var running = false
+    init() { super.init(sampler: AppPowerSampler(), interval: Self.interval) }
 
-    deinit { TelemetryClock.shared.unregister(ObjectIdentifier(self)) }
-
-    /// Snapshots the application roster and starts the poll.
-    ///
-    /// The first tick lands immediately and establishes the CPU baseline, so the
-    /// first reading arrives one interval later. That is not a delay that can be
-    /// engineered away: a rate needs two samples, and there is no honest figure
-    /// to show in between.
-    func start() {
-        guard !running else { return }
-        running = true
+    /// Snapshots the application roster before the first tick. That tick lands
+    /// immediately and establishes the CPU baseline, so the first reading
+    /// arrives one interval later — not a delay that can be engineered away: a
+    /// rate needs two samples, and there is no honest figure to show between.
+    override func willStart() {
         sampler.updateRoster(AppPowerSampler.Roster.current())
-        let sampler = self.sampler
-        TelemetryClock.shared.register(ObjectIdentifier(self), period: Self.interval) { [weak self] in
-            guard let reading = sampler.sample() else { return nil }
-            return { [weak self] in self?.accept(reading) }
-        }
     }
 
-    func stop() {
-        guard running else { return }
-        running = false
-        TelemetryClock.shared.unregister(ObjectIdentifier(self))
-        reading = nil
-        // On the sampling queue: a cancelled timer can still have a tick in
-        // flight behind us, and the sampler's contract is one thread only.
-        let sampler = self.sampler
-        Telemetry.queue.async { sampler.teardown() }
-    }
-
-    private func accept(_ new: AppPowerSampler.Reading) {
+    override func accept(_ new: AppPowerSampler.Reading) {
         if reading != new { reading = new }
         // Re-read the roster for the next pass, here on the main actor where
         // AppKit lives. Doing it after the tick rather than before means the
@@ -453,4 +419,6 @@ final class AppPowerMonitor: ObservableObject {
         // `NSWorkspace` is never touched from the sampling queue.
         sampler.updateRoster(AppPowerSampler.Roster.current())
     }
+
+    override func didStop() { reading = nil }
 }

@@ -230,8 +230,6 @@ struct BatteryGlyph: View {
         condition == .fault ? 0 : CGFloat(min(max(percent, 0), 100)) / 100
     }
 
-    @State private var pulse = false
-
     var body: some View {
         let fill = mode == .high ? Theme.crimson : Self.tint(percent, condition)
         let radius = height * 0.27
@@ -265,28 +263,13 @@ struct BatteryGlyph: View {
                     .strokeBorder(shell, lineWidth: max(1, height * 0.1))
 
                 if let symbol {
-                    // Two-tone, split exactly at the fill's edge: dark where it
-                    // sits on the fill, light where it sits on the empty track.
-                    // In the housing colour alone it was a cut-out that
-                    // vanished the moment it crossed into the empty half —
-                    // half a bolt at 50%, none at all below about 40%.
-                    let glyph = Image(systemName: symbol)
-                        .font(.system(size: height * 0.6, weight: .heavy))
-                        .frame(width: width, height: height)
-                    let inset = height * 0.1
-                    ZStack {
-                        // Label colour follows the menu bar's appearance, so on
-                        // a light menu bar the empty side gets a dark glyph.
-                        glyph.foregroundStyle(condition == .fault ? Theme.cellLow
-                                                                  : Color(nsColor: .labelColor))
-                        glyph.foregroundStyle(Theme.housing)
-                            .mask(alignment: .leading) {
-                                Rectangle()
-                                    .frame(width: inset + max(width - inset * 2, 0) * level)
-                                    .animation(still ? nil : .easeOut(duration: 0.4), value: level)
-                            }
+                    // Only a glyph that can pulse is given its own layer to
+                    // pulse on; the menu bar's never does.
+                    if still {
+                        symbolView(symbol)
+                    } else {
+                        symbolView(symbol).pulsing(condition == .charging)
                     }
-                    .opacity(condition == .charging && pulse ? 0.5 : 1)
                 }
             }
             .frame(width: width, height: height)
@@ -297,11 +280,31 @@ struct BatteryGlyph: View {
                 .fill(shell)
                 .frame(width: max(1.5, width * 0.06), height: height * 0.36)
         }
-        .onAppear { ignite() }
-        .onChange(of: condition) { _ in ignite() }
         // A repeating animation in a menu bar item is a repeating offscreen
         // render for as long as the machine is charging.
         .animation(nil, value: still)
+    }
+
+    /// The state symbol, two-tone, split exactly at the fill's edge: dark where
+    /// it sits on the fill, light where it sits on the empty track. In the
+    /// housing colour alone it was a cut-out that vanished the moment it crossed
+    /// into the empty half — half a bolt at 50%, none at all below about 40%.
+    private func symbolView(_ symbol: String) -> some View {
+        let glyph = Image(systemName: symbol)
+            .font(.system(size: height * 0.6, weight: .heavy))
+            .frame(width: width, height: height)
+        let inset = height * 0.1
+        return ZStack {
+            // Label colour follows the menu bar's appearance, so on a light
+            // menu bar the empty side gets a dark glyph.
+            glyph.foregroundStyle(condition == .fault ? Theme.cellLow : Color(nsColor: .labelColor))
+            glyph.foregroundStyle(Theme.housing)
+                .mask(alignment: .leading) {
+                    Rectangle()
+                        .frame(width: inset + max(width - inset * 2, 0) * level)
+                        .animation(still ? nil : .easeOut(duration: 0.4), value: level)
+                }
+        }
     }
 
     private var aura: Color {
@@ -310,11 +313,6 @@ struct BatteryGlyph: View {
         case .high: return Theme.crimson.opacity(0.25)
         case .auto: return condition == .fault ? Theme.cellLow.opacity(0.2) : .clear
         }
-    }
-
-    private func ignite() {
-        guard !still, condition == .charging else { pulse = false; return }
-        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
     }
 }
 
