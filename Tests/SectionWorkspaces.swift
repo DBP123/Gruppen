@@ -51,31 +51,4 @@ func sectionWorkspaces() async {
     } else {
         T.check("a partial telemetry layout decodes", false, "decode threw")
     }
-
-    T.begin("F. Libraries — one bad record must not take the file with it")
-
-    // This is the failure mode that matters: these loaders decode the whole
-    // array at once, so what happens to the good entries beside a bad one?
-    withTempDir { dir in
-        let file = dir.appendingPathComponent("scripts.json")
-        let mixed = """
-        [{"id":"33333333-3333-3333-3333-333333333333","name":"Good","isActive":false,
-          "trigger":{"kind":"manual","watchedFolder":"","appMatch":"bundleIdentifier",
-                     "bundleIdentifier":"","appName":"","processName":"","appEvent":"launched",
-                     "systemEvent":"batteryBelow","threshold":20,
-                     "notificationScope":"darwin","notificationName":""},
-          "action":{"kind":"shellCommand","interpreter":"zsh","command":"echo ok",
-                    "webhookURL":"","httpMethod":"post","source":"","isCustomised":false},
-          "feedback":"silent"},
-         {"id":"44444444-4444-4444-4444-444444444444","name":"FromAnOlderBuild","isActive":false,
-          "trigger":{"kind":"manual"},
-          "action":{"kind":"shellCommand"},
-          "feedback":"silent"}]
-        """
-        try? Data(mixed.utf8).write(to: file)
-        let loaded = (try? JSONDecoder().decode([Script].self,
-                                                from: Data(contentsOf: file))) ?? []
-        T.equal("both scripts load — one old entry must not erase the other",
-                loaded.count, 2)
-    }
 }

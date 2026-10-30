@@ -7,6 +7,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set by `GruppenApp` so the delegate can tear overlays down on quit.
     static var willTerminate: (() -> Void)?
 
+    /// Where gruppen:// links go. Set once the flow engine exists; a link that
+    /// launched the app arrives before that, so it waits in `pendingURLs`.
+    static var openURL: ((URL) -> Void)? {
+        didSet {
+            guard let openURL else { return }
+            pendingURLs.forEach(openURL)
+            pendingURLs.removeAll()
+        }
+    }
+    private static var pendingURLs: [URL] = []
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if let open = Self.openURL { open(url) } else { Self.pendingURLs.append(url) }
+        }
+    }
+
     /// A stable identifier used once the main configuration window has been found.
     ///
     /// The title fallback keeps this file compatible with the current window setup.

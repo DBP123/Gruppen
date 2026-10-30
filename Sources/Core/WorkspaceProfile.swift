@@ -55,13 +55,16 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
     /// Folders to open in Finder. Tildes are expanded at activation time, so a
     /// profile stays portable between machines.
     var folders: [String] = []
-    /// A script from the library to run last, or nil.
+    /// A flow to run last, or nil.
     ///
-    /// A library script rather than a loose `.sh` path: scripts are already a
-    /// first-class thing in this app, with argv-safe execution, a transcript and
-    /// a feedback setting. Pointing at a bare file would be a second, worse
-    /// script runner living inside the workspace engine.
-    var scriptID: UUID?
+    /// A flow rather than a loose `.sh` path: flows already have argv-safe
+    /// code, a history and their own policies. Pointing at a bare file would
+    /// be a second, worse runner living inside the workspace engine.
+    ///
+    /// Saved as `flowID`. The old `scriptID` named a script from before flows
+    /// existed and is not read: those scripts are gone, and a profile pointing
+    /// at one would only fail.
+    var flowID: UUID?
 
     var color: Color { Color(hex: colorHex) }
     var shortcutDisplay: String? { shortcut?.display }
@@ -70,7 +73,7 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
     var isEmpty: Bool {
         telemetry == nil && !replacesDock && spaceIndex == nil
             && launches.isEmpty && terminates.isEmpty
-            && links.isEmpty && folders.isEmpty && scriptID == nil
+            && links.isEmpty && folders.isEmpty && flowID == nil
     }
 
     /// One line describing what activating this does, for the card face.
@@ -83,7 +86,7 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
         if !terminates.isEmpty { parts.append("\(terminates.count) quit") }
         if !links.isEmpty { parts.append("\(links.count) link\(links.count == 1 ? "" : "s")") }
         if !folders.isEmpty { parts.append("\(folders.count) folder\(folders.count == 1 ? "" : "s")") }
-        if scriptID != nil { parts.append("script") }
+        if flowID != nil { parts.append("flow") }
         return parts.isEmpty ? "Nothing configured" : parts.joined(separator: " · ")
     }
 
@@ -110,12 +113,12 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
         terminates = try box.decodeIfPresent([AppEntry].self, forKey: .terminates) ?? []
         links = try box.decodeIfPresent([String].self, forKey: .links) ?? []
         folders = try box.decodeIfPresent([String].self, forKey: .folders) ?? []
-        scriptID = try box.decodeIfPresent(UUID.self, forKey: .scriptID)
+        flowID = try box.decodeIfPresent(UUID.self, forKey: .flowID)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, colorHex, shortcut, telemetry, dockApps, replacesDock
-        case spaceIndex, launches, terminates, links, folders, scriptID
+        case spaceIndex, launches, terminates, links, folders, flowID
     }
 }
 

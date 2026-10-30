@@ -129,7 +129,7 @@ private struct ProfileCard: View {
         if !profile.links.isEmpty { stages.append(("link", profile.links.joined(separator: "\n"))) }
         if !profile.folders.isEmpty { stages.append(("folder", profile.folders.joined(separator: "\n"))) }
         if let space = profile.spaceIndex { stages.append(("rectangle.split.3x1", "Switches to desktop \(space)")) }
-        if profile.scriptID != nil { stages.append(("chevron.left.forwardslash.chevron.right", "Runs a script last")) }
+        if profile.flowID != nil { stages.append(("point.3.connected.trianglepath.dotted", "Runs a flow last")) }
         return stages
     }
 }
@@ -211,7 +211,7 @@ private struct ActivationReceipt: View {
 /// draft copy would go stale the moment a hotkey rebind touched the same record.
 struct WorkspaceEditorView: View {
     @EnvironmentObject private var engine: WorkspaceEngine
-    @EnvironmentObject private var scripts: ScriptLibrary
+    @EnvironmentObject private var flows: FlowLibrary
     @Environment(\.dismiss) private var dismiss
 
     let profileID: UUID
@@ -309,7 +309,7 @@ private struct Identity: View {
 /// Everything a profile does, top to bottom in the order activation does it.
 private struct Stages: View {
     @EnvironmentObject private var engine: WorkspaceEngine
-    @EnvironmentObject private var scripts: ScriptLibrary
+    @EnvironmentObject private var flows: FlowLibrary
     let profile: WorkspaceProfile
 
     var body: some View {
@@ -338,7 +338,7 @@ private struct Stages: View {
             CardDivider()
             desktop
             CardDivider()
-            script
+            flow
         }
     }
 
@@ -417,20 +417,19 @@ private struct Stages: View {
         }
     }
 
-    private var script: some View {
+    private var flow: some View {
         HStack(spacing: 12) {
-            Text("Run a script").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                .help("Runs last, once everything else is in place, and shows up in that script's history")
+            Text("Run a flow").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
+                .help("Runs last, once everything else is in place, and shows up in that flow's history")
             Spacer(minLength: 12)
             Menu {
-                Button("None") { setScript(nil) }
+                Button("None") { setFlow(nil) }
                 Divider()
-                ForEach(scripts.scripts) { script in
-                    Button(script.name) { setScript(script.id) }
+                ForEach(flows.flows) { flow in
+                    Button(flow.name) { setFlow(flow.id) }
                 }
             } label: {
-                MenuKeyLabel(title: scripts.scripts.first { $0.id == profile.scriptID }?.name ?? "None",
-                             compact: false)
+                MenuKeyLabel(title: flows.flow(profile.flowID ?? UUID())?.name ?? "None", compact: false)
             }
             .menuKey()
         }
@@ -441,8 +440,8 @@ private struct Stages: View {
         var next = profile; next.spaceIndex = index; engine.update(next)
     }
 
-    private func setScript(_ id: UUID?) {
-        var next = profile; next.scriptID = id; engine.update(next)
+    private func setFlow(_ id: UUID?) {
+        var next = profile; next.flowID = id; engine.update(next)
     }
 }
 

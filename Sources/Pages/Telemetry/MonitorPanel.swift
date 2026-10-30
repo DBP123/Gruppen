@@ -16,14 +16,14 @@ struct MonitorPanel: View {
     @EnvironmentObject private var store: GroupStore
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var navigation: NavigationModel
-    @EnvironmentObject private var scripts: ScriptLibrary
+    @EnvironmentObject private var flows: FlowLibrary
     @ObservedObject private var manager = WidgetManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
             gruppen
-            pinnedScripts
+            pinnedFlows
             if !manager.panelOrder.isEmpty {
                 VStack(spacing: 7) {
                     ForEach(manager.panelOrder) { kind in
@@ -84,17 +84,17 @@ struct MonitorPanel: View {
     /// Scripts pinned from the Scripts page, each with its run key. Nothing at
     /// all until one is pinned.
     @ViewBuilder
-    private var pinnedScripts: some View {
-        let pinned = scripts.scripts.filter(\.pinnedToMenuBar)
+    private var pinnedFlows: some View {
+        let pinned = flows.flows.filter(\.pinned)
         if !pinned.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
-                Text("SCRIPTS")
+                Text("FLOWS")
                     .font(Theme.mono(8.5, .semibold))
                     .tracking(1.2)
                     .foregroundStyle(Theme.textMuted)
                     .padding(.leading, 8)
-                ForEach(pinned) { script in
-                    ScriptRow(script: script)
+                ForEach(pinned) { flow in
+                    FlowRow(flow: flow)
                 }
             }
         }
@@ -190,31 +190,31 @@ private struct GruppeRow: View {
     }
 }
 
-/// A pinned script: its lamp, its name, and RUN — then RUNNING, then the last
+/// A pinned flow: its lamp, its name, and RUN — then RUNNING, then the last
 /// run's result. The panel stays open so you can watch it finish.
-private struct ScriptRow: View {
-    let script: Script
-    @EnvironmentObject private var scripts: ScriptLibrary
-    @EnvironmentObject private var triggers: ScriptTriggerCoordinator
+private struct FlowRow: View {
+    let flow: Flow
+    @EnvironmentObject private var flows: FlowLibrary
+    @EnvironmentObject private var engine: FlowEngine
     @State private var hovering = false
 
-    private var running: Bool { triggers.progress[script.id] != nil }
-    private var last: ScriptRunRecord? { scripts.runs[script.id]?.last }
+    private var running: Bool { engine.traces[flow.id]?.isRunning == true }
+    private var last: FlowRunRecord? { flows.lastRun(flow.id) }
 
     var body: some View {
         Button {
-            triggers.run(script, paths: [], source: "Menu bar")
+            engine.run(flow.id, source: "Menu bar")
         } label: {
             HStack(spacing: 8) {
-                ScriptLamp(script: script, size: 7)
-                Text(script.name)
+                FlowLamp(flow: flow, size: 7)
+                Text(flow.name)
                     .font(Theme.sans(12, .medium))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let last, !running, !hovering {
-                    Circle().fill(last.succeeded ? Theme.green : Theme.red).frame(width: 5, height: 5)
-                        .help(last.summary)
+                    Circle().fill(last.outcome == .succeeded ? Theme.green : Theme.red).frame(width: 5, height: 5)
+                        .help(last.message)
                 }
                 Text(running ? "RUNNING" : "RUN")
                     .font(Theme.mono(8.5, .semibold))
@@ -231,7 +231,7 @@ private struct ScriptRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(running || script.steps.isEmpty)
+        .disabled(running || flow.body.isEmpty)
         .onHover { hovering = $0 }
     }
 }

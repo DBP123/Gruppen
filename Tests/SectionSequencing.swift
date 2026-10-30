@@ -1,63 +1,58 @@
 import AppKit
 import Foundation
 
-/// What sets an automation off, and the order a Gruppe closes in — the two
-/// decisions the trigger coordinator and the Gruppe store make on their own.
+/// What sets a flow off, and the order a Gruppe closes in — the two decisions
+/// the triggers and the Gruppe store make on their own.
 func sectionSequencing() async {
-    T.begin("C. Automations — what sets a trigger off")
+    T.begin("C. Flows — what sets a trigger off")
 
-    func trigger(_ kind: ScriptTrigger.Kind, _ configure: (inout ScriptTrigger) -> Void = { _ in }) -> ScriptTrigger {
-        var trigger = ScriptTrigger()
-        trigger.kind = kind
-        configure(&trigger)
-        return trigger
-    }
+    T.equal("an app input with a dot is a bundle", AppTarget("com.apple.Safari"), .bundle("com.apple.Safari"))
+    T.equal("one without is a process name", AppTarget(" node "), .process("node"))
+    T.check("a process name matches its executable, ignoring case",
+            AppTarget("Python3").matches(bundleID: "", executable: "python3"))
+    T.check("a bundle never matches by executable", !AppTarget("com.x.y").matches(bundleID: "", executable: "com.x.y"))
 
-    let connect = trigger(.display) { $0.edge = .on }
-    T.check("a display connecting fires an on-connect trigger", connect.isSetOff(by: .display(.on)))
-    T.check("but not a disconnect", !connect.isSetOff(by: .display(.off)))
+    let weekdays = Schedule(minute: 8 * 60 + 30, weekdays: [2, 3, 4, 5, 6])
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let friday = calendar.date(from: DateComponents(year: 2026, month: 10, day: 30, hour: 9))!
+    let next = weekdays.next(after: friday, calendar: calendar)
+    T.equal("after Friday's run, a weekday schedule is next due on Monday",
+            next.map { calendar.component(.weekday, from: $0) }, 2)
+    T.equal("at its minute", next.map { calendar.component(.minute, from: $0) }, 30)
+    T.check("a schedule with no days is never due", Schedule(minute: 0, weekdays: []).next(after: friday) == nil)
+    T.equal("days are kept as text", Schedule.days(" 2,3 ,9,x"), [2, 3])
+    T.equal("a key combination survives being kept as text",
+            HotkeyValue.shortcut(HotkeyValue.text(Shortcut(keyCode: 2, modifiers: 256, label: "D"))),
+            Shortcut(keyCode: 2, modifiers: 256, label: "D"))
 
-    let home = trigger(.wifi) { $0.match = " Home " }
-    T.check("a network matches by its whole name, ignoring case and spaces", home.isSetOff(by: .wifi("home")))
-    T.check("a longer name is a different network", !home.isSetOff(by: .wifi("Home-Guest")))
-
-    let pods = trigger(.audioDevice) { $0.match = "airpods" }
-    T.check("a sound output matches by part of its name", pods.isSetOff(by: .audioDevice("Sam's AirPods Pro")))
-    T.check("an empty match fires for nothing", !trigger(.audioDevice).isSetOff(by: .audioDevice("Speakers")))
-
+    // End to end: the Gruppe notification, through the armed triggers, to a
+    // recorded run.
     let dev = UUID()
-    let gruppe = trigger(.gruppe) { $0.gruppeID = dev; $0.edge = .off }
-    T.check("a Gruppe closing fires an on-close trigger", gruppe.isSetOff(by: .gruppe(dev, .off)))
-    T.check("not when it launches", !gruppe.isSetOff(by: .gruppe(dev, .on)))
-    T.check("and not for another Gruppe", !gruppe.isSetOff(by: .gruppe(UUID(), .off)))
-    T.check("an event of one kind never sets off another", !connect.isSetOff(by: .gruppe(dev, .on)))
-
-    // End to end: the Gruppe notification, through the armed coordinator, to
-    // a recorded run.
     await withTempDirAsync { dir -> Void in
-        let (library, coordinator) = await MainActor.run { () -> (ScriptLibrary, ScriptTriggerCoordinator) in
-            let library = ScriptLibrary(fileURL: dir.appendingPathComponent("scripts.json"))
-            return (library, ScriptTriggerCoordinator(library: library))
+        let (library, engine) = await MainActor.run { () -> (FlowLibrary, FlowEngine) in
+            let library = FlowLibrary(folder: dir)
+            return (library, FlowEngine(library: library))
         }
-        var script = Script(name: "On launch", isActive: true)
-        script.trigger = trigger(.gruppe) { $0.gruppeID = dev; $0.edge = .on }
-        script.steps[0].code.command = "true"
-        let id = script.id
-        let armed = script
+        let hat = Block("when.gruppe", inputs: ["gruppe": .literal(.text(Pick.join(dev, "Dev"))),
+                                               "event": .literal(.text("launches"))])
+        let flow = Flow(name: "On launch", isEnabled: true, triggers: [hat],
+                        body: [Block("text.make", inputs: ["text": .literal(.text("ok"))])])
+        let id = flow.id
         await MainActor.run {
-            library.scripts = [armed]
-            coordinator.rearm()
+            library.flows = [flow]
             NotificationCenter.default.post(name: GroupStore.didClose, object: dev)
             NotificationCenter.default.post(name: GroupStore.didLaunch, object: dev)
         }
         for _ in 0..<50 {
-            if await MainActor.run(body: { library.runs[id]?.isEmpty == false }) { break }
+            if await MainActor.run(body: { library.runs[id]?.last?.outcome == .succeeded }) { break }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         let runs = await MainActor.run { library.runs[id] ?? [] }
-        T.equal("a Gruppe launching runs its armed trigger once", runs.count, 1)
-        T.check("and the run worked", runs.first?.succeeded == true, runs.first?.summary ?? "no run")
-        await MainActor.run { coordinator.disarm() }
+        T.equal("a Gruppe launching runs its armed flow once", runs.count, 1)
+        T.equal("and the run worked", runs.first?.outcome, .succeeded)
+        T.equal("its trace names the block that ran", runs.first?.blocks.map(\.title), ["Text"])
+        await MainActor.run { engine.triggers.disarm() }
     }
 
     T.begin("C. Automations — power edges")
@@ -68,8 +63,8 @@ func sectionSequencing() async {
     let higher = PowerSource(percent: 61, isCharging: true, onExternalPower: true)
     let unplugged = PowerSource(percent: 61, isCharging: false, onExternalPower: false)
     T.check("the charge moving is not the power being connected", higher.adapterEvent(since: charging) == nil)
-    T.equal("unplugging is a disconnection", unplugged.adapterEvent(since: higher), .powerDisconnected)
-    T.equal("plugging back in is a connection", higher.adapterEvent(since: unplugged), .powerConnected)
+    T.equal("unplugging is a disconnection", unplugged.adapterEvent(since: higher), .disconnected)
+    T.equal("plugging back in is a connection", higher.adapterEvent(since: unplugged), .connected)
     T.check("nothing on the first reading", charging.adapterEvent(since: nil) == nil)
 
     let at20 = PowerSource(percent: 20, onExternalPower: false)

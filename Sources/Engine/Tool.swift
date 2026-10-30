@@ -32,29 +32,39 @@ enum Tool {
     /// Runs `path` with `arguments` and returns once it has exited. Throws only
     /// when the tool could not be started at all; a non-zero exit is in the
     /// result, for the caller to word.
+    ///
+    /// `input` is written to the tool's standard input. `onLine` hears each
+    /// complete line as it is printed — `true` for standard error — so a
+    /// console can show a long job's progress while it runs. Cancelling the
+    /// calling task stops the tool.
     static func run(_ path: String, _ arguments: [String],
                     in directory: URL? = nil,
                     environment: [String: String]? = nil,
-                    timeout: TimeInterval? = nil) async throws -> Result {
+                    input: Data? = nil,
+                    timeout: TimeInterval? = nil,
+                    onLine: (@Sendable (String, Bool) -> Void)? = nil) async throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         process.currentDirectoryURL = directory
         if let environment { process.environment = environment }
-        process.standardInput = FileHandle.nullDevice
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin ?? FileHandle.nullDevice
 
         let out = Pipe()
         let err = Pipe()
         process.standardOutput = out
         process.standardError = err
-        let collector = OutputCollector()
+
+        let collector = OutputCollector(onLine: onLine)
         out.fileHandleForReading.readabilityHandler = { collector.appendOutput($0.availableData) }
         err.fileHandleForReading.readabilityHandler = { collector.appendError($0.availableData) }
 
-        let watchdog = DispatchWorkItem { [weak process] in
-            guard let process, process.isRunning else { return }
+        let handle = ProcessHandle(process)
+        let watchdog = DispatchWorkItem {
+            guard handle.isRunning else { return }
             collector.markTimedOut()
-            process.terminate()
+            handle.terminate()
         }
         if let timeout {
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
@@ -65,25 +75,40 @@ enum Tool {
             err.fileHandleForReading.readabilityHandler = nil
         }
 
-        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
-            let resumed = Resumed()
-            // Set before `run()`: a tool that exits at once can call back before
-            // `run()` returns.
-            process.terminationHandler = { process in
-                guard resumed.claim() else { return }
-                continuation.resume(returning: process.terminationStatus)
+        let status: Int32 = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let resumed = Resumed()
+                // Set before `run()`: a tool that exits at once can call back before
+                // `run()` returns.
+                process.terminationHandler = { process in
+                    guard resumed.claim() else { return }
+                    continuation.resume(returning: process.terminationStatus)
+                }
+                do {
+                    try process.run()
+                } catch {
+                    // Nothing launched, so the handler never fires.
+                    if resumed.claim() { continuation.resume(throwing: error) }
+                    return
+                }
+                if let stdin, let input {
+                    // Off this thread: a tool that reads slowly would block the
+                    // write once the pipe buffer is full.
+                    let writer = stdin.fileHandleForWriting
+                    DispatchQueue.global(qos: .utility).async {
+                        try? writer.write(contentsOf: input)
+                        try? writer.close()
+                    }
+                }
             }
-            do {
-                try process.run()
-            } catch {
-                // Nothing launched, so the handler never fires.
-                if resumed.claim() { continuation.resume(throwing: error) }
-            }
+        } onCancel: {
+            handle.terminate()
         }
 
         // Whatever landed between the last callback and the exit.
         collector.appendOutput(out.fileHandleForReading.availableData)
         collector.appendError(err.fileHandleForReading.availableData)
+        collector.flushLines()
         return Result(tool: (path as NSString).lastPathComponent,
                       status: status,
                       output: collector.output,
@@ -92,21 +117,57 @@ enum Tool {
     }
 }
 
+/// A process, stoppable from the watchdog's queue and the cancellation
+/// handler's thread.
+private final class ProcessHandle: @unchecked Sendable {
+    private let process: Process
+    init(_ process: Process) { self.process = process }
+    var isRunning: Bool { process.isRunning }
+    func terminate() { if process.isRunning { process.terminate() } }
+}
+
 /// Two pipes drained from arbitrary queues. Every field is behind `lock`.
 private final class OutputCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var outputData = Data()
     private var errorData = Data()
     private var timedOut = false
+    private let onLine: (@Sendable (String, Bool) -> Void)?
+    /// Per stream, the bytes after the last newline, waiting for the rest of
+    /// their line.
+    private var pending: [Bool: Data] = [:]
 
-    func appendOutput(_ data: Data) {
+    init(onLine: (@Sendable (String, Bool) -> Void)?) { self.onLine = onLine }
+
+    func appendOutput(_ data: Data) { append(data, isError: false) }
+    func appendError(_ data: Data) { append(data, isError: true) }
+
+    private func append(_ data: Data, isError: Bool) {
         guard !data.isEmpty else { return }
-        lock.lock(); outputData.append(data); lock.unlock()
+        lock.lock()
+        if isError { errorData.append(data) } else { outputData.append(data) }
+        var lines: [String] = []
+        if onLine != nil {
+            var buffer = (pending[isError] ?? Data()) + data
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                lines.append(String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self))
+                buffer = Data(buffer[buffer.index(after: newline)...])
+            }
+            pending[isError] = buffer
+        }
+        lock.unlock()
+        lines.forEach { onLine?($0, isError) }
     }
 
-    func appendError(_ data: Data) {
-        guard !data.isEmpty else { return }
-        lock.lock(); errorData.append(data); lock.unlock()
+    /// A last line with no newline after it.
+    func flushLines() {
+        lock.lock()
+        let rest = pending.compactMap { entry -> (String, Bool)? in
+            entry.value.isEmpty ? nil : (String(decoding: entry.value, as: UTF8.self), entry.key)
+        }
+        pending = [:]
+        lock.unlock()
+        rest.forEach { onLine?($0.0, $0.1) }
     }
 
     func markTimedOut() { lock.lock(); timedOut = true; lock.unlock() }

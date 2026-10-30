@@ -13,7 +13,7 @@ import Foundation
 /// 3. **Terminate** — close what this context does not want.
 /// 4. **Launch** — open what it does, skipping anything already up.
 /// 5. **Open** — links in the browser, folders in Finder.
-/// 6. **Script** — one library script, last.
+/// 6. **Flow** — one flow, last.
 ///
 /// The order is not arbitrary. Telemetry first because it is instant and pure
 /// preference. The Dock next, because restarting it is the most visually
@@ -63,9 +63,9 @@ final class WorkspaceEngine: ObservableObject {
     /// Profiles whose shortcut macOS refused to hand over.
     @Published private(set) var unavailableShortcuts: Set<UUID> = []
 
-    /// Set by the app so the script stage can run through the same path as every
-    /// other script — same transcript, same feedback, same argv safety.
-    var scriptRunner: ((UUID) -> Bool)?
+    /// Set by the app so the last stage runs a flow through the engine, with
+    /// the same history and policies as any other run.
+    var flowRunner: ((UUID) -> Bool)?
 
     private var isLoading = false
     private let hotkeys = HotkeyBindings(owner: "workspace")
@@ -244,12 +244,12 @@ final class WorkspaceEngine: ObservableObject {
             report.add("Desktop", SpaceManager.switchTo(desktop: desktop))
         }
 
-        // 7 — Script.
-        if let scriptID = profile.scriptID {
-            if scriptRunner?(scriptID) == true {
-                report.add("Script", .done("started"))
+        // 7 — Flow.
+        if let flowID = profile.flowID {
+            if flowRunner?(flowID) == true {
+                report.add("Flow", .done("started"))
             } else {
-                report.add("Script", .failed("script is no longer in the library"))
+                report.add("Flow", .failed("that flow no longer exists"))
             }
         }
 

@@ -14,16 +14,12 @@ func sectionMigration() {
             from: Data(#"{"name":"x"}"#.utf8))) != nil),
         ("WorkspaceProfile", (try? JSONDecoder().decode(WorkspaceProfile.self,
             from: Data(#"{"name":"x"}"#.utf8))) != nil),
-        ("Script", (try? JSONDecoder().decode(Script.self,
-            from: Data(#"{"name":"x"}"#.utf8))) != nil),
-        ("ScriptTrigger", (try? JSONDecoder().decode(ScriptTrigger.self,
-            from: Data(#"{"kind":"manual"}"#.utf8))) != nil),
-        ("ScriptAction", (try? JSONDecoder().decode(ScriptAction.self,
-            from: Data(#"{"kind":"shellCommand"}"#.utf8))) != nil),
-        ("ScriptStep", (try? JSONDecoder().decode(ScriptStep.self,
-            from: Data(#"{"kind":"moveTo"}"#.utf8))) != nil),
-        ("ScriptOutput", (try? JSONDecoder().decode(ScriptOutput.self,
-            from: Data(#"{}"#.utf8))) != nil),
+        ("Flow", (try? JSONDecoder().decode(Flow.self, from: Data(#"{"name":"x"}"#.utf8))) != nil),
+        ("Block", (try? JSONDecoder().decode(Block.self, from: Data(#"{}"#.utf8))) != nil),
+        ("FlowPolicy", (try? JSONDecoder().decode(FlowPolicy.self, from: Data(#"{}"#.utf8))) != nil),
+        ("CustomBlock", (try? JSONDecoder().decode(CustomBlock.self, from: Data(#"{}"#.utf8))) != nil),
+        ("CodeSpec", (try? JSONDecoder().decode(CodeSpec.self, from: Data(#"{}"#.utf8))) != nil),
+        ("Port", (try? JSONDecoder().decode(Port.self, from: Data(#"{"name":"x"}"#.utf8))) != nil),
         ("SystemBuildInfo", (try? JSONDecoder().decode(SystemBuildInfo.self,
             from: Data(#"{"osVersion":"14.0"}"#.utf8))) != nil),
         ("MacHardwareProfile", (try? JSONDecoder().decode(MacHardwareProfile.self,
@@ -38,11 +34,12 @@ func sectionMigration() {
 
     // And a value this build has never heard of, which is what reading a file
     // written by a *newer* build looks like.
-    let fromTheFuture = #"{"name":"x","trigger":{"kind":"quantumEntanglement"},"action":{"kind":"telepathy"},"feedback":"interpretiveDance"}"#
-    if let script = try? JSONDecoder().decode(Script.self, from: Data(fromTheFuture.utf8)) {
+    let fromTheFuture = #"{"name":"x","policy":{"concurrency":"quantum","notify":"telepathy"},"body":[{"definition":"future.block","onFailure":{"policy":"interpretiveDance"}}],"telepathy":true}"#
+    if let flow = try? JSONDecoder().decode(Flow.self, from: Data(fromTheFuture.utf8)) {
         T.check("an unknown enum case degrades instead of throwing",
-                script.steps.first?.kind == .shell && script.output == ScriptOutput(onSuccess: .none, onFailure: .none),
-                "trigger \(script.trigger.kind), steps \(script.steps.map(\.kind)), output \(script.output)")
+                flow.policy.concurrency == .queue && flow.policy.notify == .onFailure
+                    && flow.body.first?.onFailure == .stop && flow.body.first?.definition == "future.block",
+                "policy \(flow.policy), body \(flow.body.map(\.definition))")
     } else {
         T.check("an unknown enum case degrades instead of throwing", false, "decode threw")
     }
@@ -52,19 +49,18 @@ func sectionMigration() {
     // The real failure: these libraries decode as an array in one call, so
     // before this a single unreadable record emptied the user's whole file and
     // the next save wrote the empty array back over it.
-    let mixedScripts = """
-    [{"id":"33333333-3333-3333-3333-333333333333","name":"Good","isActive":false,
-      "trigger":{"kind":"manual"},"action":{"kind":"shellCommand","command":"echo ok"},
-      "feedback":"silent"},
-     "this is not a script at all",
+    let mixedFlows = """
+    [{"id":"33333333-3333-3333-3333-333333333333","name":"Good","isEnabled":false,
+      "body":[{"definition":"text.make","inputs":{"text":{"literal":{"text":"ok"}}}}]},
+     "this is not a flow at all",
      {"name":"AlsoGood"}]
     """
-    let scripts = LenientLibrary.decode(Script.self, from: Data(mixedScripts.utf8))
-    T.equal("the readable scripts survive a corrupt neighbour", scripts.items.count, 2)
-    T.equal("the unreadable one is counted, not hidden", scripts.skipped, 1)
+    let flows = LenientLibrary.decode(Flow.self, from: Data(mixedFlows.utf8))
+    T.equal("the readable flows survive a corrupt neighbour", flows.items.count, 2)
+    T.equal("the unreadable one is counted, not hidden", flows.skipped, 1)
     T.check("the survivors are the right ones",
-            scripts.items.map(\.name).sorted() == ["AlsoGood", "Good"],
-            scripts.items.map(\.name).description)
+            flows.items.map(\.name).sorted() == ["AlsoGood", "Good"],
+            flows.items.map(\.name).description)
 
     let mixedGroups = """
     [{"name":"Keep"}, 42, {"name":"AlsoKeep","apps":[]}]
@@ -85,10 +81,9 @@ func sectionMigration() {
     T.begin("B. Migration — end to end, through the real loaders")
 
     withTempDir { dir in
-        let file = dir.appendingPathComponent("scripts.json")
-        try? Data(mixedScripts.utf8).write(to: file)
-        let library = ScriptLibrary(fileURL: file)
-        T.equal("ScriptLibrary keeps what it can read", library.scripts.count, 2)
+        try? Data(mixedFlows.utf8).write(to: dir.appendingPathComponent("flows.json"))
+        let library = FlowLibrary(folder: dir)
+        T.equal("FlowLibrary keeps what it can read", library.flows.count, 2)
     }
 
     withTempDir { dir in

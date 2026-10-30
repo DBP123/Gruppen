@@ -13,7 +13,7 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.69"
+VERSION="1.70"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 MIN_MACOS="13.0"
 
@@ -52,6 +52,7 @@ done
 rm -rf "$APP_DIR"
 mkdir -p \
     "$APP_DIR/Contents/MacOS" \
+    "$APP_DIR/Contents/Helpers" \
     "$APP_DIR/Contents/Resources"
 
 # Universal by default.
@@ -76,6 +77,26 @@ compile_slice() {
         $SOURCES
 }
 
+# The two small programs flows use: the JavaScript runner for Macs without
+# Node, and the `gruppen` command for Terminal. Each is one file.
+compile_helper() {
+    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" -o "$3" "Helpers/$1/main.swift"
+}
+
+build_helpers() {
+    for helper in gruppen-js gruppen; do
+        if [ "$FAST" = "1" ]; then
+            compile_helper "$helper" "$ARCH" "$APP_DIR/Contents/Helpers/$helper"
+        else
+            compile_helper "$helper" arm64 "${BUILD_DIR}/$helper-arm64"
+            compile_helper "$helper" x86_64 "${BUILD_DIR}/$helper-x86_64"
+            lipo -create "${BUILD_DIR}/$helper-arm64" "${BUILD_DIR}/$helper-x86_64" \
+                -output "$APP_DIR/Contents/Helpers/$helper"
+            rm -f "${BUILD_DIR}/$helper-arm64" "${BUILD_DIR}/$helper-x86_64"
+        fi
+    done
+}
+
 if [ "$FAST" = "1" ]; then
     echo "Compiling ${APP_NAME} ${VERSION} (${BUILD_NUMBER}) for ${ARCH} only..."
     compile_slice "$ARCH" "$APP_DIR/Contents/MacOS/$EXECUTABLE"
@@ -93,6 +114,9 @@ else
     rm -rf "$SLICE_DIR"
     echo "Linked universal binary ($(lipo -archs "$APP_DIR/Contents/MacOS/$EXECUTABLE"))"
 fi
+
+echo "Compiling helpers..."
+build_helpers
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -148,7 +172,19 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <string>Gruppen reads the name of the Wi-Fi network you join, for automations that run on a network. macOS only shares it with Location Services on.</string>
 
     <key>NSAppleEventsUsageDescription</key>
-    <string>Gruppen asks System Events and Finder to switch Dark Mode or empty the Trash when an automation of yours does that.</string>
+    <string>Gruppen sends Apple events to other apps when a flow of yours tells it to — switching Dark Mode, emptying the Trash, or what your own AppleScript asks.</string>
+
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>${BUNDLE_ID}.run</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>gruppen</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST
@@ -163,6 +199,11 @@ fi
 # Ship to other machines only after signing with a Developer ID and notarizing,
 # or Gatekeeper may block it.
 echo "Signing (ad-hoc)..."
+
+# Nested code first: the app's signature covers its helpers' signatures.
+for helper in "$APP_DIR/Contents/Helpers/"*; do
+    codesign --force --sign - --timestamp=none "$helper"
+done
 
 codesign \
     --force \

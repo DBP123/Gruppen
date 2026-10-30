@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The quick palette: a hotkey anywhere brings up a small panel of things to
-/// run — your actions first, most recently used at the top, then the built-in
+/// run — your flows first, most recently used at the top, then the built-in
 /// tools. Type to filter, arrows to move, Return to run, Escape to close.
 ///
 /// A non-activating panel that can still take the keyboard, the way Spotlight
@@ -13,20 +13,18 @@ final class QuickPalette {
     static let shared = QuickPalette()
 
     private var panel: PalettePanel?
-    private weak var library: ScriptLibrary?
-    private weak var triggers: ScriptTriggerCoordinator?
+    private weak var engine: FlowEngine?
 
     private init() {}
 
-    func attach(library: ScriptLibrary, triggers: ScriptTriggerCoordinator) {
-        self.library = library
-        self.triggers = triggers
+    func attach(engine: FlowEngine) {
+        self.engine = engine
         applyShortcut()
     }
 
     func applyShortcut() {
         HotkeyCenter.shared.unregisterAll(owner: "palette")
-        guard library != nil, let shortcut = AppSettings.shared.paletteShortcut else { return }
+        guard engine != nil, let shortcut = AppSettings.shared.paletteShortcut else { return }
         HotkeyCenter.shared.register(shortcut, owner: "palette") { [weak self] in self?.toggle() }
     }
 
@@ -35,10 +33,11 @@ final class QuickPalette {
     }
 
     func show() {
-        guard let library, triggers != nil else { return }
+        guard let engine else { return }
         let view = PaletteView(onRun: { [weak self] item in self?.run(item) },
                                onClose: { [weak self] in self?.close() })
-            .environmentObject(library)
+            .environmentObject(engine)
+            .environmentObject(engine.library)
         let host = NSHostingView(rootView: view)
         let size = NSSize(width: 560, height: 420)
         host.frame = NSRect(origin: .zero, size: size)
@@ -62,16 +61,10 @@ final class QuickPalette {
     private func run(_ item: PaletteItem) {
         close()
         switch item {
-        case .script(let script):
-            triggers?.run(script, paths: [], source: "Palette")
-        case .tool(let step):
-            Task {
-                do {
-                    _ = try await ScriptRunner.perform(step, files: [], hooks: triggers?.hooks ?? .init())
-                } catch {
-                    Notifier.post(title: step.kind.label, body: error.localizedDescription) { _ in }
-                }
-            }
+        case .flow(let flow):
+            engine?.run(flow.id, source: "Palette")
+        case .tool(let tool):
+            engine?.runOnce(tool.block, title: tool.title)
         }
     }
 }
@@ -105,46 +98,60 @@ private final class PalettePanel: NSPanel {
 
 /// Something the palette can run.
 enum PaletteItem: Identifiable {
-    case script(Script)
-    case tool(ScriptStep)
+    case flow(Flow)
+    case tool(Preset)
+
+    /// A built-in block run on its own, with its settings filled in.
+    struct Preset {
+        var title: String
+        var block: Block
+    }
 
     var id: String {
         switch self {
-        case .script(let script): return script.id.uuidString
-        case .tool(let step): return step.kind.rawValue + step.caseStyle.rawValue
+        case .flow(let flow): return flow.id.uuidString
+        case .tool(let tool): return tool.title
         }
     }
 
     var title: String {
         switch self {
-        case .script(let script): return script.name
-        case .tool(let step): return step.kind == .changeCase ? "Change case to \(step.caseStyle.label)" : step.kind.label
+        case .flow(let flow): return flow.name
+        case .tool(let tool): return tool.title
         }
     }
 
     var glyph: String {
         switch self {
-        case .script(let script): return script.steps.first?.kind.glyph ?? "bolt"
-        case .tool(let step): return step.kind.glyph
+        case .flow(let flow): return flow.glyph
+        case .tool(let tool): return Catalog.definition(tool.block.definition)?.glyph ?? "bolt"
         }
     }
 
-    /// The built-in tools, there before any action has been made.
+    /// The built-in tools, there before any flow has been made.
     static let tools: [PaletteItem] = {
-        var steps: [ScriptStep] = [.make(.cleanLink), .make(.cleanText)]
-        for style in CaseStyle.allCases {
-            var step = ScriptStep.make(.changeCase)
-            step.caseStyle = style
-            steps.append(step)
+        func tool(_ title: String, _ id: String, _ inputs: [String: Value] = [:]) -> PaletteItem {
+            .tool(Preset(title: title, block: Block(id, inputs: inputs.mapValues(ValueSource.literal))))
         }
-        steps += [.make(.saveClipboardImage), .make(.darkMode), .make(.mute), .make(.keepAwake),
-                  .make(.lockScreen), .make(.toggleStashes), .make(.openStash), .make(.ejectDisks), .make(.emptyTrash)]
-        return steps.map(PaletteItem.tool)
+        return [
+            tool("Clean copied link", "clip.clean", ["what": .text("link")]),
+            tool("Clean copied text", "clip.clean", ["what": .text("text")]),
+            tool("Save copied image", "clip.saveImage"),
+            tool("Toggle Dark Mode", "system.appearance"),
+            tool("Toggle mute", "system.mute"),
+            tool("Keep awake for an hour", "system.keepAwake"),
+            tool("Lock screen", "system.lock"),
+            tool("Hide or show stashes", "gruppen.toggleStashes"),
+            tool("Open a stash", "gruppen.openStash"),
+            tool("Eject disks", "system.eject"),
+            tool("Empty Trash", "system.emptyTrash"),
+        ]
     }()
 }
 
 private struct PaletteView: View {
-    @EnvironmentObject private var library: ScriptLibrary
+    @EnvironmentObject private var library: FlowLibrary
+    @EnvironmentObject private var engine: FlowEngine
     let onRun: (PaletteItem) -> Void
     let onClose: () -> Void
 
@@ -152,17 +159,15 @@ private struct PaletteView: View {
     @State private var selected = 0
     @FocusState private var focused: Bool
 
-    /// Your actions, most recently run first, then the tools — filtered.
+    /// Your flows that run by hand, most recently run first, then the tools —
+    /// filtered.
     private var items: [PaletteItem] {
-        let actions = library.scripts
-            .filter { $0.section == .actions && $0.isComplete }
-            .sorted { (library.runs[$0.id]?.last?.date ?? .distantPast) > (library.runs[$1.id]?.last?.date ?? .distantPast) }
-            .map(PaletteItem.script)
-        // A tool you have also saved as an action appears once, as yours.
-        let saved = Set(library.scripts.filter { $0.section == .actions && $0.steps.count == 1 }
-            .map { $0.steps[0].kind.rawValue + $0.steps[0].caseStyle.rawValue })
-        let tools = PaletteItem.tools.filter { !saved.contains($0.id) }
-        let all = actions + tools
+        let registry = library.registry
+        let flows = engine.manualFlows
+            .filter { !$0.body.isEmpty && $0.isRunnable(registry: registry) }
+            .sorted { (library.lastRun($0.id)?.date ?? .distantPast) > (library.lastRun($1.id)?.date ?? .distantPast) }
+            .map(PaletteItem.flow)
+        let all = flows + PaletteItem.tools
         let needle = query.trimmingCharacters(in: .whitespaces)
         return needle.isEmpty ? all : all.filter { $0.title.localizedCaseInsensitiveContains(needle) }
     }
@@ -172,7 +177,7 @@ private struct PaletteView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "wand.and.rays").foregroundStyle(Theme.orange)
-                TextField("Run an action…", text: $query)
+                TextField("Run a flow or a tool…", text: $query)
                     .textFieldStyle(.plain)
                     .font(Theme.sans(17))
                     .foregroundStyle(Theme.textPrimary)
@@ -228,7 +233,8 @@ private struct PaletteView: View {
                 .font(Theme.sans(13, selected ? .semibold : .regular))
                 .foregroundStyle(Theme.textPrimary)
             Spacer()
-            if case .script(let script) = item, let shortcut = script.trigger.shortcut {
+            if case .flow(let flow) = item,
+               let shortcut = flow.triggers.lazy.compactMap({ HotkeyValue.shortcut($0.text("keys")) }).first {
                 KeyBadge(text: shortcut.display)
             }
             if case .tool = item {

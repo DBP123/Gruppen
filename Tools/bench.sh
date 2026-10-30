@@ -4,7 +4,7 @@
 #
 #   Tools/bench.sh <surface> <a> <b> [rounds]
 #
-#   surface   panel | popover | dashboard | pinned | idle   (see Tools/bench/Harness.swift)
+#   surface   panel | popover | dashboard | pinned | idle | editor   (see Tools/bench/Harness.swift)
 #   a, b      a git ref (HEAD, HEAD~1, a tag), "work" for the working tree, or
 #             a directory holding a Sources/ tree — a patched copy, for an
 #             experiment that should not touch the real one; the same build
@@ -40,12 +40,21 @@ build() {
     name=$(echo "$ref" | tr '/~^.' '____')
     dir="$OUT/$name"
     rm -rf "$dir" && mkdir -p "$dir/src"
+    # Each build with the harness of its own time: the harness names the
+    # app's types, and those change between versions.
+    local harness=Tools/bench/Harness.swift
     if [ "$ref" = work ]; then cp -R Sources "$dir/src/"
     elif [ -d "$ref/Sources" ]; then cp -R "$ref/Sources" "$dir/src/"
-    else git archive "$ref" Sources | tar -x -C "$dir/src"; fi
+    else
+        git archive "$ref" Sources | tar -x -C "$dir/src"
+        if git cat-file -e "$ref:Tools/bench/Harness.swift" 2>/dev/null; then
+            git show "$ref:Tools/bench/Harness.swift" > "$dir/Harness.swift"
+            harness="$dir/Harness.swift"
+        fi
+    fi
     xcrun swiftc -parse-as-library -O -whole-module-optimization -sdk "$SDK" \
         -target "$(uname -m)-apple-macos13.0" -o "$dir/gruppen-bench" \
-        $(find "$dir/src/Sources" -name '*.swift' ! -name GruppenApp.swift) Tools/bench/Harness.swift \
+        $(find "$dir/src/Sources" -name '*.swift' ! -name GruppenApp.swift) "$harness" \
         2>&1 | grep -E "error" >&2 && exit 1
     echo "$dir/gruppen-bench"
 }

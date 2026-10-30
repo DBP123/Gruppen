@@ -42,10 +42,12 @@ struct PowerSource: Equatable {
     /// The adapter going in or coming out since `before` — and nothing when it
     /// did not. macOS posts a power-source change whenever the charge moves,
     /// so "the power changed" is not the same as "the power was connected".
-    func adapterEvent(since before: PowerSource?) -> ScriptTrigger.SystemEvent? {
+    func adapterEvent(since before: PowerSource?) -> AdapterChange? {
         guard let before, before.onExternalPower != onExternalPower else { return nil }
-        return onExternalPower ? .powerConnected : .powerDisconnected
+        return onExternalPower ? .connected : .disconnected
     }
+
+    enum AdapterChange: Equatable, Sendable { case connected, disconnected }
 
     /// The charge falling past `threshold` since `before`: on the way down
     /// only, so a Mac sitting at 19% does not fire on every notification.
