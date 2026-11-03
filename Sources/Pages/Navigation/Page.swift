@@ -5,7 +5,7 @@ enum WindowID {
     static let main = "main"
     /// Also how the one window is found again when it has been closed and the
     /// app is reopened from the Dock or from a menu bar item.
-    static let mainWindowTitle = "Gruppen"
+    static let mainWindowTitle = AppPaths.name
 }
 
 /// Every tool Gruppen hosts.

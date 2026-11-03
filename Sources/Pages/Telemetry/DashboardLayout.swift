@@ -183,19 +183,6 @@ final class DashboardLayout: ObservableObject {
         defaults.removeObject(forKey: Self.key)
     }
 
-    /// Whether anything has actually been arranged, so the reset button can say
-    /// whether it would do anything.
-    ///
-    /// "Has a stored slot" is the wrong test: locking a card and unlocking it
-    /// again leaves an entry behind that is identical to the default, and the
-    /// board would then claim to be arranged when it is not. What counts is
-    /// whether any stored slot *differs* from where the default would put it.
-    func isCustomised(order: [WidgetKind], width: CGFloat) -> Bool {
-        slots.contains { kind, slot in
-            slot != Self.defaultSlot(for: kind, order: order, width: width)
-        }
-    }
-
     /// How tall the canvas has to be to contain the board.
     func canvasHeight(for order: [WidgetKind], width: CGFloat) -> CGFloat {
         let bottom = order.reduce(CGFloat.zero) { tallest, kind in

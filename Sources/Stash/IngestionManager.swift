@@ -17,8 +17,7 @@ enum IngestionManager {
     /// Where virtualised items live. Under `NSTemporaryDirectory()` so the
     /// system reclaims it, in our own folder so we can sweep it ourselves.
     static let scratch: URL = {
-        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("Gruppen-Stash", isDirectory: true)
+        let url = AppPaths.stashScratch
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }()
