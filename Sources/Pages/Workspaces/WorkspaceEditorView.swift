@@ -45,7 +45,7 @@ struct WorkspaceProfileDeck: View {
                 RoundedRectangle(cornerRadius: Theme.radiusMd)
                     .strokeBorder(Theme.borderSubtle, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
             )
-            .help("A profile switches the whole environment at once — telemetry, Dock, apps, links, folders, desktop and a script — from one shortcut")
+            .help("A profile switches the whole environment at once — telemetry, Dock, apps, links, folders and desktop — from one shortcut")
     }
 }
 
@@ -129,7 +129,6 @@ private struct ProfileCard: View {
         if !profile.links.isEmpty { stages.append(("link", profile.links.joined(separator: "\n"))) }
         if !profile.folders.isEmpty { stages.append(("folder", profile.folders.joined(separator: "\n"))) }
         if let space = profile.spaceIndex { stages.append(("rectangle.split.3x1", "Switches to desktop \(space)")) }
-        if profile.flowID != nil { stages.append(("point.3.connected.trianglepath.dotted", "Runs a flow last")) }
         return stages
     }
 }
@@ -211,7 +210,6 @@ private struct ActivationReceipt: View {
 /// draft copy would go stale the moment a hotkey rebind touched the same record.
 struct WorkspaceEditorView: View {
     @EnvironmentObject private var engine: WorkspaceEngine
-    @EnvironmentObject private var flows: FlowLibrary
     @Environment(\.dismiss) private var dismiss
 
     let profileID: UUID
@@ -309,7 +307,6 @@ private struct Identity: View {
 /// Everything a profile does, top to bottom in the order activation does it.
 private struct Stages: View {
     @EnvironmentObject private var engine: WorkspaceEngine
-    @EnvironmentObject private var flows: FlowLibrary
     let profile: WorkspaceProfile
 
     var body: some View {
@@ -337,8 +334,6 @@ private struct Stages: View {
             }
             CardDivider()
             desktop
-            CardDivider()
-            flow
         }
     }
 
@@ -417,31 +412,8 @@ private struct Stages: View {
         }
     }
 
-    private var flow: some View {
-        HStack(spacing: 12) {
-            Text("Run a flow").font(Theme.sans(13)).foregroundStyle(Theme.textPrimary)
-                .help("Runs last, once everything else is in place, and shows up in that flow's history")
-            Spacer(minLength: 12)
-            Menu {
-                Button("None") { setFlow(nil) }
-                Divider()
-                ForEach(flows.flows) { flow in
-                    Button(flow.name) { setFlow(flow.id) }
-                }
-            } label: {
-                MenuKeyLabel(title: flows.flow(profile.flowID ?? UUID())?.name ?? "None", compact: false)
-            }
-            .menuKey()
-        }
-        .cardRow()
-    }
-
     private func setSpace(_ index: Int?) {
         var next = profile; next.spaceIndex = index; engine.update(next)
-    }
-
-    private func setFlow(_ id: UUID?) {
-        var next = profile; next.flowID = id; engine.update(next)
     }
 }
 

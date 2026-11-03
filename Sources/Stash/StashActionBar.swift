@@ -56,9 +56,6 @@ struct StashActionBar: View {
 
     private var hasSelection: Bool { !selected.isEmpty }
 
-    /// Flows that start from a stash, offered under Run.
-    private var flows: [Flow] { state.isEmpty ? [] : FlowEngine.current?.stashFlows ?? [] }
-
     private var convertTitle: String {
         Self.convertTitle(hasSelection: hasSelection, files: convertible.count)
     }
@@ -71,7 +68,7 @@ struct StashActionBar: View {
     }
 
     var body: some View {
-        if hasSelection || !targets.isEmpty || !flows.isEmpty {
+        if hasSelection || !targets.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     if !archives.isEmpty { extractKey }
@@ -82,7 +79,6 @@ struct StashActionBar: View {
                             .help(mergeHelp(merge))
                     }
                     if !targets.isEmpty { convertKey }
-                    if !flows.isEmpty { runKey }
                     Spacer(minLength: 0)
                     if hasSelection {
                         Button("Deselect") { state.selection.removeAll() }
@@ -131,24 +127,6 @@ struct StashActionBar: View {
                 .disabled(working)
                 .help("Extract into \(settings.exportDirectory.lastPathComponent)")
         }
-    }
-
-    /// Run, as one key whose menu lists the flows that start from a stash.
-    /// Each gets the picked-out files, or every file when none are.
-    private var runKey: some View {
-        Menu {
-            ForEach(flows) { flow in
-                Button(flow.name) {
-                    let files = state.actionable.compactMap(\.fileURL)
-                    FlowEngine.current?.run(flow.id, trigger: ["files": .files(files)], source: "Stash")
-                    note = "Running \(flow.name)"
-                }
-            }
-        } label: {
-            MenuKeyLabel(title: "Run")
-        }
-        .menuKey(compact: true)
-        .help(hasSelection ? "Run a flow on the picked-out files" : "Run a flow on every file here")
     }
 
     /// Convert, as one key whose menu lists the formats.

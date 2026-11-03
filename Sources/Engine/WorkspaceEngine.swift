@@ -13,7 +13,7 @@ import Foundation
 /// 3. **Terminate** — close what this context does not want.
 /// 4. **Launch** — open what it does, skipping anything already up.
 /// 5. **Open** — links in the browser, folders in Finder.
-/// 6. **Flow** — one flow, last.
+/// 6. **Desktop** — switch to its desktop, last, so the apps open there.
 ///
 /// The order is not arbitrary. Telemetry first because it is instant and pure
 /// preference. The Dock next, because restarting it is the most visually
@@ -62,10 +62,6 @@ final class WorkspaceEngine: ObservableObject {
 
     /// Profiles whose shortcut macOS refused to hand over.
     @Published private(set) var unavailableShortcuts: Set<UUID> = []
-
-    /// Set by the app so the last stage runs a flow through the engine, with
-    /// the same history and policies as any other run.
-    var flowRunner: ((UUID) -> Bool)?
 
     private var isLoading = false
     private let hotkeys = HotkeyBindings(owner: "workspace")
@@ -242,15 +238,6 @@ final class WorkspaceEngine: ObservableObject {
         // means the apps open behind you on the desktop you just left.
         if let desktop = profile.spaceIndex {
             report.add("Desktop", SpaceManager.switchTo(desktop: desktop))
-        }
-
-        // 7 — Flow.
-        if let flowID = profile.flowID {
-            if flowRunner?(flowID) == true {
-                report.add("Flow", .done("started"))
-            } else {
-                report.add("Flow", .failed("that flow no longer exists"))
-            }
         }
 
         report.duration = Date().timeIntervalSince(started)

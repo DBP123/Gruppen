@@ -32,10 +32,8 @@ final class MenuBarManager: NSObject {
 
     /// Handed the objects the panel's content needs, since a status item lives
     /// outside the scene graph and can inherit nothing from it.
-    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings,
-                flows: FlowLibrary, engine: FlowEngine) {
-        panel.attach(store: store, navigation: navigation, settings: settings,
-                     flows: flows, engine: engine)
+    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings) {
+        panel.attach(store: store, navigation: navigation, settings: settings)
         WidgetManager.shared.onModulesChanged = { [weak self] in self?.reconcile() }
         // `start()` builds the modules and calls back into `reconcile()` here,
         // so the items and the samplers behind them come up together.
@@ -621,20 +619,15 @@ private final class MonitorPanelController {
     private var store: GroupStore?
     private var navigation: NavigationModel?
     private var settings: AppSettings?
-    private var flows: FlowLibrary?
-    private var engine: FlowEngine?
 
     /// Installed only while the panel is open.
     private var outsideClick: Any?
     private var insideClick: Any?
 
-    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings,
-                flows: FlowLibrary, engine: FlowEngine) {
+    func attach(store: GroupStore, navigation: NavigationModel, settings: AppSettings) {
         self.store = store
         self.navigation = navigation
         self.settings = settings
-        self.flows = flows
-        self.engine = engine
     }
 
     var isOpen: Bool { window?.isVisible ?? false }
@@ -666,13 +659,11 @@ private final class MonitorPanelController {
     private var lastClose: (button: NSStatusBarButton?, at: Date)?
 
     func open(from button: NSStatusBarButton?) {
-        guard let store, let navigation, let settings, let flows, let engine else { return }
+        guard let store, let navigation, let settings else { return }
         let content = MonitorPanel()
             .environmentObject(store)
             .environmentObject(navigation)
             .environmentObject(settings)
-            .environmentObject(flows)
-            .environmentObject(engine)
             .environmentObject(WidgetManager.shared)
 
         let host = FirstMouseHostingView(rootView: AnyView(content))

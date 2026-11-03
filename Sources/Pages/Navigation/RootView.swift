@@ -56,8 +56,6 @@ struct ToolHost: View {
             if navigation.showingSettingsPane { TelemetrySettingsView() } else { TelemetryDashboardView() }
         case .stash:
             StashPage()
-        case .scripts:
-            FlowsPage()
         case .workspaces:
             if navigation.showingSettingsPane { WorkspacesSettingsPane() } else { WorkspacesView() }
         case .settings:

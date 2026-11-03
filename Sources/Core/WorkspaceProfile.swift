@@ -55,16 +55,6 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
     /// Folders to open in Finder. Tildes are expanded at activation time, so a
     /// profile stays portable between machines.
     var folders: [String] = []
-    /// A flow to run last, or nil.
-    ///
-    /// A flow rather than a loose `.sh` path: flows already have argv-safe
-    /// code, a history and their own policies. Pointing at a bare file would
-    /// be a second, worse runner living inside the workspace engine.
-    ///
-    /// Saved as `flowID`. The old `scriptID` named a script from before flows
-    /// existed and is not read: those scripts are gone, and a profile pointing
-    /// at one would only fail.
-    var flowID: UUID?
 
     var color: Color { Color(hex: colorHex) }
     var shortcutDisplay: String? { shortcut?.display }
@@ -73,7 +63,7 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
     var isEmpty: Bool {
         telemetry == nil && !replacesDock && spaceIndex == nil
             && launches.isEmpty && terminates.isEmpty
-            && links.isEmpty && folders.isEmpty && flowID == nil
+            && links.isEmpty && folders.isEmpty
     }
 
     /// One line describing what activating this does, for the card face.
@@ -86,7 +76,6 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
         if !terminates.isEmpty { parts.append("\(terminates.count) quit") }
         if !links.isEmpty { parts.append("\(links.count) link\(links.count == 1 ? "" : "s")") }
         if !folders.isEmpty { parts.append("\(folders.count) folder\(folders.count == 1 ? "" : "s")") }
-        if flowID != nil { parts.append("flow") }
         return parts.isEmpty ? "Nothing configured" : parts.joined(separator: " · ")
     }
 
@@ -113,12 +102,11 @@ struct WorkspaceProfile: Identifiable, Codable, Hashable {
         terminates = try box.decodeIfPresent([AppEntry].self, forKey: .terminates) ?? []
         links = try box.decodeIfPresent([String].self, forKey: .links) ?? []
         folders = try box.decodeIfPresent([String].self, forKey: .folders) ?? []
-        flowID = try box.decodeIfPresent(UUID.self, forKey: .flowID)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, colorHex, shortcut, telemetry, dockApps, replacesDock
-        case spaceIndex, launches, terminates, links, folders, flowID
+        case spaceIndex, launches, terminates, links, folders
     }
 }
 

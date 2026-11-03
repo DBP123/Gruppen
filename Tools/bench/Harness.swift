@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Gruppen's own code, hosting one surface on its own, so its cost can be
 /// measured without anyone clicking anything. Built by `Tools/bench.sh`
-/// against a copy of Sources; `SURFACE` picks what runs (`editor`: one flow open in its editor):
+/// against a copy of Sources; `SURFACE` picks what runs:
 ///
 /// - `panel`     the menu bar dropdown, its modules live
 /// - `popover`   one module's popover — `KIND=cpu` (default), `network`, …
@@ -34,11 +34,9 @@ enum Bench {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("gruppen-bench-\(getpid())")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let store = GroupStore(fileURL: dir.appendingPathComponent("groups.json"))
-        let flows = FlowLibrary(folder: dir)
-        let engine = FlowEngine(library: flows)
         let navigation = NavigationModel()
         let workspaces = WorkspaceEngine()
-        keep = [store, flows, engine, navigation, workspaces]
+        keep = [store, navigation, workspaces]
         let widgets = WidgetManager.shared
 
         func show<V: View>(_ view: V, size: NSSize) {
@@ -46,8 +44,6 @@ enum Bench {
                 .environmentObject(store)
                 .environmentObject(navigation)
                 .environmentObject(AppSettings.shared)
-                .environmentObject(flows)
-                .environmentObject(engine)
                 .environmentObject(workspaces)
                 .environmentObject(widgets)
             let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 120, y: 120), size: size),
@@ -73,15 +69,7 @@ enum Bench {
         case "idle":
             let stash = StashCoordinator(store: store)
             stash.enable()
-            engine.triggers.rearm()
             keep.append(stash)
-        case "editor":
-            // An open editor, doing nothing: must cost nothing.
-            var flow = FlowTemplate.all.first { $0.id == "heic" }!.make()
-            flow = flows.add(flow)
-            let model = EditorModel(document: .flow(flow.id), library: flows, engine: engine)
-            keep.append(model)
-            show(FlowEditor().environmentObject(model), size: NSSize(width: 1320, height: 840))
         default:
             show(MonitorPanel(), size: NSSize(width: 306, height: 800))
             widgets.panelDidOpen()

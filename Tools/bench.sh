@@ -4,7 +4,7 @@
 #
 #   Tools/bench.sh <surface> <a> <b> [rounds]
 #
-#   surface   panel | popover | dashboard | pinned | idle | editor   (see Tools/bench/Harness.swift)
+#   surface   panel | popover | dashboard | pinned | idle   (see Tools/bench/Harness.swift)
 #   a, b      a git ref (HEAD, HEAD~1, a tag), "work" for the working tree, or
 #             a directory holding a Sources/ tree — a patched copy, for an
 #             experiment that should not touch the real one; the same build

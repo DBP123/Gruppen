@@ -1,61 +1,9 @@
 import AppKit
 import Foundation
 
-/// What sets a flow off, and the order a Gruppe closes in — the two decisions
-/// the triggers and the Gruppe store make on their own.
+/// Power edges, and the order a Gruppe closes in.
 func sectionSequencing() async {
-    T.begin("C. Flows — what sets a trigger off")
-
-    T.equal("an app input with a dot is a bundle", AppTarget("com.apple.Safari"), .bundle("com.apple.Safari"))
-    T.equal("one without is a process name", AppTarget(" node "), .process("node"))
-    T.check("a process name matches its executable, ignoring case",
-            AppTarget("Python3").matches(bundleID: "", executable: "python3"))
-    T.check("a bundle never matches by executable", !AppTarget("com.x.y").matches(bundleID: "", executable: "com.x.y"))
-
-    let weekdays = Schedule(minute: 8 * 60 + 30, weekdays: [2, 3, 4, 5, 6])
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "UTC")!
-    let friday = calendar.date(from: DateComponents(year: 2026, month: 10, day: 30, hour: 9))!
-    let next = weekdays.next(after: friday, calendar: calendar)
-    T.equal("after Friday's run, a weekday schedule is next due on Monday",
-            next.map { calendar.component(.weekday, from: $0) }, 2)
-    T.equal("at its minute", next.map { calendar.component(.minute, from: $0) }, 30)
-    T.check("a schedule with no days is never due", Schedule(minute: 0, weekdays: []).next(after: friday) == nil)
-    T.equal("days are kept as text", Schedule.days(" 2,3 ,9,x"), [2, 3])
-    T.equal("a key combination survives being kept as text",
-            HotkeyValue.shortcut(HotkeyValue.text(Shortcut(keyCode: 2, modifiers: 256, label: "D"))),
-            Shortcut(keyCode: 2, modifiers: 256, label: "D"))
-
-    // End to end: the Gruppe notification, through the armed triggers, to a
-    // recorded run.
-    let dev = UUID()
-    await withTempDirAsync { dir -> Void in
-        let (library, engine) = await MainActor.run { () -> (FlowLibrary, FlowEngine) in
-            let library = FlowLibrary(folder: dir)
-            return (library, FlowEngine(library: library))
-        }
-        let hat = Block("when.gruppe", inputs: ["gruppe": .literal(.text(Pick.join(dev, "Dev"))),
-                                               "event": .literal(.text("launches"))])
-        let flow = Flow(name: "On launch", isEnabled: true, triggers: [hat],
-                        body: [Block("text.make", inputs: ["text": .literal(.text("ok"))])])
-        let id = flow.id
-        await MainActor.run {
-            library.flows = [flow]
-            NotificationCenter.default.post(name: GroupStore.didClose, object: dev)
-            NotificationCenter.default.post(name: GroupStore.didLaunch, object: dev)
-        }
-        for _ in 0..<50 {
-            if await MainActor.run(body: { library.runs[id]?.last?.outcome == .succeeded }) { break }
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-        let runs = await MainActor.run { library.runs[id] ?? [] }
-        T.equal("a Gruppe launching runs its armed flow once", runs.count, 1)
-        T.equal("and the run worked", runs.first?.outcome, .succeeded)
-        T.equal("its trace names the block that ran", runs.first?.blocks.map(\.title), ["Text"])
-        await MainActor.run { engine.triggers.disarm() }
-    }
-
-    T.begin("C. Automations — power edges")
+    T.begin("C. Power — edges, not notifications")
 
     // macOS posts a power-source change every time the charge moves, so the
     // adapter triggers must fire on the edge, not on the notification.

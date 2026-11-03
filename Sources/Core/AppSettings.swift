@@ -125,13 +125,6 @@ final class AppSettings: ObservableObject {
         didSet { persist(stashToggleShortcut, oldValue, Keys.stashToggleShortcut) }
     }
 
-    /// Opens the quick palette of actions. Nil for none.
-    @Published var paletteShortcut: Shortcut? {
-        didSet {
-            persist(paletteShortcut, oldValue, Keys.paletteShortcut)
-            QuickPalette.shared.applyShortcut()
-        }
-    }
 
     @Published private(set) var loginItemError: String?
 
@@ -176,7 +169,6 @@ final class AppSettings: ObservableObject {
         static let exportPath = "stashExportPath"
         static let stashShortcut = "stashSummonShortcut"
         static let stashToggleShortcut = "stashToggleShortcut"
-        static let paletteShortcut = "paletteShortcut"
     }
 
     private enum Toggle { case menuBar, dockIcon }
@@ -217,7 +209,6 @@ final class AppSettings: ObservableObject {
         exportPath = defaults.string(forKey: Keys.exportPath) ?? StashExporter.defaultDestination.path
         stashShortcut = Self.shortcut(forKey: Keys.stashShortcut)
         stashToggleShortcut = Self.shortcut(forKey: Keys.stashToggleShortcut)
-        paletteShortcut = Self.shortcut(forKey: Keys.paletteShortcut)
         launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
