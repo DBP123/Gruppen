@@ -68,10 +68,7 @@ enum DockManager {
     /// cannot repair from inside the app, so it lives beside the groups and the
     /// scripts as a file they can see, copy, and read.
     private static var backupURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let base = support.appendingPathComponent("Gruppen", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("dock-original.plist")
+        AppPaths.file("dock-original.plist")
     }
 
     static var hasBackup: Bool { FileManager.default.fileExists(atPath: backupURL.path) }

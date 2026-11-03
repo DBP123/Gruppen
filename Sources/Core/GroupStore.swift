@@ -72,13 +72,10 @@ final class GroupStore: ObservableObject {
     /// The real store location. Note that this does *not* follow `$HOME` —
     /// tests must pass an explicit `fileURL` to stay off the live data.
     static var defaultFileURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let base = support.appendingPathComponent("Gruppen", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let url = base.appendingPathComponent("groups.json")
+        let url = AppPaths.file("groups.json")
 
         // Carry over data written under the app's former name.
-        let legacy = support.appendingPathComponent("AutoLaunch/groups.json")
+        let legacy = AppPaths.support.deletingLastPathComponent().appendingPathComponent("AutoLaunch/groups.json")
         if !FileManager.default.fileExists(atPath: url.path),
            FileManager.default.fileExists(atPath: legacy.path) {
             try? FileManager.default.copyItem(at: legacy, to: url)

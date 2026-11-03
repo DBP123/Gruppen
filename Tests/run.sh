@@ -20,12 +20,18 @@ OUT="build/suite-$ARCH"
 
 source "sdk.sh"
 
+# The Beta branch's CHANNEL file compiles the suite as the beta app, the way
+# build.sh does.
+CHANNEL_FLAGS=""
+if [ -f CHANNEL ] && [ "$(tr -d '[:space:]' < CHANNEL)" = "beta" ]; then CHANNEL_FLAGS="-DBETA"; fi
+
 mkdir -p build
 echo "Building the suite for ${ARCH}..."
 xcrun swiftc \
     -parse-as-library \
     -sdk "$SDK" \
     -target "${ARCH}-apple-macos13.0" \
+    $CHANNEL_FLAGS \
     -o "$OUT" \
     $(find Sources -name '*.swift' ! -name 'GruppenApp.swift' | sort) \
     $(find Tests -name '*.swift' | sort)

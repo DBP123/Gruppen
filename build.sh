@@ -13,8 +13,19 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.70"
+VERSION="1.71"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
+
+# A CHANNEL file saying "beta" — only the Beta branch has one — builds
+# "Gruppen Beta": its own app, bundle id and data folder (see AppPaths), so it
+# installs beside the release instead of over it. See BRANCHES.md.
+CHANNEL_FLAGS=""
+if [ -f CHANNEL ] && [ "$(tr -d '[:space:]' < CHANNEL)" = "beta" ]; then
+    APP_NAME="Gruppen Beta"
+    BUNDLE_ID="com.dhilanpatel.gruppen.beta"
+    EXECUTABLE="GruppenBeta"
+    CHANNEL_FLAGS="-DBETA"
+fi
 MIN_MACOS="13.0"
 
 BUILD_DIR="build"
@@ -73,6 +84,7 @@ compile_slice() {
         -parse-as-library \
         -sdk "$SDK" \
         -target "${1}-apple-macos${MIN_MACOS}" \
+        $CHANNEL_FLAGS \
         -o "$2" \
         $SOURCES
 }

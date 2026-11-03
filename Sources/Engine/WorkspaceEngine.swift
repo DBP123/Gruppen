@@ -74,10 +74,7 @@ final class WorkspaceEngine: ObservableObject {
     private let fileURL: URL
 
     nonisolated static var defaultFileURL: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let base = support.appendingPathComponent("Gruppen", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base.appendingPathComponent("profiles.json")
+        AppPaths.file("profiles.json")
     }
 
     init(fileURL: URL = WorkspaceEngine.defaultFileURL) {

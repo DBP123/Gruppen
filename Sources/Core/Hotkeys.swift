@@ -55,7 +55,7 @@ final class HotkeyCenter {
 
     private var handlers: [UInt32: () -> Void] = [:]
     private var refs: [UInt32: EventHotKeyRef] = [:]
-    /// Which subsystem claimed each binding. Gruppen and scripts both hold
+    /// Which subsystem claimed each binding. Gruppen and profiles both hold
     /// hotkeys, and re-syncing one must not silently drop the other's.
     private var owners: [UInt32: String] = [:]
     private var nextID: UInt32 = 1
