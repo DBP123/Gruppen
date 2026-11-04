@@ -9,7 +9,13 @@ import SwiftUI
 /// - `popover`   one module's popover — `KIND=cpu` (default), `network`, …
 /// - `dashboard` the Telemetry page
 /// - `pinned`    no window, modules pinned to the menu bar only (`PINNED=power,cpu`)
+/// - `occluded`  the Telemetry page, minimised after 2 s, with `PINNED` (default
+///               power) pinned — what a dashboard costs once nobody can see it
 /// - `idle`      the app's objects alive, stash monitors armed, nothing open
+///
+/// Pins are written to the harness's defaults, so every surface sets them —
+/// to none, unless it is `pinned` or `occluded` — or a `pinned` run would leave
+/// modules sampling in every run after it.
 @main
 struct BenchHarness {
     static func main() {
@@ -39,7 +45,8 @@ enum Bench {
         keep = [store, navigation, workspaces]
         let widgets = WidgetManager.shared
 
-        func show<V: View>(_ view: V, size: NSSize) {
+        @discardableResult
+        func show<V: View>(_ view: V, size: NSSize) -> NSWindow {
             let content = view
                 .environmentObject(store)
                 .environmentObject(navigation)
@@ -47,14 +54,19 @@ enum Bench {
                 .environmentObject(workspaces)
                 .environmentObject(widgets)
             let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 120, y: 120), size: size),
-                                  styleMask: [.titled], backing: .buffered, defer: false)
+                                  styleMask: [.titled, .miniaturizable], backing: .buffered, defer: false)
             window.contentView = NSHostingView(rootView: content)
             window.collectionBehavior = [.canJoinAllSpaces]
             window.orderFrontRegardless()
             keep.append(window)
+            return window
         }
 
         widgets.start()
+        let pinned: [WidgetKind] = surface == "pinned" || surface == "occluded"
+            ? (environment["PINNED"] ?? "power").split(separator: ",").compactMap { WidgetKind(rawValue: String($0)) }
+            : []
+        for kind in WidgetKind.allCases where kind.isPinnable { widgets.setPinned(kind, pinned.contains(kind)) }
         switch surface {
         case "popover":
             let kind = environment["KIND"].flatMap(WidgetKind.init(rawValue:)) ?? .cpu
@@ -63,9 +75,13 @@ enum Bench {
         case "dashboard":
             show(TelemetryDashboardView(), size: NSSize(width: 1100, height: 800))
         case "pinned":
-            let kinds = (environment["PINNED"] ?? "power").split(separator: ",")
-                .compactMap { WidgetKind(rawValue: String($0)) }
-            for kind in WidgetKind.allCases where kind.isPinnable { widgets.setPinned(kind, kinds.contains(kind)) }
+            break
+        case "occluded":
+            let window = show(TelemetryDashboardView(), size: NSSize(width: 1100, height: 800))
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                window.miniaturize(nil)
+            }
         case "idle":
             let stash = StashCoordinator(store: store)
             stash.enable()

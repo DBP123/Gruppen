@@ -4,7 +4,7 @@
 #
 #   Tools/bench.sh <surface> <a> <b> [rounds]
 #
-#   surface   panel | popover | dashboard | pinned | idle   (see Tools/bench/Harness.swift)
+#   surface   panel | popover | dashboard | pinned | occluded | idle   (see Tools/bench/Harness.swift)
 #   a, b      a git ref (HEAD, HEAD~1, a tag), "work" for the working tree, or
 #             a directory holding a Sources/ tree — a patched copy, for an
 #             experiment that should not touch the real one; the same build
@@ -12,7 +12,7 @@
 #   rounds    a/b pairs, default 3
 #
 #   KIND=network    which module's popover
-#   PINNED=power    which modules a pinned run keeps in the menu bar
+#   PINNED=power    which modules a pinned or occluded run keeps in the menu bar
 #   RUN=45          seconds measured per run, after a 6 s settle
 #   SAMPLE=1        also `sample` each side's first run, and summarise it with
 #                   Tools/attribute.py
