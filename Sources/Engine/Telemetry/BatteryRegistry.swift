@@ -49,7 +49,7 @@ struct BatteryRegistry {
 
     /// Guarded by `serviceLock`: the power and thermal samplers run on the
     /// telemetry queue, but tests and the hardware profile read from elsewhere.
-    private static var cachedService: io_service_t = 0
+    nonisolated(unsafe) private static var cachedService: io_service_t = 0
     private static let serviceLock = NSLock()
 
     // MARK: Lookup

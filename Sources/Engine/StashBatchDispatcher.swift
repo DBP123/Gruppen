@@ -309,11 +309,11 @@ enum StashBatchDispatcher {
     }
 
     /// How long one extraction may take before it is stopped.
-    static let extractTimeout: TimeInterval = 600
+    nonisolated static let extractTimeout: TimeInterval = 600
     /// Expansion past this many times the archive's size…
-    static let bombRatio: Int64 = 100
+    nonisolated static let bombRatio: Int64 = 100
     /// …and past this many bytes, is refused.
-    static let bombFloor: Int64 = 1 << 30
+    nonisolated static let bombFloor: Int64 = 1 << 30
 
     struct ArchivePlan: Equatable {
         var entries: [String]

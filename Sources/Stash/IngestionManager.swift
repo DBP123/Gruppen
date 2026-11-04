@@ -322,7 +322,7 @@ private final class CappedImageDownload: NSObject, URLSessionDataDelegate, @unch
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
                     didReceive response: URLResponse,
-                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+                    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
         let succeeded = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
         let isImage = response.mimeType?.lowercased().hasPrefix("image/") ?? false
         let fits = response.expectedContentLength <= Int64(limit)

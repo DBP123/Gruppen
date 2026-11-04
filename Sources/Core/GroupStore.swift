@@ -181,7 +181,7 @@ final class GroupStore: ObservableObject {
            size > logLimit {
             rotateLog()
         }
-        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        let descriptor = Darwin.open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
         guard descriptor >= 0 else { return }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         logSize = Int((try? handle.seekToEnd()) ?? 0)
