@@ -50,12 +50,7 @@ final class MemorySampler: TelemetrySampler, @unchecked Sendable {
         return UInt64(size)
     }()
 
-    static let installed: UInt64 = {
-        var value: UInt64 = 0
-        var size = MemoryLayout<UInt64>.size
-        guard sysctlbyname("hw.memsize", &value, &size, nil, 0) == 0 else { return 0 }
-        return value
-    }()
+    static let installed: UInt64 = ModelNameResolver.sysctlInteger("hw.memsize") ?? 0
 
     /// The cumulative counters a rate is differenced against. `vm_statistics64`
     /// reports these as totals since boot, so a rate needs the previous pass —

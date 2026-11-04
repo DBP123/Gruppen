@@ -178,19 +178,8 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
         return ticks
     }
 
-    /// Marketing name of the chip, read once. Pure `sysctlbyname` — the C
-    /// function, not the shell tool.
-    static let brand: String = {
-        var size = 0
-        guard sysctlbyname("machdep.cpu.brand_string", nil, &size, nil, 0) == 0, size > 0 else {
-            return "Processor"
-        }
-        var buffer = [CChar](repeating: 0, count: size)
-        guard sysctlbyname("machdep.cpu.brand_string", &buffer, &size, nil, 0) == 0 else {
-            return "Processor"
-        }
-        return String(cString: buffer)
-    }()
+    /// Marketing name of the chip, read once.
+    static let brand: String = ModelNameResolver.sysctlString("machdep.cpu.brand_string") ?? "Processor"
 }
 
 @MainActor
