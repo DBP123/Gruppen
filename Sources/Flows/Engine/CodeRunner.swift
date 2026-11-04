@@ -234,10 +234,7 @@ actor PackageEnvironments {
 
     private var preparing: [String: Task<String, Error>] = [:]
 
-    static var root: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return support.appendingPathComponent("Gruppen/Environments", isDirectory: true)
-    }
+    static var root: URL { AppPaths.support.appendingPathComponent("Environments", isDirectory: true) }
 
     static func key(_ interpreter: String, _ packages: [String]) -> String {
         // FNV-1a: stable across launches, unlike `hashValue`, and only ever a

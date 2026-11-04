@@ -318,7 +318,7 @@ final class ExternalEdit {
 
     static func open(_ code: String, language: CodeLanguage, name: String, block: UUID, onChange: @escaping (String) -> Void) {
         sessions[block]?.stop()
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Gruppen code", isDirectory: true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("\(AppPaths.name) code", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let safe = name.replacingOccurrences(of: "/", with: "-")
         let file = folder.appendingPathComponent("\(safe) \(block.uuidString.prefix(4)).\(language.fileExtension)")

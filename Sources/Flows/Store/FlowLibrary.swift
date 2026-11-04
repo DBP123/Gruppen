@@ -73,12 +73,7 @@ final class FlowLibrary: ObservableObject {
     /// Each saved output value is cut to this many characters.
     nonisolated static let traceLimit = 4096
 
-    nonisolated static var defaultFolder: URL {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let base = support.appendingPathComponent("Gruppen", isDirectory: true)
-        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        return base
-    }
+    nonisolated static var defaultFolder: URL { AppPaths.support }
 
     init(folder: URL = FlowLibrary.defaultFolder) {
         self.folder = folder

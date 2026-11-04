@@ -63,7 +63,6 @@ done
 rm -rf "$APP_DIR"
 mkdir -p \
     "$APP_DIR/Contents/MacOS" \
-    "$APP_DIR/Contents/Helpers" \
     "$APP_DIR/Contents/Resources"
 
 # Universal by default.
@@ -89,14 +88,17 @@ compile_slice() {
         $SOURCES
 }
 
-# The two small programs flows use: the JavaScript runner for Macs without
-# Node, and the `gruppen` command for Terminal. Each is one file.
+# The small programs flows use — the JavaScript runner for Macs without Node,
+# and the `gruppen` command for Terminal — one file each under Helpers/. A
+# build without flows has no Helpers/ and skips all of this, which is what
+# lets one build.sh serve both branches.
 compile_helper() {
     xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
 }
 
 build_helpers() {
-    for helper in gruppen-js gruppen; do
+    mkdir -p "$APP_DIR/Contents/Helpers"
+    for helper in $(ls Helpers); do
         if [ "$FAST" = "1" ]; then
             compile_helper "$helper" "$ARCH" "$APP_DIR/Contents/Helpers/$helper"
         else
@@ -127,8 +129,30 @@ else
     echo "Linked universal binary ($(lipo -archs "$APP_DIR/Contents/MacOS/$EXECUTABLE"))"
 fi
 
-echo "Compiling helpers..."
-build_helpers
+if [ -d Helpers ]; then
+    echo "Compiling helpers..."
+    build_helpers
+fi
+
+# What only a build with flows needs: gruppen:// links, which run flows, and
+# the Wi-Fi name, which a flow can wait for.
+FLOW_KEYS=""
+if [ -d Sources/Flows ]; then
+    FLOW_KEYS="<key>NSLocationUsageDescription</key>
+    <string>Gruppen reads the name of the Wi-Fi network you join, for flows that run on a network. macOS only shares it with Location Services on.</string>
+
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>${BUNDLE_ID}.run</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>gruppen</string>
+            </array>
+        </dict>
+    </array>"
+fi
 
 cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -180,23 +204,10 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
     <key>NSSupportsSuddenTermination</key>
     <false/>
 
-    <key>NSLocationUsageDescription</key>
-    <string>Gruppen reads the name of the Wi-Fi network you join, for automations that run on a network. macOS only shares it with Location Services on.</string>
-
     <key>NSAppleEventsUsageDescription</key>
-    <string>Gruppen sends Apple events to other apps when a flow of yours tells it to — switching Dark Mode, emptying the Trash, or what your own AppleScript asks.</string>
+    <string>Gruppen asks Finder to show you files, and sends Apple events to other apps when something you set up asks it to.</string>
 
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>${BUNDLE_ID}.run</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>gruppen</string>
-            </array>
-        </dict>
-    </array>
+    ${FLOW_KEYS}
 </dict>
 </plist>
 PLIST
@@ -213,9 +224,11 @@ fi
 echo "Signing (ad-hoc)..."
 
 # Nested code first: the app's signature covers its helpers' signatures.
-for helper in "$APP_DIR/Contents/Helpers/"*; do
-    codesign --force --sign - --timestamp=none "$helper"
-done
+if [ -d "$APP_DIR/Contents/Helpers" ]; then
+    for helper in "$APP_DIR/Contents/Helpers/"*; do
+        codesign --force --sign - --timestamp=none "$helper"
+    done
+fi
 
 codesign \
     --force \

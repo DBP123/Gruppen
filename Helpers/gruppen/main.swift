@@ -24,7 +24,12 @@ arguments.removeFirst()
 switch command {
 case "list":
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    // The app this command came inside: a beta build keeps its flows apart.
+    #if BETA
+    let file = support.appendingPathComponent("Gruppen Beta/flows.json")
+    #else
     let file = support.appendingPathComponent("Gruppen/flows.json")
+    #endif
     guard let data = try? Data(contentsOf: file),
           let flows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { fail("no flows yet") }
     for flow in flows {
