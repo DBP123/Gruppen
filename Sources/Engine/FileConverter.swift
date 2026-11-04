@@ -115,8 +115,9 @@ enum FileConverter {
             if target.ext == "pdf" {
                 try autoreleasepool { try documentToPDF(url, output: output) }
             } else {
+                // `-noload` for HTML input: see `readableWithoutLoading`.
                 try await run("/usr/bin/textutil",
-                        ["-convert", target.ext, url.path, "-output", output.path])
+                        (isHTML(url) ? ["-noload"] : []) + ["-convert", target.ext, url.path, "-output", output.path])
             }
         case .audio:
             try await run("/usr/bin/afconvert",
@@ -172,8 +173,10 @@ enum FileConverter {
     /// text through this rather than repeating the CoreText walk and the
     /// zero-length-frame guard that keeps it from looping forever.
     nonisolated static func documentToPDF(_ url: URL, output: URL) throws {
+        let readable = try readableWithoutLoading(url)
+        defer { if readable != url { try? FileManager.default.removeItem(at: readable) } }
         var attributes: NSDictionary?
-        guard let read = try? NSAttributedString(url: url, options: [:],
+        guard let read = try? NSAttributedString(url: readable, options: [:],
                                                  documentAttributes: &attributes),
               read.length > 0
         else { throw ConversionError.unreadable(url.lastPathComponent) }
@@ -208,6 +211,45 @@ enum FileConverter {
             start += visible.length
         }
         context.closePDF()
+    }
+
+    /// HTML, rewritten as RTF by `textutil -noload` in its own process, so it
+    /// is never opened by `NSAttributedString` directly. Anything else is
+    /// returned as it is.
+    ///
+    /// AppKit's HTML importer is WebKit. It must run on the main thread, and
+    /// this runs off it; and it loads whatever the page refers to — remote
+    /// images (a tracking pixel tells the sender the file was opened),
+    /// stylesheets, `file://` URLs to anything on this Mac. `-noload` loads
+    /// none of it. Blocking, with a time limit, because the callers are
+    /// synchronous and already off the main actor.
+    nonisolated static func readableWithoutLoading(_ url: URL) throws -> URL {
+        guard isHTML(url) else { return url }
+        let rtf = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gruppen-html-\(UUID().uuidString).rtf")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/textutil")
+        process.arguments = ["-noload", "-convert", "rtf", url.path, "-output", rtf.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        try process.run()
+        if finished.wait(timeout: .now() + 60) == .timedOut {
+            process.terminate()
+            if finished.wait(timeout: .now() + 3) == .timedOut { kill(process.processIdentifier, SIGKILL) }
+            try? FileManager.default.removeItem(at: rtf)
+            throw ConversionError.unreadable(url.lastPathComponent)
+        }
+        guard process.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: rtf)
+            throw ConversionError.unreadable(url.lastPathComponent)
+        }
+        return rtf
+    }
+
+    nonisolated static func isHTML(_ url: URL) -> Bool {
+        ["html", "htm"].contains(url.pathExtension.lowercased())
     }
 
     // MARK: - Tools
