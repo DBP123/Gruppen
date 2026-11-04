@@ -123,7 +123,15 @@ func sectionCore() {
         let store = GroupStore(fileURL: file)
         T.check("a corrupt store file degrades to empty rather than crashing",
                 store.groups.isEmpty)
+        let kept = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        T.check("…and its bytes are kept before anything is saved over them",
+                kept.contains { $0.hasPrefix("groups.json.unreadable-") }, kept.joined(separator: ", "))
     }
+
+    // A hand-edited delay cannot trap the sequencer.
+    let wild = try? JSONDecoder().decode(AppGroup.self,
+        from: Data(#"{"name":"W","sequenceDelay":1e300}"#.utf8))
+    T.equal("a decoded sequence delay is clamped", wild?.sequenceDelay, 60)
 
     T.begin("A. Core model — app entry matching")
 

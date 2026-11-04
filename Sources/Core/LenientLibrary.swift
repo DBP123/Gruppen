@@ -26,6 +26,8 @@ enum LenientLibrary {
         /// something this build could not make sense of, which is worth saying
         /// out loud rather than quietly dropping.
         var skipped: Int
+        /// The file was not a JSON array at all — truncated, or mangled by hand.
+        var unparseable = false
     }
 
     /// Decodes `[T]`, element by element only if it has to.
@@ -43,7 +45,7 @@ enum LenientLibrary {
               let elements = parsed as? [Any] else {
             // Not an array at all — a truncated or hand-mangled file. There is
             // nothing to salvage element-wise.
-            return Result(items: [], skipped: 0)
+            return Result(items: [], skipped: 0, unparseable: true)
         }
 
         var items: [T] = []
@@ -83,7 +85,27 @@ enum LenientLibrary {
             GroupStore.log("\(label): kept \(result.items.count), "
                            + "skipped \(result.skipped) unreadable entr\(result.skipped == 1 ? "y" : "ies")")
         }
+        if result.skipped > 0 || (result.unparseable && !data.isEmpty) {
+            keepUnreadable(url, label: label)
+        }
         return result.items
+    }
+
+    /// Copies a file this build could not fully read to
+    /// `<name>.unreadable-<moment>` beside it, before anything is saved over it.
+    ///
+    /// The next edit rewrites the file with only what was understood — for a
+    /// truncated file, an empty list. Whatever was lost may still be in those
+    /// bytes, recoverable by hand or by a newer build, so they are kept.
+    static func keepUnreadable(_ url: URL, label: String) {
+        let copy = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent).unreadable-\(Stamp.moment())")
+        do {
+            try FileManager.default.copyItem(at: url, to: copy)
+            GroupStore.log("\(label): kept the unreadable original as \(copy.lastPathComponent)")
+        } catch {
+            GroupStore.log("\(label): could not keep the unreadable original — \(error.localizedDescription)")
+        }
     }
 
     /// The other direction: writes `value` as readable JSON, atomically.

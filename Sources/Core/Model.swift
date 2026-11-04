@@ -151,7 +151,10 @@ struct AppGroup: Identifiable, Codable, Hashable {
             colorHex = Theme.defaultGroupHex
         }
         isSequenced = try container.decodeIfPresent(Bool.self, forKey: .isSequenced) ?? false
-        sequenceDelay = try container.decodeIfPresent(TimeInterval.self, forKey: .sequenceDelay) ?? 0.5
+        // Clamped: a hand-edited 1e300 would trap converting to nanoseconds
+        // the first time the Gruppe ran in order.
+        let delay = try container.decodeIfPresent(TimeInterval.self, forKey: .sequenceDelay) ?? 0.5
+        sequenceDelay = delay.isFinite ? min(max(delay, 0), 60) : 0.5
 
         if let recorded = try container.decodeIfPresent(Shortcut.self, forKey: .shortcut) {
             shortcut = recorded
