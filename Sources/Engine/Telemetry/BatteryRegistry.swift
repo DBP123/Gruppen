@@ -25,16 +25,32 @@ struct BatteryRegistry {
     var reportsMissing = false
 
     /// The node, or nil on a Mac with no battery.
+    ///
+    /// The service handle is found once and kept: matching walks the registry,
+    /// and the battery node outlives the app. It is let go, and found afresh on
+    /// the next read, only if reading through it fails.
     static func read() -> BatteryRegistry? {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
-        guard service != 0 else { return nil }
-        defer { IOObjectRelease(service) }
+        serviceLock.lock()
+        defer { serviceLock.unlock() }
+        if cachedService == 0 {
+            cachedService = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+            guard cachedService != 0 else { return nil }
+        }
         var raw: Unmanaged<CFMutableDictionary>?
-        guard IORegistryEntryCreateCFProperties(service, &raw, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+        guard IORegistryEntryCreateCFProperties(cachedService, &raw, kCFAllocatorDefault, 0) == KERN_SUCCESS,
               let fields = raw?.takeRetainedValue() as? [String: Any]
-        else { return nil }
+        else {
+            IOObjectRelease(cachedService)
+            cachedService = 0
+            return nil
+        }
         return BatteryRegistry(fields: fields, reportsMissing: true)
     }
+
+    /// Guarded by `serviceLock`: the power and thermal samplers run on the
+    /// telemetry queue, but tests and the hardware profile read from elsewhere.
+    private static var cachedService: io_service_t = 0
+    private static let serviceLock = NSLock()
 
     // MARK: Lookup
 
