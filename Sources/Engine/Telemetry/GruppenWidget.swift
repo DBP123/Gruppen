@@ -391,13 +391,14 @@ class TelemetryModule<S: TelemetrySampler>: ObservableObject, GruppenWidget {
     var menuBarSample: MenuBarSample? {
         guard let summary = pinnedSummary else { return nil }
         let stack = pinnedStack
+        let battery = pinnedBattery
         return MenuBarSample(summary: summary,
                              top: stack?.0,
                              bottom: stack?.1,
                              value: pinnedValue,
-                             batteryPercent: pinnedBattery?.percent,
-                             powerState: pinnedBattery?.state,
-                             condition: pinnedBattery?.condition)
+                             batteryPercent: battery?.percent,
+                             powerState: battery?.state,
+                             condition: battery?.condition)
     }
 }
 
