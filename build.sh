@@ -93,7 +93,7 @@ compile_slice() {
 # build without flows has no Helpers/ and skips all of this, which is what
 # lets one build.sh serve both branches.
 compile_helper() {
-    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" -o "$3" "Helpers/$1/main.swift"
+    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
 }
 
 build_helpers() {
