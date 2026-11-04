@@ -75,6 +75,29 @@ func sectionTools() async {
     let long = FileName.sanitized(String(repeating: "é", count: 300) + ".jpeg")
     T.check("a long name is cut, keeping its extension",
             long.utf8.count <= FileName.maxBytes && long.hasSuffix(".jpeg"), "\(long.utf8.count) bytes")
+    // Archives are read before they are trusted.
+    T.check("an entry climbing out is unsafe", StashBatchDispatcher.isUnsafeEntry("a/../../.zshrc"))
+    T.check("an absolute entry is unsafe", StashBatchDispatcher.isUnsafeEntry("/etc/hosts"))
+    T.check("an ordinary entry is not", !StashBatchDispatcher.isUnsafeEntry("folder/file..name.txt"))
+    T.equal("zipinfo's total is read",
+            StashBatchDispatcher.expandedBytes(fromTotals: "2 files, 1234 bytes uncompressed, 567 bytes compressed:  54.1%\n"),
+            1234)
+    T.check("a summary that isn't one reads as nothing",
+            StashBatchDispatcher.expandedBytes(fromTotals: "zipinfo: cannot find zipfile") == nil)
+    withTempDir { dir in
+        try? FileManager.default.createDirectory(at: dir.appendingPathComponent("in"), withIntermediateDirectories: true)
+        try? FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("in/inside").path,
+                                                    withDestinationPath: "../in")
+        T.check("a link that stays inside is fine", StashBatchDispatcher.linkLeaving(dir) == nil)
+        try? FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("in/out").path,
+                                                    withDestinationPath: "../../..")
+        T.equal("a link that leaves is found", StashBatchDispatcher.linkLeaving(dir), "out")
+    }
+    withTempDir { dir in
+        try? FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("abs").path,
+                                                    withDestinationPath: "/Users")
+        T.equal("an absolute link is found", StashBatchDispatcher.linkLeaving(dir), "abs")
+    }
     withTempDir { dir in
         let url = FileName.unique("../../escape.txt", in: dir)
         T.equal("a unique URL is always a direct child of its folder",

@@ -213,7 +213,7 @@ enum FileConverter {
     // MARK: - Tools
 
     private nonisolated static func run(_ tool: String, _ arguments: [String]) async throws {
-        let result = try await Tool.run(tool, arguments)
+        let result = try await Tool.run(tool, arguments, timeout: 120)
         guard result.succeeded else {
             throw ConversionError.toolFailed(result.tool, result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }

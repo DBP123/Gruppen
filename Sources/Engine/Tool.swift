@@ -11,6 +11,10 @@ import Foundation
 /// that is one of the cooperative pool's few threads, held for as long as the
 /// tool takes.
 enum Tool {
+    /// The most of each stream a result keeps, in bytes. A caller that needs
+    /// all of a tool's output treats a result this long as incomplete.
+    static let outputLimit = 8 * 1024 * 1024
+
     struct Result: Sendable {
         let tool: String
         let status: Int32
@@ -29,7 +33,11 @@ enum Tool {
         }
     }
 
-    /// Runs `path` with `arguments` and returns once it has exited. Throws only
+    /// Runs `path` with `arguments` and returns once it has exited.
+    ///
+    /// Every caller passes file paths as absolute paths, so a file named
+    /// `-rf` arrives as `/…/-rf` and can never be read as an option. Keep it
+    /// that way: build arguments from `URL.path`, never from a bare name. Throws only
     /// when the tool could not be started at all; a non-zero exit is in the
     /// result, for the caller to word.
     ///
@@ -119,11 +127,27 @@ enum Tool {
 
 /// A process, stoppable from the watchdog's queue and the cancellation
 /// handler's thread.
+///
+/// Stopping is a request first and an order second. SIGTERM lets a tool clean
+/// up; one that ignores it, or is stuck, gets SIGKILL `killAfter` seconds later.
+/// SIGTERM alone left the caller waiting for an exit that might never come — a
+/// timeout that didn't end anything.
 private final class ProcessHandle: @unchecked Sendable {
+    static let killAfter: TimeInterval = 3
+
     private let process: Process
     init(_ process: Process) { self.process = process }
     var isRunning: Bool { process.isRunning }
-    func terminate() { if process.isRunning { process.terminate() } }
+
+    func terminate() {
+        guard process.isRunning else { return }
+        process.terminate()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.killAfter) { [self] in
+            // `isRunning` is this child's own state, so a pid the system has
+            // since handed to someone else is never signalled.
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+    }
 }
 
 /// Two pipes drained from arbitrary queues. Every field is behind `lock`.
@@ -142,10 +166,19 @@ private final class OutputCollector: @unchecked Sendable {
     func appendOutput(_ data: Data) { append(data, isError: false) }
     func appendError(_ data: Data) { append(data, isError: true) }
 
+    /// Kept per stream. A tool that prints without end — or is made to — would
+    /// otherwise grow this until the app runs out of memory. Past the limit,
+    /// output is still read (so the pipe never blocks the tool) and dropped.
+    static let limit = Tool.outputLimit
+
     private func append(_ data: Data, isError: Bool) {
         guard !data.isEmpty else { return }
         lock.lock()
-        if isError { errorData.append(data) } else { outputData.append(data) }
+        if isError {
+            if errorData.count < Self.limit { errorData.append(data.prefix(Self.limit - errorData.count)) }
+        } else {
+            if outputData.count < Self.limit { outputData.append(data.prefix(Self.limit - outputData.count)) }
+        }
         var lines: [String] = []
         if onLine != nil {
             var buffer = (pending[isError] ?? Data()) + data

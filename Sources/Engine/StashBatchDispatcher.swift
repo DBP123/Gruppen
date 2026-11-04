@@ -255,10 +255,28 @@ enum StashBatchDispatcher {
     /// Archive Utility's behaviour, and for its reason: `report.zip` extracted
     /// beside an existing `report/` would merge into it, and a batch that
     /// quietly overwrites someone's folder is not recoverable.
+    ///
+    /// An archive is somebody else's file, so it is read before it is
+    /// trusted:
+    ///
+    /// - Its entries are listed first, and one that is absolute or climbs out
+    ///   with `..` refuses the whole archive — nothing is written.
+    /// - What it expands to must fit on the disk, and an archive that claims to
+    ///   grow more than `bombRatio` times its size past `bombFloor` bytes is
+    ///   refused as a zip bomb.
+    /// - It is extracted into a hidden folder of its own beside the
+    ///   destination, which only takes the final name once it is complete and
+    ///   its symbolic links all point inside it.
+    /// - Every step has a time limit.
     nonisolated static func extract(_ archive: URL, into directory: URL) async throws -> URL {
-        let base = archive.deletingPathExtension().lastPathComponent
-        let folder = FileName.unique(base.isEmpty ? "Extracted" : base, in: directory, isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let plan = try await inspect(archive)
+        if let free = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage, plan.expandedBytes > free {
+            throw ExtractionError.noSpace(needed: plan.expandedBytes)
+        }
+
+        let staging = directory.appendingPathComponent(".gruppen-extract-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false)
 
         // `-x -k`: extract, treating the input as a PKZip archive. The same pair
         // Archive Utility uses. `unzip` would also work and is not equivalent —
@@ -267,22 +285,113 @@ enum StashBatchDispatcher {
         // Quarantine is deliberately *not* stripped. `--noqtn` would make
         // extracted files launch without Gatekeeper ever asking, which is not a
         // decision a shelf gets to make on the user's behalf.
-        let result = try await Tool.run("/usr/bin/ditto", ["-x", "-k", archive.path, folder.path])
+        let result = try await Tool.run("/usr/bin/ditto", ["-x", "-k", archive.path, staging.path],
+                                        timeout: extractTimeout)
         guard result.succeeded else {
-            // Clean up the empty folder, or a failed batch litters the
-            // destination with directories containing nothing.
-            try? FileManager.default.removeItem(at: folder)
+            // Clean up, or a failed batch litters the destination.
+            try? FileManager.default.removeItem(at: staging)
             throw ExtractionError.dittoFailed(status: result.status, message: result.failure)
+        }
+        if let escaping = linkLeaving(staging) {
+            try? FileManager.default.removeItem(at: staging)
+            throw ExtractionError.unsafeEntry(escaping)
+        }
+
+        let base = archive.deletingPathExtension().lastPathComponent
+        let folder = FileName.unique(base.isEmpty ? "Extracted" : base, in: directory, isDirectory: true)
+        do {
+            try FileManager.default.moveItem(at: staging, to: folder)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
         }
         return folder
     }
 
+    /// How long one extraction may take before it is stopped.
+    static let extractTimeout: TimeInterval = 600
+    /// Expansion past this many times the archive's size…
+    static let bombRatio: Int64 = 100
+    /// …and past this many bytes, is refused.
+    static let bombFloor: Int64 = 1 << 30
+
+    struct ArchivePlan: Equatable {
+        var entries: [String]
+        var expandedBytes: Int64
+    }
+
+    /// Lists an archive and totals what it expands to, without extracting
+    /// anything. Throws if the archive can't be listed — an archive that can't
+    /// be read can't be checked, and isn't extracted.
+    nonisolated static func inspect(_ archive: URL) async throws -> ArchivePlan {
+        let listing = try await Tool.run("/usr/bin/zipinfo", ["-1", archive.path], timeout: 60)
+        guard listing.succeeded, listing.output.utf8.count < Tool.outputLimit else {
+            throw ExtractionError.unreadable(listing.succeeded ? "too many entries to check" : listing.failure)
+        }
+        let entries = listing.output.split(separator: "\n").map(String.init)
+        if let unsafe = entries.first(where: isUnsafeEntry) { throw ExtractionError.unsafeEntry(unsafe) }
+
+        let totals = try await Tool.run("/usr/bin/zipinfo", ["-t", archive.path], timeout: 60)
+        let expanded = totals.succeeded ? expandedBytes(fromTotals: totals.output) : nil
+        guard let expanded else { throw ExtractionError.unreadable(totals.failure) }
+
+        let size = Int64((try? archive.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        if expanded > bombFloor, expanded > size * bombRatio {
+            throw ExtractionError.tooLarge(expanded: expanded, archive: size)
+        }
+        return ArchivePlan(entries: entries, expandedBytes: expanded)
+    }
+
+    /// An entry that would land outside the folder it is extracted into.
+    nonisolated static func isUnsafeEntry(_ name: String) -> Bool {
+        if name.hasPrefix("/") || name.hasPrefix("~") { return true }
+        return name.split(separator: "/", omittingEmptySubsequences: false).contains("..")
+    }
+
+    /// The byte count out of `zipinfo -t`'s summary line:
+    /// `3 files, 12345 bytes uncompressed, 678 bytes compressed:  94.5%`.
+    nonisolated static func expandedBytes(fromTotals output: String) -> Int64? {
+        guard let line = output.split(separator: "\n").last(where: { $0.contains("bytes uncompressed") }),
+              let range = line.range(of: " bytes uncompressed") else { return nil }
+        let number = line[..<range.lowerBound].split(separator: " ").last.map(String.init) ?? ""
+        return Int64(number)
+    }
+
+    /// The first symbolic link under `root` that points outside it — or
+    /// anywhere absolute — if there is one. Not followed while looking: the
+    /// enumerator does not descend through links.
+    nonisolated static func linkLeaving(_ root: URL) -> String? {
+        let rootPath = root.standardizedFileURL.path
+        guard let walk = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isSymbolicLinkKey])
+        else { return nil }
+        for case let url as URL in walk {
+            guard (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true,
+                  let target = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)
+            else { continue }
+            if target.hasPrefix("/") { return url.lastPathComponent }
+            let resolved = URL(fileURLWithPath: target, relativeTo: url.deletingLastPathComponent())
+                .absoluteURL.standardizedFileURL.path
+            if resolved != rootPath, !resolved.hasPrefix(rootPath + "/") { return url.lastPathComponent }
+        }
+        return nil
+    }
+
     enum ExtractionError: LocalizedError {
         case dittoFailed(status: Int32, message: String)
+        case unreadable(String)
+        case unsafeEntry(String)
+        case tooLarge(expanded: Int64, archive: Int64)
+        case noSpace(needed: Int64)
 
         var errorDescription: String? {
+            let bytes = { (count: Int64) in ByteCountFormatter.string(fromByteCount: count, countStyle: .file) }
             switch self {
             case .dittoFailed(_, let message): return message
+            case .unreadable(let why): return "Couldn't check the archive before opening it: \(why)"
+            case .unsafeEntry(let name): return "Not extracted: \"\(name)\" would be written outside the folder"
+            case .tooLarge(let expanded, let archive):
+                return "Not extracted: a \(bytes(archive)) archive that expands to \(bytes(expanded)) looks like a zip bomb"
+            case .noSpace(let needed): return "Not extracted: it needs \(bytes(needed)) of free space"
             }
         }
     }

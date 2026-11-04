@@ -88,7 +88,8 @@ enum StashExporter {
         //
         // `-y` stores symlinks rather than following them.
         let level = items.allSatisfy { isPrecompressed($0.url) } ? "-0" : "-6"
-        let result = try await Tool.run("/usr/bin/zip", ["-r", "-q", level, "-y", archive.path, "."], in: staging)
+        let result = try await Tool.run("/usr/bin/zip", ["-r", "-q", level, "-y", archive.path, "."], in: staging,
+                                        timeout: 600)
         guard result.succeeded else {
             throw ExportError.zipFailed(result.errorOutput.trimmingCharacters(in: .whitespacesAndNewlines))
         }
