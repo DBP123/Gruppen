@@ -478,8 +478,7 @@ private struct EnergyImpactRows: View {
                 }
             }
         }
-        .onAppear { monitor.start() }
-        .onDisappear { monitor.stop() }
+        .runsWhileOnScreen(start: { monitor.start() }, stop: { monitor.stop() })
     }
 }
 

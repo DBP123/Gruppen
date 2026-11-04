@@ -135,3 +135,42 @@ struct WindowVisibilityProbe: NSViewRepresentable {
         }
     }
 }
+
+extension View {
+    /// Runs `start` while this view is shown **and** its window is on screen,
+    /// and `stop` as soon as either stops being true.
+    ///
+    /// `onAppear`/`onDisappear` alone are not enough for anything that samples.
+    /// A view stays in the hierarchy when its window is covered or minimised —
+    /// the power card's folds kept sweeping every process once a second behind a
+    /// dashboard nobody could see, whenever power was also pinned and so kept the
+    /// card alive. `start` and `stop` must be safe to call repeatedly.
+    func runsWhileOnScreen(start: @escaping () -> Void, stop: @escaping () -> Void) -> some View {
+        modifier(RunsWhileOnScreen(start: start, stop: stop))
+    }
+}
+
+private struct RunsWhileOnScreen: ViewModifier {
+    let start: () -> Void
+    let stop: () -> Void
+    @StateObject private var window = WindowVisibility()
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(WindowVisibilityProbe(report: { window.update($0) }, reportFocus: { _ in }))
+            .onAppear {
+                shown = true
+                apply(visible: window.isVisible)
+            }
+            .onDisappear {
+                shown = false
+                stop()
+            }
+            .onChange(of: window.isVisible) { apply(visible: $0) }
+    }
+
+    private func apply(visible: Bool) {
+        if shown && visible { start() } else { stop() }
+    }
+}

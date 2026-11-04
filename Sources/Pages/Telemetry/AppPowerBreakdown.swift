@@ -26,8 +26,7 @@ struct AppPowerBreakdownView: View {
 
     var body: some View {
         AppPowerTable(reading: monitor.reading)
-            .onAppear { monitor.start() }
-            .onDisappear { monitor.stop() }
+            .runsWhileOnScreen(start: { monitor.start() }, stop: { monitor.stop() })
     }
 }
 
