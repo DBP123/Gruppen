@@ -20,18 +20,30 @@ Requires **macOS 13 (Ventura) or later**.
 Download the `.dmg` from [Releases](../../releases), open it, and drag Gruppen to
 Applications.
 
-The app is **ad-hoc signed**, not notarised — there's no paid developer account
-behind it — so Gatekeeper will refuse the first launch. Open it once with
-**right-click → Open**, then **Open** in the dialog. macOS remembers after that.
+The app is **ad-hoc signed**, not notarised. Notarisation needs a paid Apple
+Developer account, and there isn't one behind it. So Gatekeeper refuses the first
+launch. You approve it once, and macOS remembers after that.
 
-If it still refuses:
+**macOS 15 Sequoia and later:**
+
+1. Open Gruppen. macOS says it can't be opened. Click **Done**.
+2. Open **System Settings → Privacy & Security** and scroll down to **Security**.
+3. Next to the message about Gruppen, click **Open Anyway**, then confirm with
+   your password or Touch ID.
+4. Click **Open** in the dialog that follows.
+
+**macOS 13 Ventura and 14 Sonoma:** right-click (Control-click) Gruppen, choose
+**Open**, then click **Open** in the dialog. Sequoia removed this shortcut, which
+is why it no longer works there.
+
+If macOS still refuses, or says the app is damaged:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Gruppen.app
 ```
 
-The released build is **Apple Silicon**. On an Intel Mac, build from source (see
-below) — `build.sh` compiles for whatever architecture it runs on.
+The released build is a **universal binary**. It runs natively on Apple Silicon
+and Intel Macs.
 
 ---
 

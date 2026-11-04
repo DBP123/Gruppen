@@ -268,14 +268,20 @@ Gruppen - first launch
    This is expected: the app is signed ad-hoc rather than with a paid
    Apple Developer ID. It is not a sign that anything is wrong with it.
 
-   To open it anyway, either:
+   To open it anyway (you only do this once):
 
-   a) Right-click (or Control-click) Gruppen in Applications and choose
-      "Open", then click "Open" in the dialog. You only do this once.
+   a) macOS 15 Sequoia and later: click "Done" in that message, then open
+      System Settings > Privacy & Security and scroll down to Security.
+      Click "Open Anyway" next to the message about Gruppen, confirm with
+      your password, then click "Open" in the dialog that follows.
 
-   or, if macOS refuses outright:
+   b) macOS 13 Ventura and 14 Sonoma: right-click (or Control-click)
+      Gruppen in Applications and choose "Open", then click "Open" in the
+      dialog.
 
-   b) Open Terminal and run:
+   or, if macOS still refuses, or says the app is damaged:
+
+   c) Open Terminal and run:
 
       xattr -dr com.apple.quarantine /Applications/Gruppen.app
 
