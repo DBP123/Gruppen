@@ -92,7 +92,7 @@ compile_slice() {
 # The two small programs flows use: the JavaScript runner for Macs without
 # Node, and the `gruppen` command for Terminal. Each is one file.
 compile_helper() {
-    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" -o "$3" "Helpers/$1/main.swift"
+    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
 }
 
 build_helpers() {
