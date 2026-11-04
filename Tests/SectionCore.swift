@@ -90,7 +90,9 @@ func sectionCore() {
         let a = store.addGroup(named: "Work")
         _ = store.addGroup(named: "Work")
         T.equal("duplicate names are disambiguated", Set(store.groups.map(\.name)).count, 2)
-        T.check("adding a group writes the file immediately",
+        T.check("edits wait to be written, as one save", !FileManager.default.fileExists(atPath: file.path))
+        store.flushPendingSave()
+        T.check("flushing writes the file at once",
                 FileManager.default.fileExists(atPath: file.path))
 
         store.duplicate(a)
@@ -102,12 +104,14 @@ func sectionCore() {
         T.check("a blank rename is refused", store.groups.contains { $0.name == "Work" })
 
         // The real question: does what was written come back?
+        store.flushPendingSave()
         let reloaded = GroupStore(fileURL: file)
         T.equal("the store reloads what it wrote", reloaded.groups.count, store.groups.count)
         T.equal("names survive the round trip",
                 reloaded.groups.map(\.name).sorted(), store.groups.map(\.name).sorted())
 
         store.delete(a)
+        CoalescedSave.flushAll()
         let afterDelete = GroupStore(fileURL: file)
         T.equal("a delete is persisted", afterDelete.groups.count, 2)
     }

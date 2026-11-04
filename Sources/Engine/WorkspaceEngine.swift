@@ -43,7 +43,7 @@ final class WorkspaceEngine: ObservableObject {
     @Published var profiles: [WorkspaceProfile] = [] {
         didSet {
             guard !isLoading, profiles != oldValue else { return }
-            save()
+            saver.schedule()
             syncHotkeys()
         }
     }
@@ -90,6 +90,12 @@ final class WorkspaceEngine: ObservableObject {
     private func save() {
         LenientLibrary.save(profiles, to: fileURL, label: "WORKSPACES")
     }
+
+    /// Edits are written once they settle, not one by one. See `CoalescedSave`.
+    private lazy var saver = CoalescedSave { [weak self] in self?.save() }
+
+    /// Writes any edit still waiting to be saved. See `GroupStore.flushPendingSave`.
+    func flushPendingSave() { saver.flush() }
 
     // MARK: Editing
 

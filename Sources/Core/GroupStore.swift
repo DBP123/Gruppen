@@ -8,7 +8,7 @@ final class GroupStore: ObservableObject {
     @Published var groups: [AppGroup] = [] {
         didSet {
             guard !isLoading else { return }
-            save()
+            saver.schedule()
             syncHotkeys()
             updateCounters()
         }
@@ -193,6 +193,14 @@ final class GroupStore: ObservableObject {
     private func save() {
         LenientLibrary.save(groups, to: fileURL, label: "GROUPS")
     }
+
+    /// Edits are written once they settle, not one by one. See `CoalescedSave`.
+    private lazy var saver = CoalescedSave { [weak self] in self?.save() }
+
+    /// Writes any edit still waiting to be saved. The app does this for every
+    /// library as it quits; anything that needs the file current right now —
+    /// a test about to reload it — calls this first.
+    func flushPendingSave() { saver.flush() }
 
     // MARK: - Editing
 
