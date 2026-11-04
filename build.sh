@@ -5,6 +5,9 @@
 # ./build.sh --dmg        build, install, then package a shareable Gruppen-<ver>.dmg
 # ./build.sh --no-install build into ./build only, skip installing
 # ./build.sh --fast       build this Mac's architecture only (local iteration)
+#
+# OPT=-Osize ./build.sh   optimise for size instead of speed. Smaller binary;
+#                         compare CPU with Tools/bench.sh before shipping it.
 
 set -euo pipefail
 
@@ -76,10 +79,16 @@ mkdir -p \
 # `--fast` skips the second slice for a local iteration; the DMG never does.
 SOURCES=$(find Sources -name '*.swift' | sort)
 
+# -O by default: Gruppen's goal is near-zero CPU, and size-optimised code can
+# cost cycles in the samplers. -dead_strip drops whatever the linker can prove
+# nothing reaches; Swift's metadata is kept, so SwiftUI is unaffected.
+OPT="${OPT:--O}"
+
 compile_slice() {
     xcrun swiftc \
-        -O \
+        $OPT \
         -whole-module-optimization \
+        -Xlinker -dead_strip \
         -parse-as-library \
         -sdk "$SDK" \
         -target "${1}-apple-macos${MIN_MACOS}" \
@@ -93,7 +102,7 @@ compile_slice() {
 # build without flows has no Helpers/ and skips all of this, which is what
 # lets one build.sh serve both branches.
 compile_helper() {
-    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
+    xcrun swiftc $OPT -Xlinker -dead_strip -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
 }
 
 build_helpers() {
@@ -218,6 +227,23 @@ if [ -f "Resources/AppIcon.icns" ]; then
         "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
+# Symbols out of the shipped binaries — Swift's long mangled names are a large
+# share of an unstripped executable. `-x` keeps the global symbols the dynamic
+# loader needs. An unstripped copy stays in build/symbols/ so a crash report can
+# still be read (`atos -o build/symbols/<name> …`).
+SYMBOLS_DIR="${BUILD_DIR}/symbols"
+mkdir -p "$SYMBOLS_DIR"
+# The newest three builds' symbols are plenty; older ones only fill the disk.
+ls -t "$SYMBOLS_DIR" 2>/dev/null | tail -n +7 | while read -r old; do rm -f "$SYMBOLS_DIR/$old"; done
+cp "$APP_DIR/Contents/MacOS/$EXECUTABLE" "$SYMBOLS_DIR/${EXECUTABLE}-${VERSION}-${BUILD_NUMBER}"
+strip -x "$APP_DIR/Contents/MacOS/$EXECUTABLE"
+if [ -d "$APP_DIR/Contents/Helpers" ]; then
+    for helper in "$APP_DIR/Contents/Helpers/"*; do
+        cp "$helper" "$SYMBOLS_DIR/$(basename "$helper")-${VERSION}-${BUILD_NUMBER}"
+        strip -x "$helper"
+    done
+fi
+
 # Ad-hoc signature. Enough for local use and for a stable TCC identity.
 # Ship to other machines only after signing with a Developer ID and notarizing,
 # or Gatekeeper may block it.
@@ -310,7 +336,7 @@ NOTE
         -volname "${APP_NAME} ${VERSION}" \
         -srcfolder "$STAGING" \
         -ov \
-        -format UDZO \
+        -format ULFO \
         "${BUILD_DIR}/${DMG_NAME}" >/dev/null
 
     rm -rf "$STAGING"

@@ -14,6 +14,8 @@
 #   KIND=network    which module's popover
 #   PINNED=power    which modules a pinned or occluded run keeps in the menu bar
 #   RUN=45          seconds measured per run, after a 6 s settle
+#   OPT=-Osize      build both sides with this optimisation level (default -O),
+#                   to measure what size-optimised code costs in CPU
 #   SAMPLE=1        also `sample` each side's first run, and summarise it with
 #                   Tools/attribute.py
 #
@@ -52,7 +54,7 @@ build() {
             harness="$dir/Harness.swift"
         fi
     fi
-    xcrun swiftc -parse-as-library -O -whole-module-optimization -sdk "$SDK" \
+    xcrun swiftc -parse-as-library ${OPT:--O} -whole-module-optimization -Xlinker -dead_strip -sdk "$SDK" \
         -target "$(uname -m)-apple-macos13.0" -o "$dir/gruppen-bench" \
         $(find "$dir/src/Sources" -name '*.swift' ! -name GruppenApp.swift) "$harness" \
         2>&1 | grep -E "error" >&2 && exit 1
