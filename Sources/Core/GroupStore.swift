@@ -295,7 +295,7 @@ final class GroupStore: ObservableObject {
         guard let index = index(of: group) else { return [] }
         let existing = Set(groups[index].apps.map(\.id))
         let candidates = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
-        let refused = candidates.filter(ProtectedApps.isProtected).map(\.name)
+        let refused = candidates.filter { ProtectedApps.isProtected($0) }.map(\.name)
         let new = candidates.filter { !ProtectedApps.isProtected($0) }
         if !refused.isEmpty { Self.log("REFUSED adding \(refused.joined(separator: ", ")) to \"\(groups[index].name)\": protected") }
         guard !new.isEmpty else { return refused }
