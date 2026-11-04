@@ -287,17 +287,24 @@ final class GroupStore: ObservableObject {
         groups[index].name = trimmed
     }
 
-    /// Adds apps to a group, skipping anything already in it.
-    func add(urls: [URL], to group: AppGroup) {
-        guard let index = index(of: group) else { return }
+    /// Adds apps to a group, skipping anything already in it. Returns the names
+    /// of the apps refused because macOS needs them running (see
+    /// `ProtectedApps`), for the caller to explain.
+    @discardableResult
+    func add(urls: [URL], to group: AppGroup) -> [String] {
+        guard let index = index(of: group) else { return [] }
         let existing = Set(groups[index].apps.map(\.id))
-        let new = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
-        guard !new.isEmpty else { return }
+        let candidates = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
+        let refused = candidates.filter(ProtectedApps.isProtected).map(\.name)
+        let new = candidates.filter { !ProtectedApps.isProtected($0) }
+        if !refused.isEmpty { Self.log("REFUSED adding \(refused.joined(separator: ", ")) to \"\(groups[index].name)\": protected") }
+        guard !new.isEmpty else { return refused }
         groups[index].apps.append(contentsOf: new)
         if !groups[index].isSequenced {
             groups[index].apps.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         }
         refreshRunning()
+        return refused
     }
 
     func setColor(_ hex: String, for group: AppGroup) {
@@ -480,11 +487,15 @@ final class GroupStore: ObservableObject {
 
         let ordered = Self.closingOrder(for: live, among: groups)
         guard !ordered.isEmpty else { return }
-        let ownBundleID = Bundle.main.bundleIdentifier
         // Resolve the exact processes once, up front. Re-resolving later would
-        // target whatever happens to be running at that moment.
+        // target whatever happens to be running at that moment. Never the
+        // desktop itself, and never Gruppen — by pid as well as identifier.
         let steps = ordered.map { app in
-            app.runningInstances.filter { $0.bundleIdentifier != ownBundleID }
+            app.runningInstances.filter { instance in
+                guard ProtectedApps.isProtected(instance) else { return true }
+                Self.log("  SKIP \(instance.bundleIdentifier ?? "?"): macOS needs it running")
+                return false
+            }
         }
         guard steps.contains(where: { !$0.isEmpty }) else { settle(); return }
 
@@ -576,7 +587,6 @@ final class GroupStore: ObservableObject {
     func snapshotCandidates() -> [AppEntry] {
         let ownBundleID = Bundle.main.bundleIdentifier
         let ownPID = NSRunningApplication.current.processIdentifier
-        let excluded: Set<String> = ["com.apple.finder"]
         var seen: Set<AppEntry.ID> = []
 
         return NSWorkspace.shared.runningApplications
@@ -585,7 +595,7 @@ final class GroupStore: ObservableObject {
             // outside an app bundle, and we must never suggest ourselves.
             .filter { $0.processIdentifier != ownPID }
             .filter { ownBundleID == nil || $0.bundleIdentifier != ownBundleID }
-            .filter { !excluded.contains($0.bundleIdentifier ?? "") }
+            .filter { !ProtectedApps.isProtected($0) }
             .compactMap(\.bundleURL)
             .compactMap(AppEntry.init(url:))
             .filter { seen.insert($0.id).inserted }
@@ -596,7 +606,8 @@ final class GroupStore: ObservableObject {
     func createGroup(named name: String,
                      apps: [AppEntry],
                      colorHex: String = Theme.defaultGroupHex) -> AppGroup {
-        var group = AppGroup(name: uniqueName(from: name), apps: apps, colorHex: colorHex)
+        var group = AppGroup(name: uniqueName(from: name), apps: apps.filter { !ProtectedApps.isProtected($0) },
+                             colorHex: colorHex)
         group.isActive = false
         groups.append(group)
         refreshRunning()

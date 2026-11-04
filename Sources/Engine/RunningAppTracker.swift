@@ -91,7 +91,6 @@ final class RunningAppTracker: ObservableObject {
         if !app.bundleID.isEmpty, activeBundleIDs.contains(app.bundleID) { return true }
         let bundlePath = app.url.standardizedFileURL.path
         if activeBundlePaths.contains(bundlePath) { return true }
-        let nested = bundlePath + "/"
-        return activeBundlePaths.contains { $0.hasPrefix(nested) }
+        return activeBundlePaths.contains { AppEntry.owns($0, bundlePath: bundlePath) }
     }
 }

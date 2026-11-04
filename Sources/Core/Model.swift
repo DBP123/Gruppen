@@ -72,8 +72,21 @@ struct AppEntry: Identifiable, Codable, Hashable {
         return running.filter { candidate in
             if !bundleID.isEmpty, candidate.bundleIdentifier == bundleID { return true }
             guard let path = candidate.bundleURL?.standardizedFileURL.path else { return false }
-            return path == bundlePath || path.hasPrefix(bundlePath + "/")
+            return Self.owns(path, bundlePath: bundlePath)
         }
+    }
+
+    /// Whether a running bundle at `candidate` is this app, or a helper nested
+    /// inside it.
+    ///
+    /// Only an `.app` can contain helpers. An entry whose path is a plain
+    /// folder — a hand-edited `"path": "/Applications"` — would otherwise
+    /// count every app under it as its own, and closing its Gruppe would quit
+    /// them all.
+    static func owns(_ candidate: String, bundlePath: String) -> Bool {
+        if candidate == bundlePath { return true }
+        guard bundlePath.hasSuffix(".app") else { return false }
+        return candidate.hasPrefix(bundlePath + "/")
     }
 
     var runningInstances: [NSRunningApplication] {
@@ -88,8 +101,7 @@ struct AppEntry: Identifiable, Codable, Hashable {
     func isRunning(identifiers: Set<String>, bundlePaths: [String]) -> Bool {
         if !bundleID.isEmpty, identifiers.contains(bundleID) { return true }
         let bundlePath = url.standardizedFileURL.path
-        let nested = bundlePath + "/"
-        return bundlePaths.contains { $0 == bundlePath || $0.hasPrefix(nested) }
+        return bundlePaths.contains { Self.owns($0, bundlePath: bundlePath) }
     }
 
     var isRunning: Bool { !runningInstances.isEmpty }

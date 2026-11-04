@@ -298,6 +298,7 @@ final class WorkspaceEngine: ObservableObject {
         let targets = apps.flatMap { app in
             app.instances(among: running).filter {
                 $0.processIdentifier != ownPID && $0.bundleIdentifier != ownBundleID
+                    && !ProtectedApps.isProtected($0)
             }
         }
         guard !targets.isEmpty else { return .skipped("none of the \(apps.count) were running") }

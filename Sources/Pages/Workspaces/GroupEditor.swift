@@ -130,7 +130,12 @@ struct GroupEditorView: View {
             .padding(8)
         }
         .dropDestination(for: URL.self) { urls, _ in
-            store.add(urls: urls, to: group)
+            let refused = store.add(urls: urls, to: group)
+            // After the drop completes: a modal alert inside the drop handler
+            // holds the dragging app's drag session open until it is dismissed.
+            if !refused.isEmpty {
+                DispatchQueue.main.async { MainActor.assumeIsolated { ProtectedApps.explainRefusal(refused) } }
+            }
             return true
         }
         .help(group.apps.isEmpty ? "Drop applications here" : "")
@@ -160,7 +165,7 @@ struct GroupEditorView: View {
     private func addApps(_ group: AppGroup) {
         let urls = Pickers.apps()
         guard !urls.isEmpty else { return }
-        store.add(urls: urls, to: group)
+        ProtectedApps.explainRefusal(store.add(urls: urls, to: group))
     }
 }
 
