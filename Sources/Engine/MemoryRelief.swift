@@ -13,6 +13,13 @@ import Foundation
 /// memory pressure. Nothing runs on a schedule, and nothing runs while the app
 /// is in use — reclaiming pages under the user's fingers would trade the thing
 /// they can feel for a number they cannot.
+///
+/// **Caches are only dropped under pressure.** Freed heap pages go back on every
+/// trigger, because they hold nothing. The icon cache used to go too, on every
+/// switch to another app and every window closing — and was rebuilt through
+/// IconServices the next time anything drew an icon. Gruppen trades memory for
+/// CPU on purpose: a few megabytes of icons is cheaper than redoing that work
+/// all day, and when the system does want the memory back it says so.
 @MainActor
 enum MemoryRelief {
     private static var observers: [NSObjectProtocol] = []
@@ -24,14 +31,14 @@ enum MemoryRelief {
         observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
         ) { _ in
-            Task { @MainActor in relieve(clearingCaches: true) }
+            Task { @MainActor in relieve(clearingCaches: false) }
         })
 
         // Windows closing is the other moment a lot becomes garbage at once.
         observers.append(NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { _ in
-            Task { @MainActor in relieve(clearingCaches: true) }
+            Task { @MainActor in relieve(clearingCaches: false) }
         })
 
         // Kernel-signalled, dormant otherwise.
