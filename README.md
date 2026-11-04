@@ -145,7 +145,7 @@ constraint rather than a happy accident:
 | --- | --- |
 | Gruppen, hotkeys, scripts | `~/Library/Application Support/Gruppen/groups.json` |
 | Preferences | `UserDefaults` (`com.dhilanpatel.gruppen`) |
-| Activity log | `~/Library/Logs/Gruppen.log` (rotates at 512 KB) |
+| Activity log | `~/Library/Logs/Gruppen.log` (moves to `Gruppen.log.1` at 512 KB) |
 | Staged files from the stash | `$TMPDIR/Gruppen-Stash`, cleared at launch |
 
 Nothing is sent anywhere. To remove Gruppen completely, delete the app and those

@@ -52,10 +52,7 @@ struct GeneralSettingsPane: View {
         .onAppear { settings.refreshLoginItemStatus() }
     }
 
-    private static var logURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Gruppen.log")
-    }
+    private static var logURL: URL { GroupStore.logURL }
 }
 
 /// Shared scaffold for settings panes so every one scrolls and pads the same.

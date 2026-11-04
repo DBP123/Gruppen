@@ -107,7 +107,7 @@ final class GroupStore: ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver(_:))
     }
 
-    /// Appends a line to `~/Library/Logs/Gruppen.log`. Every launch and
+    /// Appends a line to `~/Library/Logs/Gruppen.log` (`Gruppen Beta.log` for the beta). Every launch and
     /// every kill goes through here, so the log is the record of who closed
     /// what and when.
     private nonisolated static let logLock = NSLock()
@@ -116,26 +116,74 @@ final class GroupStore: ObservableObject {
 
     /// Callable from any thread — telemetry samplers log from their own queue.
     /// The lock keeps two writers from interleaving a line.
+    ///
+    /// The file stays open between lines — sequenced launches log a line per
+    /// app, and opening, seeking and closing for each was most of the cost of
+    /// a line. It is opened append-only, so another copy of Gruppen writing at
+    /// the same moment cannot overwrite this one's lines.
     nonisolated static func log(_ message: String) {
         logLock.lock()
         defer { logLock.unlock() }
         let stamp = logStamp.string(from: Date())
         let line = "[\(stamp)] pid \(ProcessInfo.processInfo.processIdentifier) \(message)\n"
         NSLog("Gruppen: %@", message)
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Gruppen.log")
         guard let data = line.data(using: .utf8) else { return }
-        if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
-           size > 512_000 {
-            try? FileManager.default.removeItem(at: url)
+        if logHandle != nil, logSize > logLimit {
+            try? logHandle?.close()
+            logHandle = nil
+            rotateLog()
         }
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: url)
+        if logHandle == nil { openLog() }
+        guard let handle = logHandle else { return }
+        do {
+            try handle.write(contentsOf: data)
+            logSize += data.count
+        } catch {
+            // Reopened on the next line, which also recovers from the file
+            // having been moved away underneath us.
+            try? handle.close()
+            logHandle = nil
         }
+    }
+
+    /// `~/Library/Logs/<app name>.log`, so the release and the beta keep
+    /// separate records.
+    nonisolated static var logURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/\(AppPaths.name).log")
+    }
+
+    /// Past this, the log moves to `.log.1` — replacing the one before — and
+    /// starts again. The previous file is kept rather than deleted: a log is
+    /// what you read after something went wrong, such as an app being force
+    /// quit, and truncating it at the wrong moment threw that record away.
+    private nonisolated static let logLimit = 512_000
+    /// Both only touched under `logLock`.
+    nonisolated(unsafe) private static var logHandle: FileHandle?
+    nonisolated(unsafe) private static var logSize = 0
+
+    /// Under `logLock`. `O_NOFOLLOW`: if the log path has been made a symbolic
+    /// link, nothing is written — following it would let whoever made it point
+    /// Gruppen's appends at any file this user can write.
+    private nonisolated static func openLog() {
+        let url = logURL
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+           size > logLimit {
+            rotateLog()
+        }
+        let descriptor = open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { return }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        logSize = Int((try? handle.seekToEnd()) ?? 0)
+        logHandle = handle
+    }
+
+    /// Under `logLock`.
+    private nonisolated static func rotateLog() {
+        let url = logURL
+        let previous = url.appendingPathExtension("1")
+        try? FileManager.default.removeItem(at: previous)
+        try? FileManager.default.moveItem(at: url, to: previous)
     }
 
     /// Re-reads the system after *we* launched or closed something.
