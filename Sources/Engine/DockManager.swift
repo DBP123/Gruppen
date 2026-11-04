@@ -95,7 +95,7 @@ enum DockManager {
                   as? [[String: Any]]
         else { return .failed("no saved Dock to restore") }
 
-        write(tiles)
+        guard write(tiles) else { return .failed("macOS didn't accept the Dock's preferences; left as it is") }
         restartDock()
         GroupStore.log("DOCK restored original — \(tiles.count) tile(s)")
         return .done("restored \(tiles.count) original tile(s)")
@@ -129,7 +129,9 @@ enum DockManager {
             return .skipped("dock already matches")
         }
 
-        write(existing.map(tile(for:)))
+        guard write(existing.map(tile(for:))) else {
+            return .failed("macOS didn't accept the Dock's preferences; left as it is")
+        }
         restartDock()
 
         let missing = apps.count - existing.count
@@ -163,13 +165,21 @@ enum DockManager {
         return ["tile-data": data, "tile-type": "file-tile"]
     }
 
-    private static func write(_ tiles: [[String: Any]]) {
+    /// True when the new tiles reached the preferences on disk. Only then is
+    /// the Dock restarted: restarting it on an unsaved write would kill and
+    /// relaunch it for nothing, or onto a half-written state.
+    @discardableResult
+    private static func write(_ tiles: [[String: Any]]) -> Bool {
         CFPreferencesSetValue(persistentApps,
                               tiles as CFArray,
                               domain,
                               kCFPreferencesCurrentUser,
                               kCFPreferencesAnyHost)
-        CFPreferencesAppSynchronize(domain)
+        guard CFPreferencesAppSynchronize(domain) else {
+            GroupStore.log("DOCK preferences did not synchronise; Dock not restarted")
+            return false
+        }
+        return true
     }
 
     /// The native equivalent of `killall Dock`. `launchd` restarts it.

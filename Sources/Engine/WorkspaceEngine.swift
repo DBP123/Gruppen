@@ -320,8 +320,13 @@ final class WorkspaceEngine: ObservableObject {
             guard !trimmed.isEmpty else { continue }
             // A bare "example.com" is what people type; without a scheme `URL`
             // builds a relative path that opens nothing.
-            let text = trimmed.contains("://") ? trimmed : "https://" + trimmed
-            guard let url = URL(string: text), url.host != nil else { bad.append(trimmed); continue }
+            let text = trimmed.contains("://") || trimmed.lowercased().hasPrefix("mailto:") ? trimmed : "https://" + trimmed
+            // Web and mail only. Any other scheme hands the link to whatever
+            // app claims it — a `file://` to a `.command` runs in Terminal —
+            // and a profile is a list of pages to open, not of things to run.
+            guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+                  Self.linkSchemes.contains(scheme),
+                  scheme == "mailto" || url.host != nil else { bad.append(trimmed); continue }
             NSWorkspace.shared.open(url)
             opened += 1
         }
@@ -330,6 +335,8 @@ final class WorkspaceEngine: ObservableObject {
             ? .done("opened \(opened)")
             : .done("opened \(opened), skipped \(bad.count) invalid")
     }
+
+    static let linkSchemes: Set<String> = ["http", "https", "mailto"]
 
     private func open(folders: [String]) -> WorkspaceActivationReport.Outcome {
         var opened = 0
@@ -342,7 +349,14 @@ final class WorkspaceEngine: ObservableObject {
                 missing.append((path as NSString).lastPathComponent)
                 continue
             }
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            let url = URL(fileURLWithPath: path)
+            // An `.app` is a directory too, and opening it launches it. A
+            // folder entry shows a place; a package is revealed in Finder.
+            if NSWorkspace.shared.isFilePackage(atPath: path) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } else {
+                NSWorkspace.shared.open(url)
+            }
             opened += 1
         }
         if opened == 0 { return .failed("not found: \(missing.joined(separator: ", "))") }

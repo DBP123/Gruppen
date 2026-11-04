@@ -50,6 +50,7 @@ enum StashExporter {
         defer { try? FileManager.default.removeItem(at: staging) }
 
         var used: Set<String> = []
+        var missed: [String] = []
         for item in items { autoreleasepool {
             let name = FileName.unique(item.name) { used.contains($0) }
             used.insert(name)
@@ -64,12 +65,20 @@ enum StashExporter {
                 do {
                     try FileManager.default.linkItem(at: source, to: target)
                 } catch {
-                    try? FileManager.default.copyItem(at: source, to: target)
+                    do { try FileManager.default.copyItem(at: source, to: target) } catch { missed.append(name) }
                 }
             } else if let text = item.text {
-                try? text.data(using: .utf8)?.write(to: target.appendingPathExtension("txt"))
+                do { try Data(text.utf8).write(to: target.appendingPathExtension("txt")) } catch { missed.append(name) }
+            } else {
+                missed.append(name)
             }
         } }
+        // An archive quietly missing some of what was asked for is worse than
+        // none: say which, and refuse outright if nothing made it in.
+        if !missed.isEmpty {
+            GroupStore.log("STASH zip: \(missed.count) of \(items.count) item(s) could not be added — \(missed.joined(separator: ", "))")
+            if missed.count == items.count { throw ExportError.nothingToExport }
+        }
 
         let archive = FileName.unique("Stash-\(Stamp.moment()).zip", in: destination)
 

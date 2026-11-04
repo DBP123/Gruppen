@@ -111,15 +111,22 @@ enum StashFileMerger {
         return .mixed
     }
 
+    /// The most text one merge reads, in bytes.
+    static let textMergeLimit: Int64 = 100 * 1024 * 1024
+
     enum MergeError: LocalizedError {
         case notEnough
         case unreadable(String)
         case writeFailed(String)
+        case tooLarge(Int64)
 
         var errorDescription: String? {
             switch self {
             case .notEnough:
                 return "Pick at least two files to combine."
+            case .tooLarge(let bytes):
+                return "That's \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) of text — "
+                    + "more than one merge reads (\(ByteCountFormatter.string(fromByteCount: StashFileMerger.textMergeLimit, countStyle: .file)))."
             case .unreadable(let name):
                 return "\(name) could not be read."
             case .writeFailed(let name):
@@ -179,6 +186,12 @@ enum StashFileMerger {
     /// valid Latin-1 — so a stray byte costs mojibake on one line instead of
     /// failing the merge.
     private nonisolated static func mergeText(_ urls: [URL], output: URL) throws {
+        // Everything is held in memory at once, twice over while it is joined.
+        // A folder of multi-gigabyte logs would take the app down with it.
+        let total = urls.reduce(Int64(0)) { sum, url in
+            sum + Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        guard total <= textMergeLimit else { throw MergeError.tooLarge(total) }
         var merged = ""
         for url in urls {
             try autoreleasepool {
