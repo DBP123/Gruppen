@@ -53,6 +53,13 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
 
     func setDetailed(_ detailed: Bool) { self.detailed = detailed }
 
+    /// The last census and when it was taken. Thread and process counts drift
+    /// over seconds, not ticks, so the sweep — the most expensive thing this
+    /// sampler does, 3.3 ms — runs every `censusInterval` and the figures in
+    /// between are the last ones taken. Same trade as the memory table.
+    private var lastCensus: (counts: (threads: Int, processes: Int), at: Date)?
+    private static let censusInterval: TimeInterval = 5
+
     func sample() -> Reading? {
         guard let current = Self.read() else { return nil }
         defer { previous = current }
@@ -97,7 +104,19 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
             values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
         }
 
-        let census = detailed ? Self.census() : (threads: 0, processes: 0)
+        let counts: (threads: Int, processes: Int)
+        if detailed {
+            let now = Date()
+            if let cached = lastCensus, now.timeIntervalSince(cached.at) < Self.censusInterval {
+                counts = cached.counts
+            } else {
+                counts = Self.census()
+                lastCensus = (counts, now)
+            }
+        } else {
+            counts = (0, 0)
+            lastCensus = nil
+        }
         return Reading(user: userTicks / allTicks,
                        system: systemTicks / allTicks,
                        cores: cores,
@@ -105,8 +124,8 @@ final class CPUSampler: TelemetrySampler, @unchecked Sendable {
                        efficiency: mean(efficiency),
                        performanceCores: performance,
                        efficiencyCores: efficiency,
-                       threads: census.threads,
-                       processes: census.processes)
+                       threads: counts.threads,
+                       processes: counts.processes)
     }
 
     /// Threads and processes alive across the machine.

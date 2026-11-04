@@ -130,7 +130,7 @@ private struct AppPowerRowView: View {
     /// an invisible icon and a gap before the name that looked like a bug.
     @ViewBuilder
     private var icon: some View {
-        if let url = NSRunningApplication(processIdentifier: row.pid)?.bundleURL {
+        if let url = BundleByPID.url(for: row.pid) {
             Image(nsImage: IconCache.shared.icon(for: url))
                 .resizable()
                 .interpolation(.high)
@@ -234,5 +234,26 @@ private enum AppPowerTint {
         if watts >= 12 { return Theme.cellLow }
         if watts >= 5 { return Theme.amber }
         return Theme.textPrimary
+    }
+}
+
+/// Bundle locations of running applications, by process, remembered.
+///
+/// A row's icon used to build an `NSRunningApplication` — a round trip to the
+/// window server's process table — for every row on every redraw. A running
+/// process's bundle does not move, so the answer is kept; a pid that comes back
+/// with no application (it quit) is not remembered, and the table is cleared
+/// once it outgrows any plausible number of applications, which also retires
+/// reused pids.
+@MainActor
+private enum BundleByPID {
+    private static var known: [pid_t: URL] = [:]
+
+    static func url(for pid: pid_t) -> URL? {
+        if let url = known[pid] { return url }
+        guard let url = NSRunningApplication(processIdentifier: pid)?.bundleURL else { return nil }
+        if known.count >= 512 { known.removeAll() }
+        known[pid] = url
+        return url
     }
 }

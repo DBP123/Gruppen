@@ -25,6 +25,11 @@ final class RunningAppTracker: ObservableObject {
     static let didChange = Notification.Name("GruppenRunningAppsDidChange")
 
     private var observers: [NSObjectProtocol] = []
+    /// Standardised bundle paths, by process. A running process's bundle does
+    /// not move, so each is worked out once rather than on every launch or quit
+    /// anywhere on the machine. Entries for processes that have gone are dropped
+    /// on the next refresh.
+    private var pathByPID: [pid_t: String] = [:]
 
     init() {
         refresh()
@@ -60,10 +65,19 @@ final class RunningAppTracker: ObservableObject {
 
         var identifiers = Set<String>(minimumCapacity: running.count)
         var paths = Set<String>(minimumCapacity: running.count)
+        var live = Set<pid_t>(minimumCapacity: running.count)
         for application in running {
             if let identifier = application.bundleIdentifier { identifiers.insert(identifier) }
-            if let path = application.bundleURL?.standardizedFileURL.path { paths.insert(path) }
+            let pid = application.processIdentifier
+            live.insert(pid)
+            if let path = pathByPID[pid] {
+                paths.insert(path)
+            } else if let path = application.bundleURL?.standardizedFileURL.path {
+                pathByPID[pid] = path
+                paths.insert(path)
+            }
         }
+        if pathByPID.count > live.count { pathByPID = pathByPID.filter { live.contains($0.key) } }
 
         let changed = identifiers != activeBundleIDs || paths != activeBundlePaths
         if identifiers != activeBundleIDs { activeBundleIDs = identifiers }
