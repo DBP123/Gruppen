@@ -266,6 +266,45 @@ func sectionTelemetry() {
     Thread.sleep(forTimeInterval: 0.3)
     T.equal("unregistering stops it dead", box.value, fired)
 
+    // A 2 s module on a 1 s clock whose ticks land up to 0.25 s late, by a
+    // different amount each time — the leeway. It must sample every other
+    // tick, never skip to a 3 s gap.
+    let origin = DispatchTime(uptimeNanoseconds: 1_000_000_000_000)
+    func at(_ seconds: Double) -> DispatchTime { origin + seconds }
+    let lateness = [0.20, 0.00, 0.25, 0.05, 0.18, 0.01, 0.24, 0.02, 0.10, 0.22, 0.00, 0.15]
+    var due = at(1)  // registered on the first tick, as `register` does
+    var sampledAt: [Double] = []
+    for (tick, late) in lateness.enumerated() {
+        let now = at(Double(tick + 1) + late)
+        guard TelemetryClock.isDue(due, now: now, clockPeriod: 1) else { continue }
+        sampledAt.append(Double(tick + 1) + late)
+        due = TelemetryClock.nextDue(after: due, period: 2, now: now)
+    }
+    let gaps = zip(sampledAt.dropFirst(), sampledAt).map { $0 - $1 }
+    T.check("a slower module keeps its period under jitter", gaps.allSatisfy { $0 > 1.5 && $0 < 2.5 },
+            "gaps \(gaps.map { String(format: "%.2f", $0) })")
+    T.equal("…and samples every other tick", sampledAt.count, lateness.count / 2)
+    T.check("a module that fell behind samples once, not in a burst",
+            TelemetryClock.nextDue(after: at(0), period: 2, now: at(30)) == at(30))
+
+    // Suspended: entries kept, no ticks. Resumed: ticking again.
+    let paused = Counter()
+    let pausedID = ObjectIdentifier(paused)
+    TelemetryClock.shared.register(pausedID, period: 0.1) { [paused] in
+        paused.bump()
+        return nil
+    }
+    Thread.sleep(forTimeInterval: 0.25)
+    TelemetryClock.shared.setSuspended(true)
+    Thread.sleep(forTimeInterval: 0.05)
+    let atSuspend = paused.value
+    Thread.sleep(forTimeInterval: 0.4)
+    T.equal("a suspended clock does not tick", paused.value, atSuspend)
+    TelemetryClock.shared.setSuspended(false)
+    Thread.sleep(forTimeInterval: 0.35)
+    T.check("resuming brings it back", paused.value >= atSuspend + 2, "\(paused.value - atSuspend) ticks after resuming")
+    TelemetryClock.shared.unregister(pausedID)
+
     T.begin("B. Telemetry — popover-only figures")
 
     // The census walks every process, so only the CPU popover pays for it.

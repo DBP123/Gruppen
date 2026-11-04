@@ -43,6 +43,17 @@ enum Telemetry {
     static let dashboardRate: TimeInterval = 1.0
     /// Closed, but pinned to the menu bar: 0.5 Hz.
     static let pinnedRate: TimeInterval = 2.0
+    /// What the background rates slow to in Low Power Mode: one reading every
+    /// 5 s. That mode is the user saying battery matters more than freshness,
+    /// and a menu bar figure a few seconds old is still the right figure. Only
+    /// the rates nobody is actively looking at — pinned items and an unfocused
+    /// dashboard. An open dropdown or popover stays at `panelRate`.
+    static let lowPowerRate: TimeInterval = 5.0
+
+    /// `pinnedRate`, or `lowPowerRate` while Low Power Mode is on.
+    static var backgroundRate: TimeInterval {
+        ProcessInfo.processInfo.isLowPowerModeEnabled ? max(pinnedRate, lowPowerRate) : pinnedRate
+    }
 }
 
 /// One telemetry module.
