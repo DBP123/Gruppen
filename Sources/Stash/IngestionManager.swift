@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import CoreServices
 
 /// Turns anything that can be dropped into something that can be dragged out.
 ///
@@ -24,10 +25,31 @@ enum IngestionManager {
 
     /// Shelves do not survive a relaunch, so anything still in scratch at launch
     /// is orphaned by definition.
+    ///
+    /// Deleting everything in a folder is only safe if it is *our* folder. If
+    /// the scratch path has been replaced by a symbolic link — or is not a
+    /// directory this user owns — listing it would follow the link and delete
+    /// whatever it points at. So that case deletes nothing: the odd thing is
+    /// moved aside (a rename moves a link itself, never its target) and a fresh
+    /// folder takes its place. Entries inside are removed with `removeItem`,
+    /// which removes a link rather than following it.
     static func purgeScratch() {
-        guard let entries = try? FileManager.default.contentsOfDirectory(
+        let manager = FileManager.default
+        let path = scratch.path
+        if let attributes = try? manager.attributesOfItem(atPath: path) {
+            let isDirectory = attributes[.type] as? FileAttributeType == .typeDirectory
+            let owner = (attributes[.ownerAccountID] as? NSNumber)?.uint32Value
+            guard isDirectory, owner == getuid() else {
+                let aside = path + ".unexpected-" + Stamp.moment()
+                try? manager.moveItem(atPath: path, toPath: aside)
+                try? manager.createDirectory(at: scratch, withIntermediateDirectories: true)
+                GroupStore.log("STASH scratch was not our own folder; moved it to \(aside) and deleted nothing")
+                return
+            }
+        }
+        guard let entries = try? manager.contentsOfDirectory(
             at: scratch, includingPropertiesForKeys: nil) else { return }
-        for entry in entries { try? FileManager.default.removeItem(at: entry) }
+        for entry in entries { try? manager.removeItem(at: entry) }
     }
 
     // MARK: - AppKit path (drags, including promises)
@@ -191,9 +213,10 @@ enum IngestionManager {
             return
         }
 
-        // One request, only because something was dropped.
-        let task = URLSession.shared.dataTask(with: url) { data, _, error in
-            guard let data, error == nil else {
+        // One request, only because something was dropped — and a bounded one:
+        // the link came from a web page, so its server decides what arrives.
+        CappedImageDownload.start(url, limit: imageDownloadLimit) { data in
+            guard let data else {
                 completion(webloc(for: url))
                 return
             }
@@ -201,12 +224,30 @@ enum IngestionManager {
             let destination = uniqueScratchURL(named: name)
             do {
                 try data.write(to: destination)
-                completion(StashItem.virtual(file: destination, kind: .file, title: name))
+                markDownloaded(destination, from: url)
+                completion(StashItem.virtual(file: destination, kind: .file,
+                                             title: destination.lastPathComponent))
             } catch {
                 completion(webloc(for: url))
             }
         }
-        task.resume()
+    }
+
+    /// The largest image a dropped link may bring in. Past this it stays a link.
+    static let imageDownloadLimit = 50 * 1024 * 1024
+
+    /// Marks a file as downloaded from the web, the way a browser does, so
+    /// Gatekeeper and the "downloaded from the internet" check see it as what
+    /// it is if it is ever opened.
+    private static func markDownloaded(_ file: URL, from origin: URL) {
+        var values = URLResourceValues()
+        values.quarantineProperties = [
+            kLSQuarantineTypeKey as String: kLSQuarantineTypeWebDownload as String,
+            kLSQuarantineDataURLKey as String: origin,
+            kLSQuarantineAgentNameKey as String: AppPaths.name,
+        ]
+        var marked = file
+        try? marked.setResourceValues(values)
     }
 
     /// An internet location file — a plist with the URL in it, exactly as Finder
@@ -245,5 +286,59 @@ enum IngestionManager {
 
     static func uniqueScratchURL(named name: String) -> URL {
         FileName.unique(name.isEmpty ? "Item" : name, in: scratch)
+    }
+}
+
+/// One image download that stops early instead of taking whatever arrives.
+///
+/// Refused at the headers — cancelled before a byte of body — unless the server
+/// says success and an `image/` type, and doesn't announce more than `limit`.
+/// Cancelled mid-stream the moment the body passes `limit`, for a server that
+/// announced nothing or lied. 30 s without data, or 60 s in all, is a timeout.
+/// Ephemeral, so nothing is cached or stored in a cookie jar.
+private final class CappedImageDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    // Touched only from the session's delegate queue, which is serial.
+    private var body = Data()
+    private var overLimit = false
+    private let limit: Int
+    private let finish: @Sendable (Data?) -> Void
+
+    private init(limit: Int, finish: @escaping @Sendable (Data?) -> Void) {
+        self.limit = limit
+        self.finish = finish
+    }
+
+    static func start(_ url: URL, limit: Int, finish: @escaping @Sendable (Data?) -> Void) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 60
+        let delegate = CappedImageDownload(limit: limit, finish: finish)
+        // The session holds its delegate until it is invalidated, which
+        // `finishTasksAndInvalidate` does once this one task is over.
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        session.dataTask(with: url).resume()
+        session.finishTasksAndInvalidate()
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        let succeeded = (response as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+        let isImage = response.mimeType?.lowercased().hasPrefix("image/") ?? false
+        let fits = response.expectedContentLength <= Int64(limit)
+        completionHandler(succeeded && isImage && fits ? .allow : .cancel)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard !overLimit else { return }
+        body.append(data)
+        if body.count > limit {
+            overLimit = true
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        finish(error == nil && !overLimit && !body.isEmpty ? body : nil)
     }
 }

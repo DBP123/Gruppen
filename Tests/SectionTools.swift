@@ -62,6 +62,24 @@ func sectionTools() async {
     T.equal("the second is numbered Finder's way", FileName.numbered("Report.pdf", 2), "Report 2.pdf")
     T.equal("a name without an extension", FileName.numbered("Notes", 3), "Notes 3")
     T.equal("a folder keeps its dots", FileName.numbered("v1.2", 2, isDirectory: true), "v1.2 2")
+
+    // Names from outside — servers, dragging apps, archives — must stay one
+    // harmless path component.
+    T.equal("a climbing name stays put", FileName.sanitized("../../x.png"), "x.png")
+    T.equal("separators become dashes", FileName.sanitized("a/b:c"), "a-b-c")
+    T.equal("a dot file is not hidden", FileName.sanitized(".zshrc"), "zshrc")
+    T.equal("a name cannot read as an option", FileName.sanitized("-rf"), "rf")
+    T.equal("control characters go", FileName.sanitized("a\u{0}b\nc"), "a-b-c")
+    T.equal("nothing left is the fallback", FileName.sanitized(".."), "Untitled")
+    T.equal("an ordinary name is untouched", FileName.sanitized("Report 2024.pdf"), "Report 2024.pdf")
+    let long = FileName.sanitized(String(repeating: "é", count: 300) + ".jpeg")
+    T.check("a long name is cut, keeping its extension",
+            long.utf8.count <= FileName.maxBytes && long.hasSuffix(".jpeg"), "\(long.utf8.count) bytes")
+    withTempDir { dir in
+        let url = FileName.unique("../../escape.txt", in: dir)
+        T.equal("a unique URL is always a direct child of its folder",
+                url.deletingLastPathComponent().standardizedFileURL.path, dir.standardizedFileURL.path)
+    }
     T.equal("taken names are skipped",
             FileName.unique("a.txt") { ["a.txt", "a 2.txt"].contains($0) }, "a 3.txt")
     withTempDir { dir in
