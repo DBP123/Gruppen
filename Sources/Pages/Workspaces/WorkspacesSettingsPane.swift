@@ -17,8 +17,9 @@ private struct WorkspacesSettings: View {
     @EnvironmentObject private var store: GroupStore
     @EnvironmentObject private var settings: AppSettings
 
-    /// Seconds a quitting app gets before it is killed; 0 kills at once.
-    private static let grace: [TimeInterval] = [0, 3, 10]
+    /// Seconds a quitting app gets before it is killed; 0 kills at once, and
+    /// `GroupStore.neverForce` never does.
+    private static let grace: [TimeInterval] = [GroupStore.neverForce, 0, 3, 10]
 
     var body: some View {
         SettingsCard {
@@ -29,14 +30,15 @@ private struct WorkspacesSettings: View {
                     .font(Theme.sans(13))
                     .foregroundStyle(Theme.textPrimary)
                 SegmentedChoice(
-                    options: ["Force quit now", "Quit, force after 3s", "Quit, force after 10s"],
+                    options: ["Never force", "Force now", "Force after 3s", "Force after 10s"],
                     selection: Binding(
-                        get: { Self.grace.firstIndex(of: store.gracePeriod) ?? 1 },
+                        get: { Self.grace.firstIndex(of: store.gracePeriod) ?? 0 },
                         set: { store.gracePeriod = Self.grace[$0] }
                     ),
-                    help: ["Instant, but unsaved work in those apps is lost",
-                           "Asks each app to quit, and kills what is still open after 3 seconds",
-                           "Asks each app to quit, and kills what is still open after 10 seconds"])
+                    help: ["Asks each app to quit, like ⌘Q. Apps with unsaved work show their Save dialog and stay open",
+                           "Kills every app at once. Unsaved work in those apps is lost",
+                           "Asks each app to quit, then kills what is still open after 3 seconds — including apps waiting on a Save dialog",
+                           "Asks each app to quit, then kills what is still open after 10 seconds — including apps waiting on a Save dialog"])
             }
             .cardRow()
             if DockManager.hasBackup {

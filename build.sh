@@ -285,8 +285,8 @@ Gruppen - first launch
 
       xattr -dr com.apple.quarantine /Applications/Gruppen.app
 
-3. Gruppen needs no special permissions. It launches and force quits the
-   apps you group together, nothing else.
+3. Gruppen needs no special permissions. It launches and quits the apps
+   you group together, nothing else.
 
 What it does
 ------------

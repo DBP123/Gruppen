@@ -63,8 +63,13 @@ A *Gruppe* is a named set of applications.
   show a live CPU/RAM/thread readout of Gruppen itself.
 - **Snapshot.** Build a Gruppe from whatever is running right now.
 
-Closing a group force-quits its apps. Anything with unsaved work will say so
-first, the same as pressing ⌘Q.
+Closing a group asks its apps to quit, the same as pressing ⌘Q. Anything with
+unsaved work shows its Save dialog and stays open until you answer. If you'd
+rather have Gruppen force-quit what's left after 3 or 10 seconds, or straight
+away, choose that in **Settings → Workspaces**. Forcing loses unsaved work.
+
+Gruppen won't add or quit the parts of macOS that keep your session running:
+Finder, the Dock, the login window, the menu bar and Control Center.
 
 ## The Stash
 

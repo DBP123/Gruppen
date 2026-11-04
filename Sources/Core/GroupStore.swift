@@ -28,6 +28,7 @@ final class GroupStore: ObservableObject {
     @Published private(set) var runningTotal = 0
 
     /// Give apps this long to quit on their own before we kill them.
+    /// `neverForce` (negative) asks them to quit and never kills; 0 kills at once.
     @Published var gracePeriod: TimeInterval = GroupStore.storedGracePeriod {
         didSet {
             guard gracePeriod != oldValue else { return }
@@ -50,8 +51,17 @@ final class GroupStore: ObservableObject {
             UserDefaults.standard.set(legacy, forKey: "gracePeriod")
             return legacy
         }
-        return 0
+        // Nothing chosen yet: ask, never kill. Closing a Gruppe is one
+        // keypress on its hotkey, and a default that force-quits loses
+        // whatever unsaved work is open in every app in it. Force quitting is
+        // still there, as a choice someone makes knowing what it does.
+        return neverForce
     }
+
+    /// The grace period that means "ask each app to quit, like ⌘Q, and never
+    /// force it". An app with unsaved work shows its own Save dialog and stays
+    /// open until the user answers.
+    static let neverForce: TimeInterval = -1
 
     private var isLoading = false
     private var settleTask: Task<Void, Never>?
@@ -510,6 +520,15 @@ final class GroupStore: ObservableObject {
     /// each step cancelling the one before it.
     private func close(_ targets: [NSRunningApplication], groupID: UUID) {
         guard !targets.isEmpty else { return }
+
+        if gracePeriod < 0 {
+            for target in targets {
+                Self.log("  QUIT \(target.bundleIdentifier ?? "?") pid \(target.processIdentifier) (never forced)")
+                target.terminate()
+            }
+            settle()
+            return
+        }
 
         guard gracePeriod > 0 else {
             for target in targets {
