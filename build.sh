@@ -5,6 +5,9 @@
 # ./build.sh --dmg        build, install, then package a shareable Gruppen-<ver>.dmg
 # ./build.sh --no-install build into ./build only, skip installing
 # ./build.sh --fast       build this Mac's architecture only (local iteration)
+#
+# OPT=-Osize ./build.sh   optimise for size instead of speed. Smaller binary;
+#                         compare CPU with Tools/bench.sh before shipping it.
 
 set -euo pipefail
 
@@ -76,10 +79,16 @@ mkdir -p \
 # `--fast` skips the second slice for a local iteration; the DMG never does.
 SOURCES=$(find Sources -name '*.swift' | sort)
 
+# -O by default: Gruppen's goal is near-zero CPU, and size-optimised code can
+# cost cycles in the samplers. -dead_strip drops whatever the linker can prove
+# nothing reaches; Swift's metadata is kept, so SwiftUI is unaffected.
+OPT="${OPT:--O}"
+
 compile_slice() {
     xcrun swiftc \
-        -O \
+        $OPT \
         -whole-module-optimization \
+        -Xlinker -dead_strip \
         -parse-as-library \
         -sdk "$SDK" \
         -target "${1}-apple-macos${MIN_MACOS}" \
@@ -93,7 +102,7 @@ compile_slice() {
 # build without flows has no Helpers/ and skips all of this, which is what
 # lets one build.sh serve both branches.
 compile_helper() {
-    xcrun swiftc -O -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
+    xcrun swiftc $OPT -Xlinker -dead_strip -sdk "$SDK" -target "${2}-apple-macos${MIN_MACOS}" $CHANNEL_FLAGS -o "$3" "Helpers/$1/main.swift"
 }
 
 build_helpers() {
@@ -218,23 +227,61 @@ if [ -f "Resources/AppIcon.icns" ]; then
         "$APP_DIR/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature. Enough for local use and for a stable TCC identity.
-# Ship to other machines only after signing with a Developer ID and notarizing,
-# or Gatekeeper may block it.
-echo "Signing (ad-hoc)..."
-
-# Nested code first: the app's signature covers its helpers' signatures.
+# Symbols out of the shipped binaries — Swift's long mangled names are a large
+# share of an unstripped executable. `-x` keeps the global symbols the dynamic
+# loader needs. An unstripped copy stays in build/symbols/ so a crash report can
+# still be read (`atos -o build/symbols/<name> …`).
+SYMBOLS_DIR="${BUILD_DIR}/symbols"
+mkdir -p "$SYMBOLS_DIR"
+# The newest three builds' symbols are plenty; older ones only fill the disk.
+ls -t "$SYMBOLS_DIR" 2>/dev/null | tail -n +7 | while read -r old; do rm -f "$SYMBOLS_DIR/$old"; done
+cp "$APP_DIR/Contents/MacOS/$EXECUTABLE" "$SYMBOLS_DIR/${EXECUTABLE}-${VERSION}-${BUILD_NUMBER}"
+strip -x "$APP_DIR/Contents/MacOS/$EXECUTABLE"
 if [ -d "$APP_DIR/Contents/Helpers" ]; then
     for helper in "$APP_DIR/Contents/Helpers/"*; do
-        codesign --force --sign - --timestamp=none "$helper"
+        cp "$helper" "$SYMBOLS_DIR/$(basename "$helper")-${VERSION}-${BUILD_NUMBER}"
+        strip -x "$helper"
     done
 fi
 
-codesign \
-    --force \
-    --sign - \
-    --timestamp=none \
-    "$APP_DIR" >/dev/null 2>&1
+# Signing, with a stable identity when there is one.
+#
+# macOS remembers a permission such as Accessibility against the app's
+# *designated requirement*. Signed ad-hoc, that requirement is the binary's hash,
+# so every build is a different app to macOS: the grant stays on the old
+# build's entry, System Settings still shows "Gruppen" switched on, and the new
+# build is refused. Signed with a certificate, the requirement is "this bundle
+# id, signed by this certificate", the same for every build, and grants survive
+# rebuilds and updates. Tools/make-signing-identity.sh makes one, once.
+#
+# This is not a Developer ID: Gatekeeper still asks on first launch. Set
+# SIGN_IDENTITY to another identity's name to use that, or to "none" for ad-hoc.
+SIGN_IDENTITY="${SIGN_IDENTITY:-Gruppen Local Signing}"
+SIGN="-"
+if [ "$SIGN_IDENTITY" != "none" ] \
+    && security find-identity -p codesigning 2>/dev/null | grep -qF "\"$SIGN_IDENTITY\""; then
+    SIGN="$SIGN_IDENTITY"
+fi
+
+sign_bundle() {
+    # Nested code first: the app's signature covers its helpers' signatures.
+    if [ -d "$APP_DIR/Contents/Helpers" ]; then
+        for helper in "$APP_DIR/Contents/Helpers/"*; do
+            codesign --force --sign "$1" --timestamp=none "$helper" || return 1
+        done
+    fi
+    codesign --force --sign "$1" --timestamp=none "$APP_DIR"
+}
+
+if [ "$SIGN" = "-" ]; then
+    echo "Signing (ad-hoc)..."
+    echo "  warning: no \"$SIGN_IDENTITY\" signing identity. Permissions such as Accessibility" >&2
+    echo "  will not survive the next build. Run Tools/make-signing-identity.sh once to fix that." >&2
+    sign_bundle -
+elif ! { echo "Signing as \"$SIGN\"..."; sign_bundle "$SIGN"; }; then
+    echo "  warning: signing as \"$SIGN\" failed; signed ad-hoc instead." >&2
+    sign_bundle -
+fi
 
 echo "Built $APP_DIR"
 
@@ -265,22 +312,28 @@ Gruppen - first launch
 2. The first time you open it, macOS may say Gruppen "cannot be opened
    because it is from an unidentified developer", or that it is damaged.
 
-   This is expected: the app is signed ad-hoc rather than with a paid
-   Apple Developer ID. It is not a sign that anything is wrong with it.
+   This is expected: the app is not signed with a paid Apple Developer
+   ID. It is not a sign that anything is wrong with it.
 
-   To open it anyway, either:
+   To open it anyway (you only do this once):
 
-   a) Right-click (or Control-click) Gruppen in Applications and choose
-      "Open", then click "Open" in the dialog. You only do this once.
+   a) macOS 15 Sequoia and later: click "Done" in that message, then open
+      System Settings > Privacy & Security and scroll down to Security.
+      Click "Open Anyway" next to the message about Gruppen, confirm with
+      your password, then click "Open" in the dialog that follows.
 
-   or, if macOS refuses outright:
+   b) macOS 13 Ventura and 14 Sonoma: right-click (or Control-click)
+      Gruppen in Applications and choose "Open", then click "Open" in the
+      dialog.
 
-   b) Open Terminal and run:
+   or, if macOS still refuses, or says the app is damaged:
+
+   c) Open Terminal and run:
 
       xattr -dr com.apple.quarantine /Applications/Gruppen.app
 
-3. Gruppen needs no special permissions. It launches and force quits the
-   apps you group together, nothing else.
+3. Gruppen needs no special permissions. It launches and quits the apps
+   you group together, nothing else.
 
 What it does
 ------------
@@ -304,7 +357,7 @@ NOTE
         -volname "${APP_NAME} ${VERSION}" \
         -srcfolder "$STAGING" \
         -ov \
-        -format UDZO \
+        -format ULFO \
         "${BUILD_DIR}/${DMG_NAME}" >/dev/null
 
     rm -rf "$STAGING"

@@ -410,8 +410,15 @@ final class MenuBarReadout: ObservableObject {
     func setMode(_ next: MenuBarDisplayMode) {
         guard next != mode else { return }
         mode = next
+        // The plot is only quantised while it is the thing drawn (see
+        // `update`), so bring it up to date before it becomes visible.
+        if drawsPlot { latest.plot = quantised(pending) }
         if latest != frame { frame = latest }
     }
+
+    /// The one form that draws the history. The power item's sparkline form is
+    /// its battery glyph, which draws none.
+    private var drawsPlot: Bool { mode == .sparkline && kind != .power }
 
     func update(_ sample: MenuBarSample) {
         if let value = sample.value {
@@ -424,7 +431,9 @@ final class MenuBarReadout: ObservableObject {
         latest = Frame(text: sample.summary,
                        top: sample.top ?? sample.summary,
                        bottom: sample.bottom ?? "",
-                       plot: quantised(pending),
+                       // Normalising sixty points every tick for a plot no
+                       // one draws was the bulk of this method in numeric mode.
+                       plot: drawsPlot ? quantised(pending) : latest.plot,
                        gauge: sample.value,
                        badgeLevel: sample.batteryPercent,
                        powerState: sample.powerState,

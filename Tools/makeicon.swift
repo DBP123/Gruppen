@@ -86,19 +86,34 @@ func sourceArtwork() -> NSImage? {
     return NSImage(contentsOf: url)
 }
 
-/// Redraws artwork at an exact pixel size, preserving aspect ratio.
-func scaled(_ image: NSImage, to size: CGFloat) -> NSImage {
-    let out = NSImage(size: NSSize(width: size, height: size))
-    out.lockFocus()
-    NSGraphicsContext.current?.imageInterpolation = .high
+/// `image` as an 8-bit sRGB bitmap exactly `pixels` square, its centre square
+/// scaled to fit.
+///
+/// Rendered into an explicit bitmap rather than through `lockFocus` and
+/// `tiffRepresentation`. That path takes the screen's backing scale and depth:
+/// on a Retina display every PNG came out at twice its size and 16 bits per
+/// channel, so the icns was 4.4 MB, and `iconutil` dropped the small sizes
+/// whose pixels no longer matched their names.
+func bitmap(_ image: NSImage, pixels: Int) -> NSBitmapImageRep? {
+    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
+                                     pixelsWide: pixels, pixelsHigh: pixels,
+                                     bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false,
+                                     colorSpaceName: .deviceRGB,
+                                     bytesPerRow: 0, bitsPerPixel: 0) else { return nil }
+    rep.size = NSSize(width: pixels, height: pixels)
     let side = min(image.size.width, image.size.height)
     let crop = NSRect(x: (image.size.width - side) / 2,
                       y: (image.size.height - side) / 2,
                       width: side, height: side)
-    image.draw(in: NSRect(x: 0, y: 0, width: size, height: size),
+    NSGraphicsContext.saveGraphicsState()
+    let context = NSGraphicsContext(bitmapImageRep: rep)
+    context?.imageInterpolation = .high
+    NSGraphicsContext.current = context
+    image.draw(in: NSRect(x: 0, y: 0, width: pixels, height: pixels),
                from: crop, operation: .copy, fraction: 1)
-    out.unlockFocus()
-    return out
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.retagging(with: .sRGB) ?? rep
 }
 
 let fm = FileManager.default
@@ -119,10 +134,12 @@ let artwork = sourceArtwork()
 if artwork != nil { print("Using Resources/icon-source.png") }
 
 for (name, size) in variants {
-    let image = artwork.map { scaled($0, to: size) } ?? drawIcon(size: size)
-    guard let tiff = image.tiffRepresentation,
-          let rep = NSBitmapImageRep(data: tiff),
-          let png = rep.representation(using: .png, properties: [:]) else { continue }
+    let image = artwork ?? drawIcon(size: size)
+    guard let rep = bitmap(image, pixels: Int(size)),
+          let png = rep.representation(using: .png, properties: [:]) else {
+        print("could not render \(name)")
+        continue
+    }
     try png.write(to: iconset.appendingPathComponent("\(name).png"))
 }
 

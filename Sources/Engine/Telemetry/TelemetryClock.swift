@@ -44,8 +44,29 @@ final class TelemetryClock: @unchecked Sendable {
     private var entries: [ObjectIdentifier: Entry] = [:]
     private var timer: DispatchSourceTimer?
     private var timerPeriod: TimeInterval = 0
+    /// Nobody can see the screen (see `ScreenPresence`). The entries are kept,
+    /// so every module picks up where it was; only the timer goes.
+    private var suspended = false
 
     private init() {}
+
+    /// Stops or restarts the clock without forgetting who is registered.
+    ///
+    /// For a locked screen, displays asleep or another user in front: the
+    /// readouts are on a menu bar nobody can see, so a tick is work for no one.
+    /// Resuming marks every entry due, so the first tick back brings every
+    /// visible number up to date at once.
+    func setSuspended(_ value: Bool) {
+        Telemetry.queue.async { [self] in
+            guard suspended != value else { return }
+            suspended = value
+            if !value {
+                let now = DispatchTime.now()
+                for id in entries.keys { entries[id]?.due = now }
+            }
+            reschedule()
+        }
+    }
 
     /// Adds or re-registers a module. Safe to call from any thread; takes
     /// effect on the queue. The first sample runs on the next tick, which is
@@ -67,7 +88,7 @@ final class TelemetryClock: @unchecked Sendable {
     /// Runs on the queue. Cancels when nothing is registered; otherwise makes
     /// sure the timer runs at the shortest period anyone needs.
     private func reschedule() {
-        guard let shortest = entries.values.map(\.period).min() else {
+        guard !suspended, let shortest = entries.values.map(\.period).min() else {
             timer?.cancel()
             timer = nil
             timerPeriod = 0
@@ -90,12 +111,13 @@ final class TelemetryClock: @unchecked Sendable {
     /// One pass: sample everything that is due, then one trip to the main thread.
     private func fire() {
         let now = DispatchTime.now()
+        let period = timerPeriod
         var applies: [@MainActor @Sendable () -> Void] = []
         // Every sampler allocates — arrays of ticks, process names, CFTypes
         // out of IOKit. One pool around the whole pass drains them together.
         autoreleasepool {
-            for (id, var entry) in entries where entry.due <= now {
-                entry.due = now + entry.period
+            for (id, var entry) in entries where Self.isDue(entry.due, now: now, clockPeriod: period) {
+                entry.due = Self.nextDue(after: entry.due, period: entry.period, now: now)
                 entries[id] = entry
                 if let apply = entry.tick() { applies.append(apply) }
             }
@@ -107,5 +129,24 @@ final class TelemetryClock: @unchecked Sendable {
                 for apply in batch { apply() }
             }
         }
+    }
+
+    /// Whether an entry should sample on a tick at `now`.
+    ///
+    /// Ticks land up to a quarter-period late (the leeway), and by a different
+    /// amount each time. Asking only `due <= now` let a 2 s module on a 1 s
+    /// clock miss the tick that arrived a few milliseconds before its due time
+    /// and wait for the next one: 3 s instead of 2. Half a clock period of
+    /// tolerance takes exactly one tick per period, whatever the jitter.
+    static func isDue(_ due: DispatchTime, now: DispatchTime, clockPeriod: TimeInterval) -> Bool {
+        due <= now + clockPeriod / 2
+    }
+
+    /// When an entry that just sampled is next due: one period after its
+    /// last due time, so the schedule keeps its own grid instead of drifting by
+    /// each tick's lateness — but never in the past, so an entry that fell
+    /// behind (a long stall) samples once rather than catching up in a burst.
+    static func nextDue(after due: DispatchTime, period: TimeInterval, now: DispatchTime) -> DispatchTime {
+        max(due + period, now)
     }
 }

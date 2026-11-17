@@ -8,7 +8,7 @@ final class GroupStore: ObservableObject {
     @Published var groups: [AppGroup] = [] {
         didSet {
             guard !isLoading else { return }
-            save()
+            saver.schedule()
             syncHotkeys()
             updateCounters()
         }
@@ -28,6 +28,7 @@ final class GroupStore: ObservableObject {
     @Published private(set) var runningTotal = 0
 
     /// Give apps this long to quit on their own before we kill them.
+    /// `neverForce` (negative) asks them to quit and never kills; 0 kills at once.
     @Published var gracePeriod: TimeInterval = GroupStore.storedGracePeriod {
         didSet {
             guard gracePeriod != oldValue else { return }
@@ -50,8 +51,17 @@ final class GroupStore: ObservableObject {
             UserDefaults.standard.set(legacy, forKey: "gracePeriod")
             return legacy
         }
-        return 0
+        // Nothing chosen yet: ask, never kill. Closing a Gruppe is one
+        // keypress on its hotkey, and a default that force-quits loses
+        // whatever unsaved work is open in every app in it. Force quitting is
+        // still there, as a choice someone makes knowing what it does.
+        return neverForce
     }
+
+    /// The grace period that means "ask each app to quit, like ⌘Q, and never
+    /// force it". An app with unsaved work shows its own Save dialog and stays
+    /// open until the user answers.
+    static let neverForce: TimeInterval = -1
 
     private var isLoading = false
     private var settleTask: Task<Void, Never>?
@@ -107,7 +117,7 @@ final class GroupStore: ObservableObject {
         observers.forEach(NotificationCenter.default.removeObserver(_:))
     }
 
-    /// Appends a line to `~/Library/Logs/Gruppen.log`. Every launch and
+    /// Appends a line to `~/Library/Logs/Gruppen.log` (`Gruppen Beta.log` for the beta). Every launch and
     /// every kill goes through here, so the log is the record of who closed
     /// what and when.
     private nonisolated static let logLock = NSLock()
@@ -116,26 +126,74 @@ final class GroupStore: ObservableObject {
 
     /// Callable from any thread — telemetry samplers log from their own queue.
     /// The lock keeps two writers from interleaving a line.
+    ///
+    /// The file stays open between lines — sequenced launches log a line per
+    /// app, and opening, seeking and closing for each was most of the cost of
+    /// a line. It is opened append-only, so another copy of Gruppen writing at
+    /// the same moment cannot overwrite this one's lines.
     nonisolated static func log(_ message: String) {
         logLock.lock()
         defer { logLock.unlock() }
         let stamp = logStamp.string(from: Date())
         let line = "[\(stamp)] pid \(ProcessInfo.processInfo.processIdentifier) \(message)\n"
         NSLog("Gruppen: %@", message)
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/Gruppen.log")
         guard let data = line.data(using: .utf8) else { return }
-        if let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int,
-           size > 512_000 {
-            try? FileManager.default.removeItem(at: url)
+        if logHandle != nil, logSize > logLimit {
+            try? logHandle?.close()
+            logHandle = nil
+            rotateLog()
         }
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: url)
+        if logHandle == nil { openLog() }
+        guard let handle = logHandle else { return }
+        do {
+            try handle.write(contentsOf: data)
+            logSize += data.count
+        } catch {
+            // Reopened on the next line, which also recovers from the file
+            // having been moved away underneath us.
+            try? handle.close()
+            logHandle = nil
         }
+    }
+
+    /// `~/Library/Logs/<app name>.log`, so the release and the beta keep
+    /// separate records.
+    nonisolated static var logURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Logs/\(AppPaths.name).log")
+    }
+
+    /// Past this, the log moves to `.log.1` — replacing the one before — and
+    /// starts again. The previous file is kept rather than deleted: a log is
+    /// what you read after something went wrong, such as an app being force
+    /// quit, and truncating it at the wrong moment threw that record away.
+    private nonisolated static let logLimit = 512_000
+    /// Both only touched under `logLock`.
+    nonisolated(unsafe) private static var logHandle: FileHandle?
+    nonisolated(unsafe) private static var logSize = 0
+
+    /// Under `logLock`. `O_NOFOLLOW`: if the log path has been made a symbolic
+    /// link, nothing is written — following it would let whoever made it point
+    /// Gruppen's appends at any file this user can write.
+    private nonisolated static func openLog() {
+        let url = logURL
+        if let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+           size > logLimit {
+            rotateLog()
+        }
+        let descriptor = Darwin.open(url.path, O_WRONLY | O_APPEND | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { return }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        logSize = Int((try? handle.seekToEnd()) ?? 0)
+        logHandle = handle
+    }
+
+    /// Under `logLock`.
+    private nonisolated static func rotateLog() {
+        let url = logURL
+        let previous = url.appendingPathExtension("1")
+        try? FileManager.default.removeItem(at: previous)
+        try? FileManager.default.moveItem(at: url, to: previous)
     }
 
     /// Re-reads the system after *we* launched or closed something.
@@ -194,6 +252,14 @@ final class GroupStore: ObservableObject {
         LenientLibrary.save(groups, to: fileURL, label: "GROUPS")
     }
 
+    /// Edits are written once they settle, not one by one. See `CoalescedSave`.
+    private lazy var saver = CoalescedSave { [weak self] in self?.save() }
+
+    /// Writes any edit still waiting to be saved. The app does this for every
+    /// library as it quits; anything that needs the file current right now —
+    /// a test about to reload it — calls this first.
+    func flushPendingSave() { saver.flush() }
+
     // MARK: - Editing
 
     func addGroup(named name: String = "New Group") -> AppGroup {
@@ -221,17 +287,24 @@ final class GroupStore: ObservableObject {
         groups[index].name = trimmed
     }
 
-    /// Adds apps to a group, skipping anything already in it.
-    func add(urls: [URL], to group: AppGroup) {
-        guard let index = index(of: group) else { return }
+    /// Adds apps to a group, skipping anything already in it. Returns the names
+    /// of the apps refused because macOS needs them running (see
+    /// `ProtectedApps`), for the caller to explain.
+    @discardableResult
+    func add(urls: [URL], to group: AppGroup) -> [String] {
+        guard let index = index(of: group) else { return [] }
         let existing = Set(groups[index].apps.map(\.id))
-        let new = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
-        guard !new.isEmpty else { return }
+        let candidates = urls.compactMap(AppEntry.init(url:)).filter { !existing.contains($0.id) }
+        let refused = candidates.filter { ProtectedApps.isProtected($0) }.map(\.name)
+        let new = candidates.filter { !ProtectedApps.isProtected($0) }
+        if !refused.isEmpty { Self.log("REFUSED adding \(refused.joined(separator: ", ")) to \"\(groups[index].name)\": protected") }
+        guard !new.isEmpty else { return refused }
         groups[index].apps.append(contentsOf: new)
         if !groups[index].isSequenced {
             groups[index].apps.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         }
         refreshRunning()
+        return refused
     }
 
     func setColor(_ hex: String, for group: AppGroup) {
@@ -414,11 +487,15 @@ final class GroupStore: ObservableObject {
 
         let ordered = Self.closingOrder(for: live, among: groups)
         guard !ordered.isEmpty else { return }
-        let ownBundleID = Bundle.main.bundleIdentifier
         // Resolve the exact processes once, up front. Re-resolving later would
-        // target whatever happens to be running at that moment.
+        // target whatever happens to be running at that moment. Never the
+        // desktop itself, and never Gruppen — by pid as well as identifier.
         let steps = ordered.map { app in
-            app.runningInstances.filter { $0.bundleIdentifier != ownBundleID }
+            app.runningInstances.filter { instance in
+                guard ProtectedApps.isProtected(instance) else { return true }
+                Self.log("  SKIP \(instance.bundleIdentifier ?? "?"): macOS needs it running")
+                return false
+            }
         }
         guard steps.contains(where: { !$0.isEmpty }) else { settle(); return }
 
@@ -454,6 +531,15 @@ final class GroupStore: ObservableObject {
     /// each step cancelling the one before it.
     private func close(_ targets: [NSRunningApplication], groupID: UUID) {
         guard !targets.isEmpty else { return }
+
+        if gracePeriod < 0 {
+            for target in targets {
+                Self.log("  QUIT \(target.bundleIdentifier ?? "?") pid \(target.processIdentifier) (never forced)")
+                target.terminate()
+            }
+            settle()
+            return
+        }
 
         guard gracePeriod > 0 else {
             for target in targets {
@@ -501,7 +587,6 @@ final class GroupStore: ObservableObject {
     func snapshotCandidates() -> [AppEntry] {
         let ownBundleID = Bundle.main.bundleIdentifier
         let ownPID = NSRunningApplication.current.processIdentifier
-        let excluded: Set<String> = ["com.apple.finder"]
         var seen: Set<AppEntry.ID> = []
 
         return NSWorkspace.shared.runningApplications
@@ -510,7 +595,7 @@ final class GroupStore: ObservableObject {
             // outside an app bundle, and we must never suggest ourselves.
             .filter { $0.processIdentifier != ownPID }
             .filter { ownBundleID == nil || $0.bundleIdentifier != ownBundleID }
-            .filter { !excluded.contains($0.bundleIdentifier ?? "") }
+            .filter { !ProtectedApps.isProtected($0) }
             .compactMap(\.bundleURL)
             .compactMap(AppEntry.init(url:))
             .filter { seen.insert($0.id).inserted }
@@ -521,7 +606,8 @@ final class GroupStore: ObservableObject {
     func createGroup(named name: String,
                      apps: [AppEntry],
                      colorHex: String = Theme.defaultGroupHex) -> AppGroup {
-        var group = AppGroup(name: uniqueName(from: name), apps: apps, colorHex: colorHex)
+        var group = AppGroup(name: uniqueName(from: name), apps: apps.filter { !ProtectedApps.isProtected($0) },
+                             colorHex: colorHex)
         group.isActive = false
         groups.append(group)
         refreshRunning()

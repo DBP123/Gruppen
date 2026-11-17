@@ -43,7 +43,7 @@ final class WorkspaceEngine: ObservableObject {
     @Published var profiles: [WorkspaceProfile] = [] {
         didSet {
             guard !isLoading, profiles != oldValue else { return }
-            save()
+            saver.schedule()
             syncHotkeys()
         }
     }
@@ -90,6 +90,12 @@ final class WorkspaceEngine: ObservableObject {
     private func save() {
         LenientLibrary.save(profiles, to: fileURL, label: "WORKSPACES")
     }
+
+    /// Edits are written once they settle, not one by one. See `CoalescedSave`.
+    private lazy var saver = CoalescedSave { [weak self] in self?.save() }
+
+    /// Writes any edit still waiting to be saved. See `GroupStore.flushPendingSave`.
+    func flushPendingSave() { saver.flush() }
 
     // MARK: Editing
 
@@ -292,6 +298,7 @@ final class WorkspaceEngine: ObservableObject {
         let targets = apps.flatMap { app in
             app.instances(among: running).filter {
                 $0.processIdentifier != ownPID && $0.bundleIdentifier != ownBundleID
+                    && !ProtectedApps.isProtected($0)
             }
         }
         guard !targets.isEmpty else { return .skipped("none of the \(apps.count) were running") }
@@ -313,8 +320,13 @@ final class WorkspaceEngine: ObservableObject {
             guard !trimmed.isEmpty else { continue }
             // A bare "example.com" is what people type; without a scheme `URL`
             // builds a relative path that opens nothing.
-            let text = trimmed.contains("://") ? trimmed : "https://" + trimmed
-            guard let url = URL(string: text), url.host != nil else { bad.append(trimmed); continue }
+            let text = trimmed.contains("://") || trimmed.lowercased().hasPrefix("mailto:") ? trimmed : "https://" + trimmed
+            // Web and mail only. Any other scheme hands the link to whatever
+            // app claims it — a `file://` to a `.command` runs in Terminal —
+            // and a profile is a list of pages to open, not of things to run.
+            guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+                  Self.linkSchemes.contains(scheme),
+                  scheme == "mailto" || url.host != nil else { bad.append(trimmed); continue }
             NSWorkspace.shared.open(url)
             opened += 1
         }
@@ -323,6 +335,8 @@ final class WorkspaceEngine: ObservableObject {
             ? .done("opened \(opened)")
             : .done("opened \(opened), skipped \(bad.count) invalid")
     }
+
+    static let linkSchemes: Set<String> = ["http", "https", "mailto"]
 
     private func open(folders: [String]) -> WorkspaceActivationReport.Outcome {
         var opened = 0
@@ -335,7 +349,14 @@ final class WorkspaceEngine: ObservableObject {
                 missing.append((path as NSString).lastPathComponent)
                 continue
             }
-            NSWorkspace.shared.open(URL(fileURLWithPath: path))
+            let url = URL(fileURLWithPath: path)
+            // An `.app` is a directory too, and opening it launches it. A
+            // folder entry shows a place; a package is revealed in Finder.
+            if NSWorkspace.shared.isFilePackage(atPath: path) {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } else {
+                NSWorkspace.shared.open(url)
+            }
             opened += 1
         }
         if opened == 0 { return .failed("not found: \(missing.joined(separator: ", "))") }

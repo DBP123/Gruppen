@@ -90,7 +90,9 @@ func sectionCore() {
         let a = store.addGroup(named: "Work")
         _ = store.addGroup(named: "Work")
         T.equal("duplicate names are disambiguated", Set(store.groups.map(\.name)).count, 2)
-        T.check("adding a group writes the file immediately",
+        T.check("edits wait to be written, as one save", !FileManager.default.fileExists(atPath: file.path))
+        store.flushPendingSave()
+        T.check("flushing writes the file at once",
                 FileManager.default.fileExists(atPath: file.path))
 
         store.duplicate(a)
@@ -102,12 +104,14 @@ func sectionCore() {
         T.check("a blank rename is refused", store.groups.contains { $0.name == "Work" })
 
         // The real question: does what was written come back?
+        store.flushPendingSave()
         let reloaded = GroupStore(fileURL: file)
         T.equal("the store reloads what it wrote", reloaded.groups.count, store.groups.count)
         T.equal("names survive the round trip",
                 reloaded.groups.map(\.name).sorted(), store.groups.map(\.name).sorted())
 
         store.delete(a)
+        CoalescedSave.flushAll()
         let afterDelete = GroupStore(fileURL: file)
         T.equal("a delete is persisted", afterDelete.groups.count, 2)
     }
@@ -119,7 +123,15 @@ func sectionCore() {
         let store = GroupStore(fileURL: file)
         T.check("a corrupt store file degrades to empty rather than crashing",
                 store.groups.isEmpty)
+        let kept = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        T.check("…and its bytes are kept before anything is saved over them",
+                kept.contains { $0.hasPrefix("groups.json.unreadable-") }, kept.joined(separator: ", "))
     }
+
+    // A hand-edited delay cannot trap the sequencer.
+    let wild = try? JSONDecoder().decode(AppGroup.self,
+        from: Data(#"{"name":"W","sequenceDelay":1e300}"#.utf8))
+    T.equal("a decoded sequence delay is clamped", wild?.sequenceDelay, 60)
 
     T.begin("A. Core model — app entry matching")
 
@@ -152,4 +164,40 @@ func sectionCore() {
             !parent.isRunning(identifiers: [],
                               bundlePaths: ["/System/Library/CoreServices/Finder Extras.app"]),
             "prefix matching must be path-segment aware")
+
+    // A hand-edited entry whose path is a folder must not own every app in it.
+    let folder = try? JSONDecoder().decode(AppEntry.self,
+        from: Data(#"{"name":"Everything","bundleID":"","path":"/Applications"}"#.utf8))
+    T.check("a folder path owns nothing inside it",
+            folder.map { !$0.isRunning(identifiers: [], bundlePaths: ["/Applications/Safari.app"]) } ?? false,
+            "closing its Gruppe would quit every app in /Applications")
+    T.check("…but an .app still owns its nested helpers",
+            AppEntry.owns("/Applications/Backdrop.app/Contents/Resources/BackdropWallpaper.app",
+                          bundlePath: "/Applications/Backdrop.app"))
+
+    T.begin("A. Core model — apps macOS needs running")
+
+    T.check("Finder is protected", ProtectedApps.isProtected(finder), finder.bundleID)
+    T.check("loginwindow is protected, by identifier",
+            ProtectedApps.isProtected(bundleID: "com.apple.loginwindow", path: nil))
+    T.check("anything in CoreServices is protected, by path",
+            ProtectedApps.isProtected(bundleID: "com.example.agent",
+                                      path: "/System/Library/CoreServices/SomeAgent.app"))
+    T.check("CoreServices' own Applications folder is not",
+            !ProtectedApps.isProtected(bundleID: "com.apple.ScreenSharing",
+                                       path: "/System/Library/CoreServices/Applications/Screen Sharing.app"))
+    T.check("an ordinary app is not",
+            !ProtectedApps.isProtected(bundleID: "com.apple.Safari", path: "/Applications/Safari.app"))
+    T.check("Gruppen itself is", ProtectedApps.isProtected(NSRunningApplication.current))
+
+    withTempDir { dir in
+        let store = GroupStore(fileURL: dir.appendingPathComponent("groups.json"))
+        let group = store.addGroup(named: "Desk")
+        let refused = store.add(urls: [URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"),
+                                       URL(fileURLWithPath: "/System/Applications/Calculator.app")], to: group)
+        T.equal("adding Finder to a Gruppe is refused, and said", refused, [finder.name])
+        T.equal("the rest of the drop still goes in",
+                store.groups.first?.apps.map(\.bundleID) ?? [], ["com.apple.calculator"])
+        store.flushPendingSave()
+    }
 }

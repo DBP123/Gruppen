@@ -20,6 +20,7 @@ func sectionWorkspaces() async {
         edited.replacesDock = true
         edited.spaceIndex = 2
         engine.update(edited)
+        engine.flushPendingSave()
 
         let reloaded = WorkspaceEngine(fileURL: file)
         let back = reloaded.profiles.first { $0.id == p.id }
@@ -29,6 +30,7 @@ func sectionWorkspaces() async {
                 back.map { "\($0.links) \($0.folders)" } ?? "missing")
 
         engine.remove(p)
+        engine.flushPendingSave()
         T.equal("a removal is persisted", WorkspaceEngine(fileURL: file).profiles.count, 1)
     }
 

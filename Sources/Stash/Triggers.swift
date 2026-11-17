@@ -153,12 +153,24 @@ final class EdgeSentinelPanel: SentinelPanel {
 /// They are only on screen **while a drag is in progress**. Invisible windows
 /// at `.statusBar` level covering the menu bar and the screen edges would
 /// otherwise swallow ordinary clicks — including clicks on the menu bar itself.
-/// Mouse-down puts them up, mouse-up takes them down, so they exist exactly
-/// when a drag could reach them and never otherwise.
+/// Mouse-down puts them up, mouse-up takes them down, so they are on screen
+/// exactly when a drag could reach them and never otherwise.
+///
+/// **Built once, then only ordered in and out.** Every drag anywhere on the
+/// system — a text selection, a window being moved — puts these up, and each
+/// one used to be a new `NSPanel` with its drag types registered, destroyed
+/// again on mouse-up: three windows built and thrown away per gesture, all
+/// day. The panels are kept instead and moved to the current screen's frame
+/// when that changes. Ordered out, a window costs a little memory and nothing
+/// else.
 @MainActor
 final class SentinelCoordinator {
+    /// Kept for the coordinator's life; `notchUp`/`edgesUp` say whether they
+    /// are on screen. Created the first time they are wanted.
     private var notchPanel: SentinelPanel?
-    private var edgePanels: [SentinelPanel] = []
+    private var edgePanels: [EdgeSentinelPanel.Side: SentinelPanel] = [:]
+    private var notchUp = false
+    private var edgesUp = false
     private let onNotch: () -> Void
     private let onEdge: (NSPoint) -> Void
     /// Asked at install time, once per drag. A trigger the user has switched
@@ -195,30 +207,40 @@ final class SentinelCoordinator {
         let notchScreen = NotchGeometryManager.shared.screen
         guard let edgeScreen = NSScreen.main ?? notchScreen else { return }
 
-        if notchPanel == nil, notchWanted(), let screen = notchScreen {
-            let panel = NotchSentinelPanel(screen: screen) { [weak self] in
+        if !notchUp, notchWanted(), let screen = notchScreen {
+            let panel = notchPanel ?? NotchSentinelPanel(screen: screen) { [weak self] in
                 Task { @MainActor in self?.triggerNotch() }
             }
             notchPanel = panel
-            panel.orderFrontRegardless()
+            Self.place(panel, at: NotchSentinelPanel.frame(for: screen))
+            notchUp = true
         }
 
-        if edgePanels.isEmpty, edgesWanted() {
+        if !edgesUp, edgesWanted() {
             for side in [EdgeSentinelPanel.Side.left, .right] {
-                let panel = EdgeSentinelPanel(side: side, screen: edgeScreen) { [weak self] in
+                let panel = edgePanels[side] ?? EdgeSentinelPanel(side: side, screen: edgeScreen) { [weak self] in
                     Task { @MainActor in self?.triggerEdge() }
                 }
-                edgePanels.append(panel)
-                panel.orderFrontRegardless()
+                edgePanels[side] = panel
+                Self.place(panel, at: EdgeSentinelPanel.frame(for: side, on: edgeScreen))
             }
+            edgesUp = true
         }
     }
 
     func remove() {
         notchPanel?.orderOut(nil)
-        notchPanel = nil
-        edgePanels.forEach { $0.orderOut(nil) }
-        edgePanels.removeAll()
+        notchUp = false
+        edgePanels.values.forEach { $0.orderOut(nil) }
+        edgesUp = false
+    }
+
+    /// Moves a kept panel to where this drag wants it — the screen may have
+    /// changed since it was built — and puts it on screen. The content view
+    /// follows the window's frame on its own.
+    private static func place(_ panel: SentinelPanel, at frame: NSRect) {
+        if panel.frame != frame { panel.setFrame(frame, display: false) }
+        panel.orderFrontRegardless()
     }
 
     /// Slides the tray out, and stands down.
@@ -228,8 +250,8 @@ final class SentinelCoordinator {
     /// to the end of the drag the only drop target near the notch is the tray
     /// itself.
     private func triggerNotch() {
-        guard let panel = notchPanel else { return }
-        notchPanel = nil
+        guard notchUp, let panel = notchPanel else { return }
+        notchUp = false
         panel.orderOut(nil)
         onNotch()
     }
@@ -237,10 +259,9 @@ final class SentinelCoordinator {
     /// An edge fires once, then steps aside, so sliding along the side of the
     /// screen cannot breed a row of shelves.
     private func triggerEdge() {
-        guard !edgePanels.isEmpty else { return }
-        let spent = edgePanels
-        edgePanels.removeAll()
-        spent.forEach { $0.orderOut(nil) }
+        guard edgesUp else { return }
+        edgesUp = false
+        edgePanels.values.forEach { $0.orderOut(nil) }
         onEdge(NSEvent.mouseLocation)
     }
 }

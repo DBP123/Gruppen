@@ -22,10 +22,14 @@ final class IconCache: @unchecked Sendable {
 
     private let cache: NSCache<NSURL, NSImage> = {
         let cache = NSCache<NSURL, NSImage>()
-        cache.countLimit = 64
-        // 40×40 @2x RGBA ≈ 25 KB; 64 of those is a ~1.6 MB ceiling. The old
-        // 64pt/200-entry limits allowed 13 MB for icons the UI draws at 18–34pt.
-        cache.totalCostLimit = 2 * 1024 * 1024
+        cache.countLimit = 256
+        // 40×40 @2x RGBA ≈ 25 KB; 256 of those is a ~6.4 MB ceiling. Sized so
+        // every app in every Gruppe, the snapshot sheet and the running list
+        // all fit at once: an evicted icon is an IconServices round trip and a
+        // redraw the next time it scrolls into view, and memory is the cheaper
+        // of the two. The old 64pt/200-entry limits allowed 13 MB for icons
+        // the UI draws at 18–34pt, which is the waste flattening removed.
+        cache.totalCostLimit = 8 * 1024 * 1024
         return cache
     }()
 

@@ -20,18 +20,30 @@ Requires **macOS 13 (Ventura) or later**.
 Download the `.dmg` from [Releases](../../releases), open it, and drag Gruppen to
 Applications.
 
-The app is **ad-hoc signed**, not notarised — there's no paid developer account
-behind it — so Gatekeeper will refuse the first launch. Open it once with
-**right-click → Open**, then **Open** in the dialog. macOS remembers after that.
+The app isn't signed with an Apple Developer ID or notarised. Both need a paid
+Apple Developer account, and there isn't one behind it. So Gatekeeper refuses the first
+launch. You approve it once, and macOS remembers after that.
 
-If it still refuses:
+**macOS 15 Sequoia and later:**
+
+1. Open Gruppen. macOS says it can't be opened. Click **Done**.
+2. Open **System Settings → Privacy & Security** and scroll down to **Security**.
+3. Next to the message about Gruppen, click **Open Anyway**, then confirm with
+   your password or Touch ID.
+4. Click **Open** in the dialog that follows.
+
+**macOS 13 Ventura and 14 Sonoma:** right-click (Control-click) Gruppen, choose
+**Open**, then click **Open** in the dialog. Sequoia removed this shortcut, which
+is why it no longer works there.
+
+If macOS still refuses, or says the app is damaged:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Gruppen.app
 ```
 
-The released build is **Apple Silicon**. On an Intel Mac, build from source (see
-below) — `build.sh` compiles for whatever architecture it runs on.
+The released build is a **universal binary**. It runs natively on Apple Silicon
+and Intel Macs.
 
 ---
 
@@ -51,8 +63,13 @@ A *Gruppe* is a named set of applications.
   show a live CPU/RAM/thread readout of Gruppen itself.
 - **Snapshot.** Build a Gruppe from whatever is running right now.
 
-Closing a group force-quits its apps. Anything with unsaved work will say so
-first, the same as pressing ⌘Q.
+Closing a group asks its apps to quit, the same as pressing ⌘Q. Anything with
+unsaved work shows its Save dialog and stays open until you answer. If you'd
+rather have Gruppen force-quit what's left after 3 or 10 seconds, or straight
+away, choose that in **Settings → Workspaces**. Forcing loses unsaved work.
+
+Gruppen won't add or quit the parts of macOS that keep your session running:
+Finder, the Dock, the login window, the menu bar and Control Center.
 
 ## The Stash
 
@@ -133,7 +150,7 @@ constraint rather than a happy accident:
 | --- | --- |
 | Gruppen, hotkeys, scripts | `~/Library/Application Support/Gruppen/groups.json` |
 | Preferences | `UserDefaults` (`com.dhilanpatel.gruppen`) |
-| Activity log | `~/Library/Logs/Gruppen.log` (rotates at 512 KB) |
+| Activity log | `~/Library/Logs/Gruppen.log` (moves to `Gruppen.log.1` at 512 KB) |
 | Staged files from the stash | `$TMPDIR/Gruppen-Stash`, cleared at launch |
 
 Nothing is sent anywhere. To remove Gruppen completely, delete the app and those
@@ -155,6 +172,23 @@ Xcode project — `build.sh` calls `swiftc` over `Sources/` directly.
 ./build.sh --run        # build, install, then launch
 ./build.sh --dmg        # build, install, then package build/Gruppen-<version>.dmg
 ./build.sh --no-install # build into ./build only, skip installing
+```
+
+Once per Mac, before your first build:
+
+```bash
+Tools/make-signing-identity.sh
+```
+
+It puts a self-signed signing certificate, "Gruppen Local Signing", in your login
+keychain, and `build.sh` signs with it from then on. Without it, builds are
+signed ad-hoc, and macOS treats every build as a different app: a permission
+such as Accessibility (used to switch desktops) is lost on each rebuild, while
+System Settings still shows Gruppen switched on. If that has already happened,
+**Reset and Grant Again** in the profile editor fixes it, or run:
+
+```bash
+tccutil reset Accessibility com.dhilanpatel.gruppen
 ```
 
 Regenerate the app icon after editing `Tools/makeicon.swift`:

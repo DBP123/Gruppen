@@ -145,6 +145,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // First: edits are written half a second after they settle, and a
+        // quit inside that half second must not lose the last one.
+        CoalescedSave.flushAll()
         Self.willTerminate?()
     }
 }

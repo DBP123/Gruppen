@@ -40,6 +40,7 @@ final class WidgetManager: ObservableObject {
     /// from here is a kind costing nothing.
     private var modules: [WidgetKind: any GruppenWidget] = [:]
     private var settingsObserver: NSObjectProtocol?
+    private var powerStateObserver: NSObjectProtocol?
 
     /// Called after every reconcile so the menu bar can add or drop items.
     var onModulesChanged: (() -> Void)?
@@ -82,10 +83,17 @@ final class WidgetManager: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor in self?.reconcile() }
         }
+        // Low Power Mode turning on or off changes the background rate.
+        powerStateObserver = NotificationCenter.default.addObserver(
+            forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reconcile() }
+        }
     }
 
     deinit {
         if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+        if let powerStateObserver { NotificationCenter.default.removeObserver(powerStateObserver) }
     }
 
     /// The one switch that turns the whole monitor off.
@@ -150,7 +158,10 @@ final class WidgetManager: ObservableObject {
     /// item but no sampler behind it until something else — opening the panel,
     /// touching a switch — happens to reconcile, and until then the item sits on
     /// a dash for however long the app is left alone.
-    func start() { reconcile() }
+    func start() {
+        ScreenPresence.shared.install()
+        reconcile()
+    }
 
     func panelDidOpen() {
         guard !isPanelOpen else { return }
@@ -411,11 +422,13 @@ final class WidgetManager: ObservableObject {
             // move at the speed they are looking at it.
             // Fastest live surface wins. The dropdown, a module's own popover
             // and the focused dashboard all run at 1 Hz; see `Telemetry.panelRate`.
+            // Everything else runs at the background rate, which slows further
+            // in Low Power Mode.
             let rate: TimeInterval
             if inSharedPanel || inOwnPopover { rate = Telemetry.panelRate }
             else if onDashboard { rate = isDashboardFocused ? Telemetry.dashboardRate
-                                                            : Telemetry.pinnedRate }
-            else { rate = Telemetry.pinnedRate }
+                                                            : Telemetry.backgroundRate }
+            else { rate = Telemetry.backgroundRate }
             module.startFetching(rate: rate)
         }
         objectWillChange.send()

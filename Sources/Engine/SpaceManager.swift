@@ -45,7 +45,9 @@ enum SpaceManager {
             case .ready:
                 return "Ready"
             case .needsAccessibility:
-                return "Gruppen is not trusted for Accessibility, so macOS ignores the keystroke"
+                return "Gruppen is not trusted for Accessibility, so macOS ignores the keystroke. "
+                    + "If System Settings shows Gruppen switched on, that entry is from an earlier build: "
+                    + "use Reset and Grant Again in the profile editor"
             case .shortcutDisabled(let desktop):
                 return "\"Switch to Desktop \(desktop)\" is off in System Settings ▸ Keyboard ▸ Shortcuts ▸ Mission Control"
             }
@@ -63,6 +65,33 @@ enum SpaceManager {
         // mutable global and so cannot read safely from concurrent code.
         let options = ["AXTrustedCheckOptionPrompt": true]
         _ = AXIsProcessTrustedWithOptions(options as CFDictionary)
+    }
+
+    /// Clears Gruppen's own Accessibility entry, then asks again.
+    ///
+    /// For the case where System Settings shows Gruppen switched on and macOS
+    /// still refuses it: the entry belongs to a build signed differently from
+    /// this one (see `build.sh`), and granting again only lands on that stale,
+    /// already-on row. `tccutil` removes it — only this app's, by bundle
+    /// identifier — so the prompt that follows creates one for the app that is
+    /// actually running.
+    static func resetAndRequestAccessibility() {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            requestAccessibility()
+            return
+        }
+        Task {
+            do {
+                let result = try await Tool.run("/usr/bin/tccutil", ["reset", "Accessibility", bundleID], timeout: 10)
+                GroupStore.log(result.succeeded
+                    ? "ACCESSIBILITY reset for \(bundleID)"
+                    : "ACCESSIBILITY reset failed: \(result.failure)")
+            } catch {
+                GroupStore.log("ACCESSIBILITY reset could not run: \(error.localizedDescription)")
+            }
+            requestAccessibility()
+            AccessibilityTrust.shared.refresh()
+        }
     }
 
     /// Whether the machine could actually honour a switch to `desktop`.
@@ -129,5 +158,48 @@ enum SpaceManager {
             6: kVK_ANSI_6, 7: kVK_ANSI_7, 8: kVK_ANSI_8, 9: kVK_ANSI_9, 10: kVK_ANSI_0,
         ]
         return codes[desktop].map { CGKeyCode($0) }
+    }
+}
+
+/// Whether Gruppen is trusted for Accessibility, kept current for the UI.
+///
+/// `AXIsProcessTrusted()` is a question, not a notification, so a view that
+/// asked it once kept showing "not trusted" after the user had granted it, until
+/// something else redrew. This asks again when the answer can have changed,
+/// and only then:
+///
+/// - `com.apple.accessibility.api`, which macOS posts when the Accessibility
+///   list changes. The new answer lags the notification slightly, so it is
+///   asked a moment later.
+/// - Gruppen becoming active, which is what coming back from System Settings
+///   looks like.
+///
+/// No timer; nothing runs until the editor first shows a desktop switch.
+@MainActor
+final class AccessibilityTrust: ObservableObject {
+    static let shared = AccessibilityTrust()
+
+    @Published private(set) var isTrusted = AXIsProcessTrusted()
+    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+
+    private init() {
+        let distributed = DistributedNotificationCenter.default()
+        observers.append((distributed, distributed.addObserver(
+            forName: Notification.Name("com.apple.accessibility.api"), object: nil, queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                MainActor.assumeIsolated { self?.refresh() }
+            }
+        }))
+        observers.append((NotificationCenter.default, NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
+        }))
+    }
+
+    func refresh() {
+        let now = AXIsProcessTrusted()
+        if now != isTrusted { isTrusted = now }
     }
 }
