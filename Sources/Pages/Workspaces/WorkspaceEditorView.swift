@@ -307,6 +307,9 @@ private struct Identity: View {
 /// Everything a profile does, top to bottom in the order activation does it.
 private struct Stages: View {
     @EnvironmentObject private var engine: WorkspaceEngine
+    /// Redraws the desktop row's warning the moment Accessibility is granted
+    /// or revoked, rather than whenever something else happens to redraw.
+    @ObservedObject private var trust = AccessibilityTrust.shared
     let profile: WorkspaceProfile
 
     var body: some View {
@@ -404,8 +407,14 @@ private struct Stages: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 if readiness == .needsAccessibility {
-                    Button("Grant Accessibility…") { SpaceManager.requestAccessibility() }
-                        .industrialButton(.secondary)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Button("Grant Accessibility…") { SpaceManager.requestAccessibility() }
+                            .industrialButton(.secondary)
+                        Button("Reset and Grant Again") { SpaceManager.resetAndRequestAccessibility() }
+                            .industrialButton(.ghost)
+                            .help("Already on in System Settings? That entry is from an earlier build. "
+                                  + "This removes Gruppen's entry and asks again.")
+                    }
                 }
             }
             .padding([.horizontal, .bottom], 12)

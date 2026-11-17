@@ -244,23 +244,44 @@ if [ -d "$APP_DIR/Contents/Helpers" ]; then
     done
 fi
 
-# Ad-hoc signature. Enough for local use and for a stable TCC identity.
-# Ship to other machines only after signing with a Developer ID and notarizing,
-# or Gatekeeper may block it.
-echo "Signing (ad-hoc)..."
-
-# Nested code first: the app's signature covers its helpers' signatures.
-if [ -d "$APP_DIR/Contents/Helpers" ]; then
-    for helper in "$APP_DIR/Contents/Helpers/"*; do
-        codesign --force --sign - --timestamp=none "$helper"
-    done
+# Signing, with a stable identity when there is one.
+#
+# macOS remembers a permission such as Accessibility against the app's
+# *designated requirement*. Signed ad-hoc, that requirement is the binary's hash,
+# so every build is a different app to macOS: the grant stays on the old
+# build's entry, System Settings still shows "Gruppen" switched on, and the new
+# build is refused. Signed with a certificate, the requirement is "this bundle
+# id, signed by this certificate", the same for every build, and grants survive
+# rebuilds and updates. Tools/make-signing-identity.sh makes one, once.
+#
+# This is not a Developer ID: Gatekeeper still asks on first launch. Set
+# SIGN_IDENTITY to another identity's name to use that, or to "none" for ad-hoc.
+SIGN_IDENTITY="${SIGN_IDENTITY:-Gruppen Local Signing}"
+SIGN="-"
+if [ "$SIGN_IDENTITY" != "none" ] \
+    && security find-identity -p codesigning 2>/dev/null | grep -qF "\"$SIGN_IDENTITY\""; then
+    SIGN="$SIGN_IDENTITY"
 fi
 
-codesign \
-    --force \
-    --sign - \
-    --timestamp=none \
-    "$APP_DIR" >/dev/null 2>&1
+sign_bundle() {
+    # Nested code first: the app's signature covers its helpers' signatures.
+    if [ -d "$APP_DIR/Contents/Helpers" ]; then
+        for helper in "$APP_DIR/Contents/Helpers/"*; do
+            codesign --force --sign "$1" --timestamp=none "$helper" || return 1
+        done
+    fi
+    codesign --force --sign "$1" --timestamp=none "$APP_DIR"
+}
+
+if [ "$SIGN" = "-" ]; then
+    echo "Signing (ad-hoc)..."
+    echo "  warning: no \"$SIGN_IDENTITY\" signing identity. Permissions such as Accessibility" >&2
+    echo "  will not survive the next build. Run Tools/make-signing-identity.sh once to fix that." >&2
+    sign_bundle -
+elif ! { echo "Signing as \"$SIGN\"..."; sign_bundle "$SIGN"; }; then
+    echo "  warning: signing as \"$SIGN\" failed; signed ad-hoc instead." >&2
+    sign_bundle -
+fi
 
 echo "Built $APP_DIR"
 
@@ -291,8 +312,8 @@ Gruppen - first launch
 2. The first time you open it, macOS may say Gruppen "cannot be opened
    because it is from an unidentified developer", or that it is damaged.
 
-   This is expected: the app is signed ad-hoc rather than with a paid
-   Apple Developer ID. It is not a sign that anything is wrong with it.
+   This is expected: the app is not signed with a paid Apple Developer
+   ID. It is not a sign that anything is wrong with it.
 
    To open it anyway (you only do this once):
 

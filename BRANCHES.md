@@ -22,4 +22,5 @@ and commit. `master` already carries the commit that removed flows, and
 has. `build.sh` reads it and builds "Gruppen Beta" with its own bundle id,
 settings and data folder (`~/Library/Application Support/Gruppen Beta`), so
 the two apps never touch each other's files. Run one at a time: both claim
-the same hotkeys and menu bar items.
+the same hotkeys and menu bar items. Permissions are separate too: grant
+Accessibility to "Gruppen Beta" on its own.

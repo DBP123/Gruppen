@@ -20,8 +20,8 @@ Requires **macOS 13 (Ventura) or later**.
 Download the `.dmg` from [Releases](../../releases), open it, and drag Gruppen to
 Applications.
 
-The app is **ad-hoc signed**, not notarised. Notarisation needs a paid Apple
-Developer account, and there isn't one behind it. So Gatekeeper refuses the first
+The app isn't signed with an Apple Developer ID or notarised. Both need a paid
+Apple Developer account, and there isn't one behind it. So Gatekeeper refuses the first
 launch. You approve it once, and macOS remembers after that.
 
 **macOS 15 Sequoia and later:**
@@ -172,6 +172,23 @@ Xcode project — `build.sh` calls `swiftc` over `Sources/` directly.
 ./build.sh --run        # build, install, then launch
 ./build.sh --dmg        # build, install, then package build/Gruppen-<version>.dmg
 ./build.sh --no-install # build into ./build only, skip installing
+```
+
+Once per Mac, before your first build:
+
+```bash
+Tools/make-signing-identity.sh
+```
+
+It puts a self-signed signing certificate, "Gruppen Local Signing", in your login
+keychain, and `build.sh` signs with it from then on. Without it, builds are
+signed ad-hoc, and macOS treats every build as a different app: a permission
+such as Accessibility (used to switch desktops) is lost on each rebuild, while
+System Settings still shows Gruppen switched on. If that has already happened,
+**Reset and Grant Again** in the profile editor fixes it, or run:
+
+```bash
+tccutil reset Accessibility com.dhilanpatel.gruppen
 ```
 
 Regenerate the app icon after editing `Tools/makeicon.swift`:
