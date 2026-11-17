@@ -183,18 +183,20 @@ final class AccessibilityTrust: ObservableObject {
     private var observers: [(NotificationCenter, NSObjectProtocol)] = []
 
     private init() {
+        // The one instance lives as long as the app, so the observers reach it
+        // through `shared` rather than capturing it.
         let distributed = DistributedNotificationCenter.default()
         observers.append((distributed, distributed.addObserver(
             forName: Notification.Name("com.apple.accessibility.api"), object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                MainActor.assumeIsolated { self?.refresh() }
+                MainActor.assumeIsolated { AccessibilityTrust.shared.refresh() }
             }
         }))
         observers.append((NotificationCenter.default, NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refresh() }
+        ) { _ in
+            MainActor.assumeIsolated { AccessibilityTrust.shared.refresh() }
         }))
     }
 

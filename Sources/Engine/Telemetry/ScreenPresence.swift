@@ -44,7 +44,7 @@ final class ScreenPresence {
     var isAway: Bool { displaysAsleep || sessionInactive || locked }
 
     private func watch(_ center: NotificationCenter, _ name: Notification.Name,
-                       _ change: @escaping @MainActor (ScreenPresence) -> Void) {
+                       _ change: @escaping @MainActor @Sendable (ScreenPresence) -> Void) {
         let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
