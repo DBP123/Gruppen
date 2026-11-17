@@ -3,6 +3,20 @@ import Foundation
 
 @MainActor
 func sectionWorkspaces() async {
+    T.begin("F. Workspaces — reordering the Dock")
+
+    let dock = (try? JSONDecoder().decode([AppEntry].self, from: Data("""
+        [{"name":"A","bundleID":"a","path":"/A.app"}, {"name":"B","bundleID":"b","path":"/B.app"},
+         {"name":"C","bundleID":"c","path":"/C.app"}, {"name":"D","bundleID":"","path":"/D.app"}]
+        """.utf8))) ?? []
+    T.equal("dropped on a later app, it sits just before it", dock.moving("a", before: "c").map(\.id), ["b", "a", "c", "/D.app"])
+    T.equal("dropped on an earlier app, likewise", dock.moving("c", before: "a").map(\.id), ["c", "a", "b", "/D.app"])
+    T.equal("dropped below them all, it goes last", dock.moving("a", before: nil).map(\.id), ["b", "c", "/D.app", "a"])
+    T.equal("an app with no bundle id moves by its path", dock.moving("/D.app", before: "a").map(\.id), ["/D.app", "a", "b", "c"])
+    T.equal("dropped on itself, nothing moves", dock.moving("b", before: "b"), dock)
+    T.equal("an app from another list is ignored", dock.moving("z", before: "a"), dock)
+    T.equal("a target that isn't there means last", dock.moving("a", before: "z").map(\.id), ["b", "c", "/D.app", "a"])
+
     T.begin("F. Workspaces — profiles on disk")
 
     withTempDir { dir in

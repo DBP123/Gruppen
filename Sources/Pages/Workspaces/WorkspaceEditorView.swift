@@ -365,7 +365,8 @@ private struct Stages: View {
         ))
         .help("Restarts the Dock, which flashes once. The Dock you had first is kept, and Settings on the Workspaces page can put it back")
         if profile.replacesDock {
-            AppList(apps: profile.dockApps, empty: "No apps yet — the Dock is left alone until you add some") { apps in
+            AppList(apps: profile.dockApps, empty: "No apps yet — the Dock is left alone until you add some",
+                    reorderable: true) { apps in
                 var next = profile; next.dockApps = apps; engine.update(next)
             } extra: {
                 Button("Use current Dock") {
@@ -525,10 +526,15 @@ private struct StageList: View {
 struct AppList<Extra: View>: View {
     let apps: [AppEntry]
     let empty: String
+    /// Rows can be dragged into a new order — for the Dock, where order is
+    /// the point. Launch and quit lists have no order worth keeping.
+    var reorderable = false
     let onChange: ([AppEntry]) -> Void
     @ViewBuilder let extra: Extra
 
     @State private var targeted = false
+    /// Where a row being dragged would land.
+    @State private var landing: AppSlot?
     /// Apps no longer on disk, checked when the list changes, not per redraw.
     @State private var missing: Set<String> = []
 
@@ -544,9 +550,12 @@ struct AppList<Extra: View>: View {
             ForEach(apps) { app in
                 ListRow(icon: app.icon, title: app.name,
                         warning: missing.contains(app.path) ? "MISSING" : nil,
-                        help: app.bundleID.isEmpty ? app.path : app.bundleID) {
+                        help: app.bundleID.isEmpty ? app.path : app.bundleID,
+                        grip: reorderable) {
                     onChange(apps.filter { $0.id != app.id })
                 }
+                .modifier(AppReorder(enabled: reorderable, slot: .before(app.id), landing: $landing,
+                                     payload: AppReorder.payload(app.id), move: move))
             }
             HStack(spacing: 6) {
                 Button { choose() } label: { Label("Add Applikationen…", systemImage: "plus") }
@@ -554,6 +563,10 @@ struct AppList<Extra: View>: View {
                 extra
             }
             .padding(.top, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Dropped below the last app: it goes last.
+            .modifier(AppReorder(enabled: reorderable && !apps.isEmpty, slot: .end, landing: $landing,
+                                 payload: nil, move: move))
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -580,6 +593,59 @@ struct AppList<Extra: View>: View {
     private func choose() {
         add(Pickers.apps())
     }
+
+    private func move(_ id: String, to slot: AppSlot) {
+        let target: String? = if case .before(let target) = slot { target } else { nil }
+        let moved = apps.moving(id, before: target)
+        if moved != apps { onChange(moved) }
+    }
+}
+
+/// A place a dragged app can land: just before another app, or after them all.
+enum AppSlot: Equatable {
+    case before(String)
+    case end
+}
+
+/// Makes a row of an `AppList` draggable, and a place to drop one: an orange
+/// line along its top edge shows where the app would land.
+///
+/// The drag carries the app's id behind a prefix, so text dragged in from
+/// another app — which is also a string — is never read as a reorder.
+private struct AppReorder: ViewModifier {
+    let enabled: Bool
+    let slot: AppSlot
+    @Binding var landing: AppSlot?
+    /// What dragging this row carries; nil for a drop target that is not a row.
+    let payload: String?
+    let move: (String, AppSlot) -> Void
+
+    private static let prefix = "gruppen.app:"
+    static func payload(_ id: String) -> String { prefix + id }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            let target = content
+                .overlay(alignment: .top) {
+                    if landing == slot {
+                        Capsule().fill(Theme.orange).frame(height: 2).offset(y: -1).allowsHitTesting(false)
+                    }
+                }
+                .dropDestination(for: String.self) { items, _ in
+                    landing = nil
+                    guard let id = items.lazy.filter({ $0.hasPrefix(Self.prefix) })
+                        .map({ String($0.dropFirst(Self.prefix.count)) }).first else { return false }
+                    move(id, slot)
+                    return true
+                } isTargeted: { targeted in
+                    if targeted { landing = slot } else if landing == slot { landing = nil }
+                }
+            if let payload { target.draggable(payload) } else { target }
+        } else {
+            content
+        }
+    }
 }
 
 /// One entry in an editor list: an icon or glyph, a name, a warning when it is
@@ -590,12 +656,20 @@ struct ListRow: View {
     let title: String
     var warning: String? = nil
     var help: String? = nil
+    /// A grip at the leading edge, for a row that can be dragged into order.
+    var grip = false
     let onRemove: () -> Void
 
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 8) {
+            if grip {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(hovering ? Theme.textSecondary : Theme.textMuted.opacity(0.6))
+                    .help("Drag to reorder")
+            }
             if let icon {
                 Image(nsImage: icon).resizable().interpolation(.high).frame(width: 18, height: 18)
             } else if let glyph {

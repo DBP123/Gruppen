@@ -107,6 +107,20 @@ struct AppEntry: Identifiable, Codable, Hashable {
     var isRunning: Bool { !runningInstances.isEmpty }
 }
 
+extension Array where Element == AppEntry {
+    /// The list with the app `id` moved to sit just before `target`, or last
+    /// when `target` is nil. Unchanged when `id` is not in the list, or is
+    /// dropped on itself.
+    func moving(_ id: String, before target: String?) -> [AppEntry] {
+        guard id != target, let from = firstIndex(where: { $0.id == id }) else { return self }
+        var result = self
+        let app = result.remove(at: from)
+        let to = target.flatMap { target in result.firstIndex { $0.id == target } } ?? result.endIndex
+        result.insert(app, at: to)
+        return result
+    }
+}
+
 /// A named set of apps that can be turned on and off together.
 struct AppGroup: Identifiable, Codable, Hashable {
     var id = UUID()

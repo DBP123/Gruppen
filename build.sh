@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 APP_NAME="Gruppen"
 BUNDLE_ID="com.dhilanpatel.gruppen"
 EXECUTABLE="Gruppen"
-VERSION="1.71"
+VERSION="1.72"
 BUILD_NUMBER="$(date +%Y%m%d%H%M)"
 
 # A CHANNEL file saying "beta" — only the Beta branch has one — builds
