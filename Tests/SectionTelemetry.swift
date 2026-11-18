@@ -188,6 +188,17 @@ func sectionTelemetry() {
     T.check("macOS 27: a temperature that no longer exists is unknown, not an error", macOS27.celsius == nil)
     T.equal("macOS 26: temperature in hundredths of a degree", macOS26.celsius, 30.5)
 
+    // Health follows the cells, not the reserve the controller holds back.
+    func health(nominal: Int?, fullCharge: Int) -> Double? {
+        var data: [String: Any] = ["FullChargeCapacity": fullCharge, "DesignCapacity": 6_249]
+        if let nominal { data["NominalChargeCapacity"] = nominal }
+        return PowerFlow.condition(of: BatteryRegistry(fields: ["BatteryData": data])).health
+    }
+    T.equal("a larger reserve does not read as a worn battery", health(nominal: 6_450, fullCharge: 6_200), 1)
+    T.equal("real wear still shows", health(nominal: 5_624, fullCharge: 5_472).map { ($0 * 100).rounded() }, 90)
+    T.equal("no nominal figure falls back to full-charge capacity",
+            health(nominal: nil, fullCharge: 5_624).map { ($0 * 100).rounded() }, 90)
+
     // A node down to just the charge level still makes a reading.
     let bare = BatteryRegistry(fields: ["CurrentCapacity": 55, "MaxCapacity": 100])
     T.equal("only a percentage is enough to show the battery", PowerFlow.flow(from: bare, liveDraw: nil)?.percent, 55)

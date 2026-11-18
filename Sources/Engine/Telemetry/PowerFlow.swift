@@ -562,7 +562,7 @@ extension PowerFlow {
     static func condition(of battery: BatteryRegistry) -> (cycles: Int?, health: Double?, celsius: Double?) {
         // Health is what the pack can still hold against what it shipped with.
         let health = battery.designmAh.flatMap { design in
-            battery.capacitymAh.map { min($0 / design, 1) }
+            battery.wearCapacitymAh.map { min($0 / design, 1) }
         }
         return (battery.cycles, health, battery.celsius)
     }

@@ -100,6 +100,19 @@ struct BatteryRegistry {
     }
     var designmAh: Double? { optional("design capacity", "DesignCapacity", "BatteryData.DesignCapacity") }
 
+    /// What the cells can hold, for judging wear.
+    ///
+    /// Not `capacitymAh`: full-charge capacity is the nominal figure less
+    /// `PackReserve` (6450 − 152 = 6298 on this machine), and the reserve is
+    /// the controller's to move. A pack barely above its design capacity could
+    /// read 99% for a while and 100% later with no change in the cells, while
+    /// macOS said 100% throughout. Full-charge capacity remains the fallback
+    /// for a Mac that does not report the nominal figure.
+    var wearCapacitymAh: Double? {
+        optional("nominal capacity", "NominalChargeCapacity", "BatteryData.NominalChargeCapacity",
+                 "AppleRawMaxCapacity", "BatteryData.FullChargeCapacity")
+    }
+
     /// The percentage macOS itself shows.
     ///
     /// `CurrentCapacity` *is* that calibrated figure whenever `MaxCapacity`
