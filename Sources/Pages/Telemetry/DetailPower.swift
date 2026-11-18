@@ -21,6 +21,9 @@ struct PowerDetail: View {
     /// closes, and a section that forgets it was open is worse than one that
     /// never folded.
     @AppStorage("powerHistoryExpanded") private var showingHistory = false
+    /// Persisted for the same reason, and free to be: these figures come off
+    /// the reading the card is already taking, so an open fold samples nothing.
+    @AppStorage("powerBatteryExpanded") private var showingBattery = false
     // Session-only on purpose, unlike the history fold below. Persisting
     // "open" meant the most expensive sampler in the app — a `proc_pid_rusage`
     // walk over every process, once a second — started on every launch, on
@@ -79,7 +82,29 @@ struct PowerDetail: View {
                 PowerModeSegmentControl(mode: PowerMode.current(lowPower: reading.isLowPower))
             }
 
-            Well {
+            // Folded away by default. It is history rather than telemetry —
+            // useful when you are asking why the machine woke at 3am, and noise
+            // the rest of the time.
+            // Two folds, and they answer different questions. This one asks
+            // "what is my battery being spent on", in watts, per application.
+            // The one below ranks processes by a unitless impact score. They are
+            // not two attempts at the same number: one is a share of a measured
+            // quantity, the other is a heuristic for ordering.
+            Fold(title: "POWER BY APPLIKATION", expanded: $showingAppPower) {
+                AppPowerBreakdownView()
+            }
+
+            Fold(title: "ENERGY IMPACT", expanded: $showingEnergy) {
+                EnergyImpactRows()
+            }
+
+            Fold(title: "POWER HISTORY", expanded: $showingHistory) {
+                UptimeRows()
+            }
+
+            // The pack itself, which changes over months rather than seconds. A
+            // fault does not depend on this being open: it is in the header.
+            Fold(title: "BATTERY CONDITION", expanded: $showingBattery) {
                 // mAh, not Wh: watt-hours are derived through a voltage that
                 // rises as the pack fills, so a "full capacity" in Wh grows by
                 // about 13% between empty and full. Milliamp-hours are what the
@@ -100,26 +125,6 @@ struct PowerDetail: View {
                     StatRow(label: "CELL TEMPERATURE", value: String(format: "%.1f °C", celsius),
                             tint: ThermalDetailTint.heat(celsius))
                 }
-            }
-
-            // Folded away by default. It is history rather than telemetry —
-            // useful when you are asking why the machine woke at 3am, and noise
-            // the rest of the time.
-            // Two folds, and they answer different questions. This one asks
-            // "what is my battery being spent on", in watts, per application.
-            // The one below ranks processes by a unitless impact score. They are
-            // not two attempts at the same number: one is a share of a measured
-            // quantity, the other is a heuristic for ordering.
-            Fold(title: "POWER BY APPLIKATION", expanded: $showingAppPower) {
-                AppPowerBreakdownView()
-            }
-
-            Fold(title: "ENERGY IMPACT", expanded: $showingEnergy) {
-                EnergyImpactRows()
-            }
-
-            Fold(title: "POWER HISTORY", expanded: $showingHistory) {
-                UptimeRows()
             }
         } else {
             Waiting(unavailable: widget.isUnavailable)

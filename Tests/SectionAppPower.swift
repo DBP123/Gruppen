@@ -110,6 +110,8 @@ func sectionAppPower() async {
                    reading.attributedWatts, reading.packageWatts))
     T.check("and the remainder is never negative",
             reading.systemWatts >= 0, String(format: "%.2f W", reading.systemWatts))
+    T.check("the remainder's CPU is never negative",
+            reading.systemCPU >= 0, String(format: "%.2f cores", reading.systemCPU))
     T.check("the rows sum to no more than the attributed total",
             reading.rows.reduce(0) { $0 + $1.watts } <= reading.attributedWatts + 0.01)
     T.check("rows come back heaviest first",

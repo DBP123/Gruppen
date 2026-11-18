@@ -116,6 +116,8 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
         /// What the rows above add up to. Always ≤ `packageWatts`.
         var attributedWatts: Double
         var basis: Basis
+        /// The CPU behind `systemWatts`, in the core-fractions the rows use.
+        var systemCPU = 0.0
 
         /// Everything not attributable to a running application: the kernel,
         /// the window server, daemons, and the helpers whose parent is `launchd`.
@@ -271,7 +273,8 @@ final class AppPowerSampler: TelemetrySampler, @unchecked Sendable {
         return Reading(rows: Array(rows.prefix(Self.rowCount)),
                        packageWatts: package.watts,
                        attributedWatts: min(attributed, package.watts),
-                       basis: package.basis)
+                       basis: package.basis,
+                       systemCPU: max(total - appBusy.reduce(0, +), 0))
     }
 
     /// Drops the baselines and lets go of the hardware.

@@ -102,14 +102,7 @@ private struct AppPowerRowView: View {
                         .fixedSize()
                 }
                 Spacer(minLength: 6)
-                Text(Format.percent(row.cpu, decimals: 0))
-                    .font(Theme.mono(10).monospacedDigit())
-                    .foregroundStyle(Theme.textMuted)
-                    .frame(width: 44, alignment: .trailing)
-                Text(String(format: "%.2f", row.watts))
-                    .font(Theme.mono(10.5, .medium).monospacedDigit())
-                    .foregroundStyle(AppPowerTint.of(row.watts))
-                    .frame(width: 52, alignment: .trailing)
+                AppPowerFigures(cpu: row.cpu, watts: row.watts, tint: AppPowerTint.of(row.watts))
             }
             ShareBar(fraction: peak > 0 ? row.watts / peak : 0,
                      tint: AppPowerTint.of(row.watts))
@@ -142,67 +135,89 @@ private struct AppPowerRowView: View {
     }
 }
 
-/// Everything the applications do not account for.
+/// The CPU and WATTS cells, sized and spaced to sit under `TableHeader`'s columns.
 ///
-/// The detail is its *share*, not the package total. It used to read
-/// `of 3.10 W  3.10 W` — the total before the value, which is backwards, and on
-/// a quiet machine the same figure printed twice side by side. The package total
-/// is stated once, in the footnote, where it is explained.
+/// One view for the application rows and the remainder, so the two cannot drift
+/// out of line with each other or with the headings above them.
+private struct AppPowerFigures: View {
+    let cpu: Double
+    let watts: Double
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(Format.percent(cpu, decimals: 0))
+                .font(Theme.mono(10).monospacedDigit())
+                .foregroundStyle(Theme.textMuted)
+                .frame(width: 44, alignment: .trailing)
+            Text(String(format: "%.2f", watts))
+                .font(Theme.mono(10.5, .medium).monospacedDigit())
+                .foregroundStyle(tint)
+                .frame(width: 52, alignment: .trailing)
+        }
+    }
+}
+
+/// Why a row's watts are an attribution. Stated wherever the table is explained.
+private let attributionCaveat =
+    "There is no per-process power sensor on any Mac — the hardware meters the "
+    + "whole package. These are that one figure divided by CPU time, so work "
+    + "done on the GPU, the disk or the network lands on another row."
+
+/// Everything the applications do not account for, in the table's own columns.
+///
+/// The percentage is CPU, like the column it sits in. It used to be this row's
+/// share of the package's power, which under a CPU heading would read as a
+/// different quantity from every figure above it.
 private struct SystemRemainderRow: View {
     let reading: AppPowerSampler.Reading
 
     var body: some View {
-        StatRow(label: "SYSTEM & BACKGROUND",
-                value: String(format: "%.2f W", reading.systemWatts),
-                tint: Theme.textSecondary,
-                detail: share)
-    }
-
-    private var share: String? {
-        guard reading.packageWatts > 0 else { return nil }
-        return Format.percent(reading.systemWatts / reading.packageWatts, decimals: 0)
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("SYSTEM & BACKGROUND")
+                .font(Theme.mono(9.5))
+                .tracking(0.5)
+                .foregroundStyle(Theme.textMuted)
+                .fixedSize()
+            Spacer(minLength: 6)
+            AppPowerFigures(cpu: reading.systemCPU, watts: reading.systemWatts,
+                            tint: Theme.textSecondary)
+        }
+        .help(attributionCaveat)
     }
 }
 
-/// What the numbers above rest on.
+/// What the numbers above rest on, when that is not the live system rail.
 ///
-/// Present on every reading, not only the modelled one. A measured figure that
-/// says which instrument measured it is worth more than one that does not, and it
-/// is the difference between the live rail and the once-a-minute battery meter
-/// that explains why the column sometimes stops moving.
+/// The rail is the normal case and the panel's header already shows its total, so
+/// it goes unremarked. The other two are worth a line: the battery meter explains
+/// why the column sometimes stops moving, and the model is an estimate.
 private struct BasisFootnote: View {
     let basis: AppPowerSampler.Basis
     let package: Double
 
     var body: some View {
-        Text(text)
-            .font(Theme.mono(8))
-            .foregroundStyle(basis.isMeasured ? Theme.textMuted : Theme.amber)
-            .lineLimit(3)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 1)
-            .help(help)
+        if let text {
+            Text(text)
+                .font(Theme.mono(8))
+                .foregroundStyle(basis.isMeasured ? Theme.textMuted : Theme.amber)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 1)
+                .help(attributionCaveat)
+        }
     }
 
-    /// The package total lives here and nowhere else in the fold: it is the one
-    /// figure every row is a share of, so it belongs beside the sentence saying
-    /// what the rows are shares of.
-    private var text: String {
+    private var text: String? {
         let total = String(format: "%.2f W", package)
         switch basis {
         case .systemRail:
-            return "\(basis.label) · \(total) live, shared by CPU time"
+            return nil
         case .packMeter:
             return "\(basis.label) · \(total), republished about once a minute"
         case .model:
             return "\(basis.label) · \(total) estimated — this Mac reports no power rail"
         }
-    }
-
-    private var help: String {
-        "There is no per-process power sensor on any Mac — the hardware meters the "
-        + "whole package. These are that one figure divided by CPU time, so work "
-        + "done on the GPU, the disk or the network lands on another row."
     }
 }
 
